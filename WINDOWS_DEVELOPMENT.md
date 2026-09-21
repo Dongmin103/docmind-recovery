@@ -1,6 +1,6 @@
 # Windows 서버에서 개발 시작
 
-이 브랜치는 **소스와 설계를 받아 개발을 시작하는 기준점**이다. 완성된 OpenViking 제거판이나 Windows에서 기동 검증된 배포판이 아니다. 원본 PDF·운영 청크·DB·MinIO 데이터를 이동하지 않는다.
+이 브랜치는 **Windows 개발 기준선과 1~4단계 C 검색 구현**을 제공한다. OpenViking 의존을 제거했고, 독립된 Windows/WSL2 개발 Compose와 빈 인프라 기동을 검증했다. 다만 운영 배포판은 아니며 실제 Jina/답변 모델 자격증명, uEncryptor2 연동, 사용자 시험 문서 검증은 후속 단계다. 원본 PDF·운영 청크·DB·MinIO 데이터는 이동하지 않는다.
 
 ## 받기
 
@@ -27,6 +27,12 @@ powershell -NoProfile -File .\tools\windows\Test-DevelopmentEnvironment.ps1
 4. 새 모델 파일은 필요에 따라 다운로드한다. BGE-M3 tokenizer 소스 자원은 포함하지만 모델 가중치·Docker 이미지 캐시는 없다. 다운로드·이미지 빌드 시간이 필요하다.
 5. PRD 순서대로 검색과 수집/미리보기 연계를 독립적으로 구현한다. 기존 원본을 새 Windows로 옮기지 않고 합성 문서 및 사용자가 지정할 시험 문서를 사용한다.
 
+개발 전용 Compose의 준비·검증·기동 명령은
+[docs/WINDOWS-DEVELOPMENT-DOCKER.md](docs/WINDOWS-DEVELOPMENT-DOCKER.md)를 따른다.
+이 구성은 기존 배포 Compose를 include하지 않으며 전용 프로젝트/볼륨,
+loopback 포트, 임의 생성 로컬 자격증명을 사용한다. 세 원본 루트는 mount하지
+않고 OpenViking 서비스도 포함하지 않는다.
+
 ## 설정과 의존성
 
 - Python 백엔드는 3.13+, web은 Node.js 22와 package-lock/uv.lock을 기준으로 한다. 네이티브 의존이 있어 백엔드 설치/실행은 Docker의 Linux 개발 환경에서 진행한다.
@@ -48,4 +54,5 @@ python tools/windows/initialize_auth_keys.py --check
 - 프런트: app/web에서 npm ci, npm run type-check, npm run build와 관련 테스트. Linux 개발 컨테이너 실행을 우선한다.
 - Go: 변경이 필요한 경우 app/AGENTS.md에 따라 build.sh --test를 사용한다.
 - 합성 fixture는 코드 테스트용으로 남아 있지만 PDF/Office 원본 파일을 읽는 기존 테스트 일부는 별도 fixture가 필요하다. 사용자 원문을 받아 이 부족분을 채우지 말고 합성 fixture를 생성한다.
-- 최종 Windows Docker 기동·uEncryptor2·실제 API·성능 검증은 이 서버에서 수행할 후속 작업이다.
+- Windows 개발 전용 MySQL·Elasticsearch·Valkey·MinIO 인프라는 이 서버에서 정상 기동을 확인했다. 전체 애플리케이션 기동은 실제 Jina/답변 모델 자격증명을 넣은 뒤 수행한다.
+- uEncryptor2·실제 사용자 문서·외부 모델 API·성능 검증은 후속 작업이다. 원본 루트에는 접근하거나 변경하지 않는다.

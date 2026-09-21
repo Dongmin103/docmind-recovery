@@ -1,0 +1,205 @@
+name: docmind-windows-dev
+
+# Isolated Windows/WSL2 development stack.
+#
+# This file intentionally does not include the legacy production compose files.
+# In particular it has no legacy routing sidecar, fixed container names, Linux host
+# data paths, uEncryptor invocation, or mounts from the All-in-One source roots.
+
+x-docmind-env: &docmind-env
+  env_file:
+    - ${DOCMIND_DEV_ENV_FILE:-../../.local/docker/windows-dev.env}
+
+x-docmind-service: &docmind-service
+  <<: *docmind-env
+  networks:
+    - docmind-dev
+  restart: unless-stopped
+
+services:
+  mysql:
+    <<: *docmind-service
+    profiles: [infra, full]
+    image: mysql:8.0.40
+    command:
+      - --max_connections=1000
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --tls_version=TLSv1.2,TLSv1.3
+      - --init-file=/data/application/init.sql
+      - --binlog_expire_logs_seconds=604800
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+    ports:
+      - 127.0.0.1:${DOCMIND_DEV_MYSQL_PORT:-13306}:3306
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/data/application/init.sql:ro
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-1g}
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, -uroot, "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  es01:
+    <<: *docmind-service
+    profiles: [infra, full]
+    image: elasticsearch:${STACK_VERSION:-8.11.3}
+    environment:
+      node.name: es01
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      bootstrap.memory_lock: "false"
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      cluster.routing.allocation.disk.watermark.low: 5gb
+      cluster.routing.allocation.disk.watermark.high: 3gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 2gb
+    ports:
+      - 127.0.0.1:${DOCMIND_DEV_ES_PORT:-19200}:9200
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    tmpfs:
+      - /tmp:mode=1777,size=512m
+    mem_limit: ${ES_MEMORY_LIMIT:-2g}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS -u elastic:$${ELASTIC_PASSWORD} http://127.0.0.1:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  redis:
+    <<: *docmind-service
+    profiles: [infra, full]
+    image: valkey/valkey:8
+    command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}", --maxmemory, 128mb, --maxmemory-policy, volatile-lru]
+    ports:
+      - 127.0.0.1:${DOCMIND_DEV_REDIS_PORT:-16379}:6379
+    volumes:
+      - redis_data:/data
+    mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
+    healthcheck:
+      test: [CMD-SHELL, "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  # MinIO remains only because the current upload/parser baseline still reads
+  # originals and chunk images through STORAGE_IMPL. Cloud-source ingestion must
+  # replace that persistence contract before this service can be removed.
+  minio:
+    <<: *docmind-service
+    profiles: [infra, full]
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z
+    command: [server, --console-address, ":9001", /data]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+    ports:
+      - 127.0.0.1:${DOCMIND_DEV_MINIO_PORT:-19000}:9000
+      - 127.0.0.1:${DOCMIND_DEV_MINIO_CONSOLE_PORT:-19001}:9001
+    volumes:
+      - minio_data:/data
+    mem_limit: ${MINIO_MEMORY_LIMIT:-1g}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:9000/minio/health/live]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  bge-m3-cpu:
+    <<: *docmind-service
+    profiles: [full]
+    platform: linux/amd64
+    image: ${BGE_M3_IMAGE:-ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07}
+    command:
+      - --model-id
+      - BAAI/bge-m3
+      - --revision
+      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      - --tokenization-workers
+      - "1"
+      - --max-concurrent-requests
+      - "16"
+      - --max-batch-tokens
+      - "2048"
+      - --max-client-batch-size
+      - "32"
+      - --auto-truncate
+    environment:
+      MALLOC_ARENA_MAX: "2"
+      OMP_NUM_THREADS: "4"
+    ports:
+      - 127.0.0.1:${DOCMIND_DEV_BGE_PORT:-16380}:80
+    volumes:
+      - bge_model_cache:/data
+    mem_limit: ${BGE_M3_MEMORY_LIMIT:-4g}
+    memswap_limit: ${BGE_M3_MEMORY_SWAP_LIMIT:-6g}
+    cpus: ${BGE_M3_CPUS:-4}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:80/health]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  ragflow-cpu:
+    <<: *docmind-service
+    profiles: [full]
+    image: ${RAGFLOW_IMAGE:-docmind-ragflow:windows-dev}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        RAGFLOW_VERSION: windows-development
+    command:
+      - --enable-adminserver
+      - --init-model-provider-tables
+    depends_on:
+      mysql:
+        condition: service_healthy
+      es01:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bge-m3-cpu:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:${DOCMIND_DEV_WEB_PORT:-18080}:80
+      - 127.0.0.1:${DOCMIND_DEV_API_PORT:-19380}:9380
+      - 127.0.0.1:${DOCMIND_DEV_ADMIN_PORT:-19381}:9381
+    volumes:
+      - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template:ro
+      - ./entrypoint.sh:/ragflow/entrypoint.sh:ro
+      - ragflow_logs:/ragflow/logs
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+      nproc:
+        soft: 65535
+        hard: 65535
+    mem_limit: ${RAGFLOW_MEMORY_LIMIT:-4g}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+networks:
+  docmind-dev:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  es_data:
+  redis_data:
+  minio_data:
+  bge_model_cache:
+  ragflow_logs:
