@@ -10,10 +10,18 @@ export interface DocMindFolder {
   depth?: number;
 }
 
+export interface DocMindDocumentOption {
+  id: string;
+  name: string;
+  folder_id: string;
+  relative_path: string;
+}
+
 export interface DocMindFolderCatalog {
   project_id?: string;
   dataset_id: string;
   folders: DocMindFolder[];
+  documents: DocMindDocumentOption[];
   hierarchical?: boolean;
   initialized?: boolean;
   can_administer?: boolean;

@@ -40,6 +40,40 @@ def _candidate(chunk_id: str, doc_id: str, *, text: str | None = None) -> servic
     )
 
 
+def test_document_options_are_available_from_the_authorized_catalog(monkeypatch):
+    monkeypatch.setattr(
+        service.DocumentService,
+        "get_by_ids",
+        lambda _ids: [SimpleNamespace(id="doc-1", name="protocol.pdf")],
+    )
+    monkeypatch.setattr(
+        service,
+        "document_relative_paths",
+        lambda _dataset_id, _document_ids: {"doc-1": "quality/protocol.pdf"},
+    )
+
+    assert service._document_options(_catalog()) == [
+        {
+            "id": "doc-1",
+            "name": "protocol.pdf",
+            "folder_id": "child-a",
+            "relative_path": "quality/protocol.pdf",
+        },
+        {
+            "id": "doc-2",
+            "name": "doc-2",
+            "folder_id": "child-a",
+            "relative_path": "doc-2",
+        },
+        {
+            "id": "doc-3",
+            "name": "doc-3",
+            "folder_id": "child-b",
+            "relative_path": "doc-3",
+        },
+    ]
+
+
 def test_scope_modes_are_mutually_exclusive_and_recursive():
     catalog = _catalog()
 

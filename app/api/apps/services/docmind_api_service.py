@@ -15,6 +15,7 @@ from api.apps.services import dataset_api_service
 from api.db.joint_services.tenant_model_service import get_model_config_from_provider_instance
 from api.db.services import docmind_catalog_service
 from api.db.services.docmind_document_path_service import document_relative_paths
+from api.db.services.document_service import DocumentService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.llm_service import LLMBundle
 from common.constants import LLMType
@@ -192,6 +193,34 @@ def _subtree_ids(catalog: Catalog, folder_id: str) -> list[str]:
     return result
 
 
+def _document_options(catalog: Catalog) -> list[dict[str, str]]:
+    folder_by_document = {
+        document_id: folder_id
+        for folder_id, document_ids in catalog.folders.items()
+        for document_id in document_ids
+    }
+    document_ids = list(folder_by_document)
+    if not document_ids:
+        return []
+
+    rows = {str(row.id): row for row in DocumentService.get_by_ids(document_ids)}
+    relative_paths = document_relative_paths(catalog.dataset_id, set(document_ids))
+    options: list[dict[str, str]] = []
+    for document_id in document_ids:
+        row = rows.get(document_id)
+        relative_path = relative_paths.get(document_id, "")
+        name = str(getattr(row, "name", "") or relative_path.rsplit("/", 1)[-1] or document_id)
+        options.append(
+            {
+                "id": document_id,
+                "name": name,
+                "folder_id": folder_by_document[document_id],
+                "relative_path": relative_path or name,
+            }
+        )
+    return options
+
+
 def list_folders(tenant_id: str) -> dict[str, Any]:
     catalog = _load_catalog()
     if not KnowledgebaseService.accessible(catalog.dataset_id, tenant_id):
@@ -202,6 +231,7 @@ def list_folders(tenant_id: str) -> dict[str, Any]:
             "catalog_source": catalog.source,
             "catalog_version_id": _catalog_version_id(catalog),
             "hierarchical": True,
+            "documents": _document_options(catalog),
             "folders": [
                 {**row, "document_count": len(catalog.folders.get(str(row["id"]), ()))}
                 for row in catalog.folder_tree
@@ -212,6 +242,7 @@ def list_folders(tenant_id: str) -> dict[str, Any]:
         "catalog_source": catalog.source,
         "catalog_version_id": _catalog_version_id(catalog),
         "hierarchical": False,
+        "documents": _document_options(catalog),
         "folders": [
             {"id": folder_id, "name": _folder_display_name(folder_id), "document_count": len(doc_ids)}
             for folder_id, doc_ids in catalog.folders.items()

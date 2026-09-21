@@ -20,7 +20,15 @@ jest.mock('@tanstack/react-query', () => ({
         data: {
           project_id: 'project-1',
           dataset_id: 'dataset-1',
-          can_administer: true,
+          can_administer: false,
+          documents: [
+            {
+              id: 'document-1',
+              name: 'protocol.pdf',
+              folder_id: 'folder-1',
+              relative_path: '품질/protocol.pdf',
+            },
+          ],
           folders: [
             { id: 'folder-1', name: '품질', document_count: 1 },
             { id: 'folder-2', name: '밸리데이션', document_count: 1 },
@@ -153,6 +161,14 @@ describe('DocMind search scopes', () => {
         scope: { mode: 'documents', documentIds: ['document-1'] },
       }),
     );
+  });
+
+  it('allows document scope for a non-admin user', () => {
+    renderDocMind();
+    enterQuestion();
+    fireEvent.click(screen.getByText('전체 문서'));
+
+    expect(screen.getByLabelText('선택 문서')).not.toBeDisabled();
   });
 
   it('does not expose the removed catalog workspace', () => {

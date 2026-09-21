@@ -349,11 +349,8 @@ export default function DocMind() {
     [folderCatalog.data?.folders],
   );
   const documentNodes = useMemo(
-    () =>
-      (hierarchyQuery.data?.nodes ?? []).filter(
-        (node) => node.type === 'file' && Boolean(node.document_id),
-      ),
-    [hierarchyQuery.data?.nodes],
+    () => folderCatalog.data?.documents ?? [],
+    [folderCatalog.data?.documents],
   );
   const canonicalFolderIds = useMemo(
     () =>
@@ -365,8 +362,8 @@ export default function DocMind() {
   const canonicalDocumentIds = useMemo(
     () =>
       documentNodes
-        .filter((node) => selectedDocumentIds.includes(node.document_id!))
-        .map((node) => node.document_id!),
+        .filter((document) => selectedDocumentIds.includes(document.id))
+        .map((document) => document.id),
     [documentNodes, selectedDocumentIds],
   );
   const explicitScopeEmpty =
@@ -378,19 +375,16 @@ export default function DocMind() {
     () => new Map(folders.map((folder) => [folder.id, folder.name])),
     [folders],
   );
-  const documentFolderNames = useMemo(() => {
-    const folderPaths = new Map(
-      (hierarchyQuery.data?.nodes ?? [])
-        .filter((node) => node.type === 'folder')
-        .map((node) => [node.file_id, node.relative_path || node.name]),
-    );
-    return new Map(
-      documentNodes.flatMap((node) => {
-        const path = folderPaths.get(node.parent_file_id || '');
-        return path ? [[node.document_id!, path] as const] : [];
-      }),
-    );
-  }, [documentNodes, hierarchyQuery.data?.nodes]);
+  const documentFolderNames = useMemo(
+    () =>
+      new Map(
+        documentNodes.map((document) => [
+          document.id,
+          folderNames.get(document.folder_id) ?? document.relative_path,
+        ]),
+      ),
+    [documentNodes, folderNames],
+  );
 
   useFolderSelection(
     folders.map((folder) => folder.id),
@@ -576,9 +570,6 @@ export default function DocMind() {
                                   type="radio"
                                   name="docmind-scope"
                                   checked={scopeMode === mode}
-                                  disabled={
-                                    mode === 'documents' && !canAdminister
-                                  }
                                   onChange={() => setScopeMode(mode)}
                                 />
                                 {mode === 'all'
@@ -616,25 +607,22 @@ export default function DocMind() {
                         )}
                         {scopeMode === 'documents' && (
                           <div className="mt-2 border-t border-border-button pt-2">
-                            {documentNodes.map((node) => (
+                            {documentNodes.map((document) => (
                               <label
-                                key={node.document_id}
+                                key={document.id}
                                 className="flex items-center gap-2 rounded px-2 py-2"
                               >
                                 <input
                                   type="checkbox"
                                   checked={selectedDocumentIds.includes(
-                                    node.document_id!,
+                                    document.id,
                                   )}
                                   onChange={() =>
-                                    toggle(
-                                      node.document_id!,
-                                      setSelectedDocumentIds,
-                                    )
+                                    toggle(document.id, setSelectedDocumentIds)
                                   }
                                 />
                                 <span className="truncate">
-                                  {node.relative_path || node.name}
+                                  {document.relative_path || document.name}
                                 </span>
                               </label>
                             ))}
