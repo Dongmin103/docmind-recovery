@@ -36,12 +36,15 @@ $minioUser = 'docminddev' + (New-RandomHex 6)
 $minioPassword = New-RandomHex 24
 
 $content = @"
-DOCMIND_DEV_ENV_FILE=../../.local/docker/windows-dev.env
 STACK_VERSION=8.11.3
 RAGFLOW_IMAGE=docmind-ragflow:windows-dev
 DOC_ENGINE=elasticsearch
 DEVICE=cpu
 TZ=Asia/Seoul
+DOCMIND_DEV_SECURITY_MODE=isolated-synthetic-only
+DOCMIND_DEV_DATA_CLASS=synthetic-only
+DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK=1
+DOCMIND_DEV_EXTERNAL_API_POLICY=https-only
 DOCMIND_DEV_WEB_PORT=18080
 DOCMIND_DEV_API_PORT=19380
 DOCMIND_DEV_ADMIN_PORT=19381
@@ -87,5 +90,6 @@ BGE_M3_CPUS=4
 
 [IO.Directory]::CreateDirectory((Split-Path -Parent $resolvedOutput)) | Out-Null
 [IO.File]::WriteAllText($resolvedOutput, $content, [Text.UTF8Encoding]::new($false))
+& (Join-Path $PSScriptRoot 'Initialize-WindowsDevelopmentSecurity.ps1') -EnvironmentPath $resolvedOutput
 Write-Output "Created ignored development environment: $resolvedOutput"
 Write-Output 'No external API keys were added. Set JINA_API_KEY and the answer-model credentials locally when available.'

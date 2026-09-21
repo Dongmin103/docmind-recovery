@@ -6,17 +6,82 @@ name: docmind-windows-dev
 # In particular it has no legacy routing sidecar, fixed container names, Linux host
 # data paths, uEncryptor invocation, or mounts from the All-in-One source roots.
 
-x-docmind-env: &docmind-env
-  env_file:
-    - ${DOCMIND_DEV_ENV_FILE:-../../.local/docker/windows-dev.env}
-
 x-docmind-service: &docmind-service
-  <<: *docmind-env
   networks:
     - docmind-dev
   restart: unless-stopped
 
 services:
+  # Runtime guard for the deliberately limited Windows development boundary.
+  # It has no network and prints no secret values. Every persistent service
+  # waits for this check before starting.
+  security-gate:
+    profiles: [infra, full]
+    image: alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
+    network_mode: none
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DOCMIND_DEV_SECURITY_MODE: ${DOCMIND_DEV_SECURITY_MODE:?Run Initialize-WindowsDevelopmentSecurity.ps1 first}
+      DOCMIND_DEV_DATA_CLASS: ${DOCMIND_DEV_DATA_CLASS:?Run Initialize-WindowsDevelopmentSecurity.ps1 first}
+      DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK: ${DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK:?Run Initialize-WindowsDevelopmentSecurity.ps1 first}
+      DOCMIND_DEV_EXTERNAL_API_POLICY: ${DOCMIND_DEV_EXTERNAL_API_POLICY:?Run Initialize-WindowsDevelopmentSecurity.ps1 first}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      MINIO_USER: ${MINIO_USER:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      MINIO_PASSWORD: ${MINIO_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        fail() { echo "Windows development security gate failed: $$1" >&2; exit 1; }
+        [ "$$DOCMIND_DEV_SECURITY_MODE" = "isolated-synthetic-only" ] || fail "unsupported security mode"
+        [ "$$DOCMIND_DEV_DATA_CLASS" = "synthetic-only" ] || fail "this stack is not approved for sensitive or operating data"
+        [ "$$DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK" = "1" ] || fail "loopback transport boundary was not acknowledged"
+        [ "$$DOCMIND_DEV_EXTERNAL_API_POLICY" = "https-only" ] || fail "external API policy must be https-only"
+        check_secret() {
+          value="$$1"; name="$$2"
+          [ "$${#value}" -ge 32 ] || fail "$$name is missing or too short"
+          case "$$value" in GENERATED_LOCALLY|CHANGE_ME*|*PLACEHOLDER*) fail "$$name still contains a placeholder" ;; esac
+        }
+        check_secret "$$MYSQL_PASSWORD" MYSQL_PASSWORD
+        check_secret "$$ELASTIC_PASSWORD" ELASTIC_PASSWORD
+        check_secret "$$REDIS_PASSWORD" REDIS_PASSWORD
+        check_secret "$$MINIO_PASSWORD" MINIO_PASSWORD
+        [ "$${#MINIO_USER}" -ge 16 ] || fail "MINIO_USER is missing or too short"
+        echo "Windows development security boundary validated (no secrets logged)."
+
+  # The full application may send question/chunk content to external model APIs.
+  # Keep that path fail-closed until explicit local credentials are present.
+  model-secret-gate:
+    profiles: [full]
+    image: alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
+    network_mode: none
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      security-gate:
+        condition: service_completed_successfully
+    environment:
+      JINA_API_KEY: ${JINA_API_KEY:-}
+      DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        fail() { echo "Windows development model-secret gate failed: $$1" >&2; exit 1; }
+        [ "$${#JINA_API_KEY}" -ge 12 ] || fail "JINA_API_KEY is missing"
+        [ -n "$$DOCMIND_GENERATOR_MODEL" ] || fail "DOCMIND_GENERATOR_MODEL is missing"
+        [ "$${#DASHSCOPE_API_KEY}" -ge 12 ] || fail "DASHSCOPE_API_KEY is missing"
+        case "$$JINA_API_KEY$$DASHSCOPE_API_KEY" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "model credentials contain placeholders" ;; esac
+        echo "External model credentials are present (values not logged)."
+
   mysql:
     <<: *docmind-service
     profiles: [infra, full]
@@ -31,6 +96,10 @@ services:
       - --binlog_expire_logs_seconds=604800
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      TZ: ${TZ:-Asia/Seoul}
+    depends_on:
+      security-gate:
+        condition: service_completed_successfully
     ports:
       - 127.0.0.1:${DOCMIND_DEV_MYSQL_PORT:-13306}:3306
     volumes:
@@ -58,6 +127,10 @@ services:
       cluster.routing.allocation.disk.watermark.low: 5gb
       cluster.routing.allocation.disk.watermark.high: 3gb
       cluster.routing.allocation.disk.watermark.flood_stage: 2gb
+      TZ: ${TZ:-Asia/Seoul}
+    depends_on:
+      security-gate:
+        condition: service_completed_successfully
     ports:
       - 127.0.0.1:${DOCMIND_DEV_ES_PORT:-19200}:9200
     volumes:
@@ -80,6 +153,12 @@ services:
     profiles: [infra, full]
     image: valkey/valkey:8
     command: [redis-server, --requirepass, "${REDIS_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}", --maxmemory, 128mb, --maxmemory-policy, volatile-lru]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      TZ: ${TZ:-Asia/Seoul}
+    depends_on:
+      security-gate:
+        condition: service_completed_successfully
     ports:
       - 127.0.0.1:${DOCMIND_DEV_REDIS_PORT:-16379}:6379
     volumes:
@@ -102,6 +181,10 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_USER:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
       MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      TZ: ${TZ:-Asia/Seoul}
+    depends_on:
+      security-gate:
+        condition: service_completed_successfully
     ports:
       - 127.0.0.1:${DOCMIND_DEV_MINIO_PORT:-19000}:9000
       - 127.0.0.1:${DOCMIND_DEV_MINIO_CONSOLE_PORT:-19001}:9001
@@ -136,6 +219,7 @@ services:
     environment:
       MALLOC_ARENA_MAX: "2"
       OMP_NUM_THREADS: "4"
+      TZ: ${TZ:-Asia/Seoul}
     ports:
       - 127.0.0.1:${DOCMIND_DEV_BGE_PORT:-16380}:80
     volumes:
@@ -163,6 +247,8 @@ services:
       - --enable-adminserver
       - --init-model-provider-tables
     depends_on:
+      model-secret-gate:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       es01:
@@ -173,6 +259,35 @@ services:
         condition: service_healthy
       bge-m3-cpu:
         condition: service_healthy
+    # Keep model/API credentials out of unrelated containers. Compose receives
+    # them from the ignored --env-file and injects them only into the app.
+    environment:
+      DOC_ENGINE: ${DOC_ENGINE:-elasticsearch}
+      DEVICE: ${DEVICE:-cpu}
+      TZ: ${TZ:-Asia/Seoul}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      MYSQL_DBNAME: ${MYSQL_DBNAME:-rag_flow_dev}
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      ES_HOST: ${ES_HOST:-es01}
+      ES_PORT: ${ES_PORT:-9200}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      MINIO_USER: ${MINIO_USER:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      MINIO_PASSWORD: ${MINIO_PASSWORD:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+      MINIO_HOST: ${MINIO_HOST:-minio}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      STORAGE_IMPL: ${STORAGE_IMPL:-MINIO}
+      TEI_HOST: ${TEI_HOST:-bge-m3-cpu}
+      DOCMIND_RERANK_ID: ${DOCMIND_RERANK_ID:-jina-reranker-v3.5@jina@Jina}
+      JINA_API_KEY: ${JINA_API_KEY:-}
+      DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      PARSER_PLATFORM_ENABLED: ${PARSER_PLATFORM_ENABLED:-0}
+      PARSER_PLATFORM_INTEGRATION_READY: ${PARSER_PLATFORM_INTEGRATION_READY:-0}
+      TE_RUN_MODE: ${TE_RUN_MODE:-0}
     ports:
       - 127.0.0.1:${DOCMIND_DEV_WEB_PORT:-18080}:80
       - 127.0.0.1:${DOCMIND_DEV_API_PORT:-19380}:9380

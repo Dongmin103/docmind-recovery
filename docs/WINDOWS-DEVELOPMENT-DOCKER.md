@@ -16,7 +16,9 @@ Run from the repository root in PowerShell:
 
 ```powershell
 powershell -NoProfile -File .\tools\windows\Initialize-WindowsDevelopmentDocker.ps1
+powershell -NoProfile -File .\tools\windows\Initialize-WindowsDevelopmentSecurity.ps1
 powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentCompose.ps1
+powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentSecurity.ps1
 ```
 
 The initializer writes random database/storage credentials to the ignored file
@@ -34,6 +36,12 @@ powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentCompose.ps1 `
 
 The tracked `windows-dev.env.example` is documentation only and contains no
 usable credential.
+
+The security initializer restricts the env-file ACL and fixes this Compose to a
+non-sensitive synthetic-data boundary. Internal Docker/loopback traffic is not
+TLS and the named volumes are not application-encrypted. Read
+[WINDOWS-DEVELOPMENT-SECURITY.md](WINDOWS-DEVELOPMENT-SECURITY.md) before adding
+data or model credentials.
 
 ## Validate and start
 
@@ -56,7 +64,16 @@ C:\Users\uplex\bin\docker.cmd compose `
 ```
 
 After fresh authentication keys are initialized and the application image is
-ready, start the complete baseline:
+ready, add Jina and answer-model credentials to the ignored local env file and
+validate them before starting the complete baseline:
+
+```powershell
+powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentSecurity.ps1 `
+  -DockerCommand C:\Users\uplex\bin\docker.cmd `
+  -RequireModelCredentials
+```
+
+The `full` profile fails closed when those credentials are missing. Then start:
 
 ```powershell
 C:\Users\uplex\bin\docker.cmd compose `

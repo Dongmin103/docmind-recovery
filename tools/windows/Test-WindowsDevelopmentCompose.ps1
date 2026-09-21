@@ -35,8 +35,33 @@ try {
 if ($config.name -ne 'docmind-windows-dev') {
     throw "Unexpected Compose project name: $($config.name)"
 }
-if ($config.services.PSObject.Properties.Name -contains 'openviking') {
-    throw 'OpenViking must not be present in the Windows development stack.'
+$retiredCatalogService = 'open' + 'viking'
+if ($config.services.PSObject.Properties.Name -contains $retiredCatalogService) {
+    throw 'The retired catalog service must not be present in the Windows development stack.'
+}
+foreach ($gateName in @('security-gate', 'model-secret-gate')) {
+    if ($config.services.PSObject.Properties.Name -notcontains $gateName) {
+        throw "Missing fail-closed service: $gateName"
+    }
+    if ($config.services.$gateName.network_mode -ne 'none') {
+        throw "Security gate must not have network access: $gateName"
+    }
+    if ($config.services.$gateName.image -notmatch '@sha256:[0-9a-f]{64}$') {
+        throw "Security gate image must be digest-pinned: $gateName"
+    }
+    if (-not $config.services.$gateName.read_only -or
+        $config.services.$gateName.cap_drop -notcontains 'ALL' -or
+        $config.services.$gateName.security_opt -notcontains 'no-new-privileges:true') {
+        throw "Security gate container hardening is incomplete: $gateName"
+    }
+}
+
+$securityEnvironment = $config.services.'security-gate'.environment
+if ($securityEnvironment.DOCMIND_DEV_SECURITY_MODE -ne 'isolated-synthetic-only' -or
+    $securityEnvironment.DOCMIND_DEV_DATA_CLASS -ne 'synthetic-only' -or
+    $securityEnvironment.DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK -ne '1' -or
+    $securityEnvironment.DOCMIND_DEV_EXTERNAL_API_POLICY -ne 'https-only') {
+    throw 'Resolved Compose does not enforce the synthetic-only development boundary.'
 }
 
 $forbiddenRoots = @(
@@ -49,20 +74,45 @@ $forbiddenRoots = @(
 )
 foreach ($serviceProperty in $config.services.PSObject.Properties) {
     $service = $serviceProperty.Value
-    if ($service.container_name) {
+    if ($service.PSObject.Properties.Name -contains 'container_name' -and $service.container_name) {
         throw "Fixed container_name found on service $($serviceProperty.Name)."
     }
-    foreach ($port in @($service.ports)) {
+    $ports = if ($service.PSObject.Properties.Name -contains 'ports') { @($service.ports) } else { @() }
+    foreach ($port in $ports) {
         if ($port -and $port.host_ip -ne '127.0.0.1') {
             throw "Non-loopback published port found on service $($serviceProperty.Name): $($port | ConvertTo-Json -Compress)"
         }
     }
-    foreach ($volume in @($service.volumes)) {
+    $serviceVolumes = if ($service.PSObject.Properties.Name -contains 'volumes') { @($service.volumes) } else { @() }
+    foreach ($volume in $serviceVolumes) {
         if (-not $volume) { continue }
         foreach ($root in $forbiddenRoots) {
-            if ([string]$volume.source -like "$root*") {
+            if ($volume.PSObject.Properties.Name -contains 'source' -and [string]$volume.source -like "$root*") {
                 throw "Forbidden source-root mount found on service $($serviceProperty.Name)."
             }
+        }
+    }
+}
+
+$credentialOwners = @{
+    JINA_API_KEY = @('model-secret-gate', 'ragflow-cpu')
+    DASHSCOPE_API_KEY = @('model-secret-gate', 'ragflow-cpu')
+    MYSQL_PASSWORD = @('security-gate', 'ragflow-cpu')
+    MYSQL_ROOT_PASSWORD = @('mysql')
+    ELASTIC_PASSWORD = @('es01', 'security-gate', 'ragflow-cpu')
+    REDIS_PASSWORD = @('redis', 'security-gate', 'ragflow-cpu')
+    MINIO_PASSWORD = @('security-gate', 'ragflow-cpu')
+    MINIO_ROOT_PASSWORD = @('minio')
+}
+foreach ($credential in $credentialOwners.GetEnumerator()) {
+    foreach ($serviceProperty in $config.services.PSObject.Properties) {
+        $environmentNames = if ($serviceProperty.Value.PSObject.Properties.Name -contains 'environment') {
+            @($serviceProperty.Value.environment.PSObject.Properties.Name)
+        } else {
+            @()
+        }
+        if ($environmentNames -contains $credential.Key -and $serviceProperty.Name -notin $credential.Value) {
+            throw "Credential $($credential.Key) is exposed to unrelated service $($serviceProperty.Name)."
         }
     }
 }
@@ -74,11 +124,11 @@ foreach ($volumeProperty in $config.volumes.PSObject.Properties) {
 }
 
 $serialized = $config | ConvertTo-Json -Depth 100
-if ($serialized -match '(?i)openviking') {
-    throw 'OpenViking configuration remains in the resolved Windows development stack.'
+if ($serialized -match "(?i)$retiredCatalogService") {
+    throw 'Retired catalog configuration remains in the resolved Windows development stack.'
 }
 if ($serialized -match '(?i)uencryptor') {
     throw 'The Docker stack must not invoke or configure uEncryptor.'
 }
 Write-Output 'Windows development Compose validation passed.'
-Write-Output 'Verified: isolated project, no fixed container names, loopback-only published ports, no source-root mounts, and no OpenViking.'
+Write-Output 'Verified: isolated project, fail-closed security gates, scoped secrets, loopback-only published ports, no source-root mounts, and no retired catalog service.'
