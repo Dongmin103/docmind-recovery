@@ -1,0 +1,37 @@
+{
+  "checkpoint": "pre-openviking-refactor-20260921T061958Z",
+  "source_head": "432dd7e6f98796b875beb41dd1abf2ced3ad8d5b",
+  "tracked_files": 6058,
+  "untracked_files": 10,
+  "modified_tracked_files": 20,
+  "source_stable_during_capture": true,
+  "asset": "pre-openviking-refactor-20260921T061958Z.tar.enc",
+  "asset_bytes": 805529658,
+  "asset_sha256": "1e3e34b005deb15dd070bbce5d25235d3a45bb6e647b29291731e115d4b703b3",
+  "plaintext_archive_sha256": "085d17d281ea599f83028c6be8c994ebb535e7825c6baf05b569c51bc6099a6d",
+  "encryption": "AES-256-GCM; random 256-bit key held separately; format implemented in restore_backup.py",
+  "scope": [
+    "Git history and refs",
+    "Tracked and untracked working-tree files",
+    "Staging index and patches",
+    "Ignored environment configuration",
+    "Running DocMind source and built frontend",
+    "Installed OpenViking package",
+    "Container configuration and image identifiers"
+  ],
+  "excluded": [
+    "Database data",
+    "Search indexes",
+    "Uploaded document object storage",
+    "OpenViking persistent catalog",
+    "Model weights",
+    "Container image layers"
+  ],
+  "verification": {
+    "decrypt_roundtrip": "passed",
+    "component_hashes": "passed: 11 components",
+    "working_tree_hashes": "passed: 6069 entries",
+    "git_bundle_restore": "passed: clone --mirror, fsck --full, source HEAD present",
+    "github_download": "pending"
+  }
+}

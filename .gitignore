@@ -1,0 +1,17 @@
+# Private recovery inputs and authentication material must stay outside Git.
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+*private*
+*.tar
+*.tar.gz
+*.bundle
+*.enc
+*.unverified
+__pycache__/
+restore-test/
+
+# Encrypted archives are distributed as release assets, not Git blobs.
