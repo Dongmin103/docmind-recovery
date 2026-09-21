@@ -45,7 +45,6 @@ DEFAULT_CONTAINERS = (
     "docmind-bge-m3",
     SURYA_CONTAINER,
     "docmind-docling-pdf-parser-1",
-    "docmind-openviking",
     "docmind-minio-1",
     "docmind-es01-1",
     "docmind-mysql-1",

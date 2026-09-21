@@ -29,7 +29,6 @@ import (
 	"ragflow/internal/agent/retrievalbridge"
 	agenttool "ragflow/internal/agent/tool"
 	"ragflow/internal/channels"
-	"ragflow/internal/folderrouter"
 	"ragflow/internal/handler"
 	"ragflow/internal/ingestion/knowledge_compile"
 	ingestion "ragflow/internal/ingestion/service"
@@ -874,53 +873,6 @@ func startServer(ctx context.Context) {
 	// agent falls back to hybrid search (no failing call).
 	wikisearch.SetService(wikisearch.NewEngineService(engine.Get()))
 
-	var folderRouterHandler *handler.FolderRouterHandler
-	if catalogPath := strings.TrimSpace(os.Getenv("RAGFLOW_FOLDER_ROUTER_CATALOG")); catalogPath != "" {
-		catalogBytes, err := os.ReadFile(catalogPath)
-		if err != nil {
-			common.Fatal("Failed to read folder router catalog", zap.Error(err))
-			return
-		}
-		catalog, err := folderrouter.ParseCatalog(catalogBytes)
-		if err != nil {
-			common.Fatal("Failed to parse folder router catalog", zap.Error(err))
-			return
-		}
-		rootURI := strings.TrimSpace(os.Getenv("RAGFLOW_FOLDER_ROUTER_ROOT_URI"))
-		folderRouter, err := folderrouter.NewRouter(catalog, rootURI)
-		if err != nil {
-			common.Fatal("Failed to configure folder router", zap.Error(err))
-			return
-		}
-		finder, err := folderrouter.NewHTTPFinder(
-			strings.TrimSpace(os.Getenv("RAGFLOW_OPENVIKING_URL")),
-			strings.TrimSpace(os.Getenv("RAGFLOW_OPENVIKING_API_KEY")),
-			rootURI,
-		)
-		if err != nil {
-			common.Fatal("Failed to configure OpenViking folder finder", zap.Error(err))
-			return
-		}
-		candidateLimit, err := strconv.Atoi(strings.TrimSpace(os.Getenv("RAGFLOW_FOLDER_ROUTER_RERANK_CANDIDATE_LIMIT")))
-		if err != nil {
-			common.Fatal("Failed to parse folder router rerank candidate limit", zap.Error(err))
-			return
-		}
-		folderRouterHandler, err = handler.NewFolderRouterHandler(
-			folderRouter,
-			finder,
-			datasetsService,
-			datasetsService,
-			strings.TrimSpace(os.Getenv("RAGFLOW_FOLDER_ROUTER_OPERATOR_ID")),
-			strings.TrimSpace(os.Getenv("RAGFLOW_FOLDER_ROUTER_RERANK_ID")),
-			candidateLimit,
-		)
-		if err != nil {
-			common.Fatal("Failed to configure folder router handler", zap.Error(err))
-			return
-		}
-	}
-
 	// Initialize router
 	r := router.NewRouter(authHandler,
 		userHandler,
@@ -955,8 +907,7 @@ func startServer(ctx context.Context) {
 		pipelineHandler,
 		compilationTemplateHandler,
 		compilationTemplateGroupHandler,
-		datasetArtifactHandler,
-		folderRouterHandler)
+		datasetArtifactHandler)
 
 	// Create Gin engine
 	ginEngine := gin.New()

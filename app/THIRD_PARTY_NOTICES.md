@@ -11,7 +11,6 @@ DocMind canary. It does not replace the corresponding upstream license text.
 | llama.cpp | release `b10718`, Ubuntu x64 binary | MIT, <https://github.com/ggml-org/llama.cpp> |
 | Docling | `docling-slim[format-office]==2.115.0`, disabled in first canary | MIT, <https://github.com/docling-project/docling> |
 | rhwp-python | `0.8.1`, disabled in first canary | MIT, <https://github.com/DanMeon/rhwp-python> |
-| OpenViking | external image pinned by digest, v0.4.14 | AGPL-3.0, <https://github.com/volcengine/OpenViking> |
 
 Surya model files, provider credentials, source documents, indexes, database
 contents and target-specific capability evidence are not redistributed in Git

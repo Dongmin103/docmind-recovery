@@ -5,7 +5,7 @@ import pytest
 from peewee import IntegrityError, MySQLDatabase, PostgresqlDatabase, SqliteDatabase
 
 from api.apps.services import docmind_api_service
-from api.apps.services import docmind_draft_service
+from api.apps.services import docmind_hierarchy_draft_state
 from api.db.db_models import (
     DocmindAuditEvent,
     DocmindCatalogVersion,
@@ -288,7 +288,7 @@ def _published_dynamic_version(loaded):
             routing_digest_hash="d" * 64,
             chunk_set_fingerprint="e" * 64,
         )
-    snapshot_json, snapshot_hash = docmind_draft_service._snapshot(version)
+    snapshot_json, snapshot_hash = docmind_hierarchy_draft_state.snapshot(version)
     DocmindCatalogVersion.update(
         snapshot_json=snapshot_json,
         snapshot_hash=snapshot_hash,

@@ -16,8 +16,6 @@ services:
       args:
         RAGFLOW_VERSION: v0.27.1-docmind-production-routing-v3-hybrid-redacted-20260912
     depends_on:
-      openviking:
-        condition: service_healthy
       surya-parser-cpu:
         condition: service_healthy
         required: false
@@ -28,10 +26,7 @@ services:
       - path: .env.docmind.cpu
         required: true
     environment:
-      DOCMIND_OPENVIKING_URL: http://openviking:1933
-      DOCMIND_OPENVIKING_API_KEY: ${OPENVIKING_DATA_API_KEY:?set OPENVIKING_DATA_API_KEY}
-      DOCMIND_OPENVIKING_CAPABILITY_ARTIFACT: /ragflow/private/docmind-openviking-capability.json
-      DOCMIND_RERANK_ID: ${DOCMIND_RERANK_ID:-jina-reranker-v3@jina@Jina}
+      DOCMIND_RERANK_ID: ${DOCMIND_RERANK_ID:-jina-reranker-v3.5@jina@Jina}
       DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-qwen3.6-plus@QwenCloud@Tongyi-Qianwen}
       DOCMIND_CATALOG_SHADOW_ENABLED: "0"
       DOCMIND_CATALOG_DB_PRIMARY_ENABLED: "1"
@@ -85,35 +80,7 @@ services:
       retries: 30
       start_period: 180s
 
-  openviking:
-    platform: linux/amd64
-    image: ghcr.io/volcengine/openviking@sha256:7616dce87069dc94fb1a197569c36f7ec4d14aed85a169ba8cb7b99461250617
-    container_name: docmind-openviking
-    command: ["--without-bot"]
-    env_file:
-      - path: .env.docmind.cpu
-        required: true
-    depends_on:
-      bge-m3-cpu:
-        condition: service_healthy
-    environment:
-      OPENVIKING_ROOT_API_KEY: ${OPENVIKING_ROOT_API_KEY:?set OPENVIKING_ROOT_API_KEY}
-      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?set DASHSCOPE_API_KEY}
-      OPENVIKING_CONFIG_FILE: /app/.openviking/ov.conf
-      OPENVIKING_CONF_CONTENT: >-
-        {"storage":{"workspace":"/app/.openviking/workspace","vectordb":{"name":"context","backend":"local"},"agfs":{"backend":"local"}},"server":{"auth_mode":"api_key","root_api_key":"${OPENVIKING_ROOT_API_KEY}"},"embedding":{"dense":{"provider":"openai","api_key":"local-no-key-required","api_base":"http://docmind-bge-m3:80/v1","model":"BAAI/bge-m3","dimension":1024},"max_concurrent":2,"max_retries":1,"text_source":"summary_only"},"vlm":{"provider":"openai","api_base":"https://dashscope-intl.aliyuncs.com/compatible-mode/v1","api_key":"${DASHSCOPE_API_KEY}","model":"${OPENVIKING_VLM_MODEL:-qwen3.6-plus}","max_concurrent":1,"max_retries":1}}
-    ports:
-      - 127.0.0.1:${OPENVIKING_PORT:-1933}:1933
-    volumes:
-      - ${OPENVIKING_DATA_DIR:-/home/uplexsoft/docmind-data/openviking-bge}:/app/.openviking
-    networks:
-      - ragflow
-    mem_limit: ${OPENVIKING_MEMORY_LIMIT:-3g}
-    cpus: ${OPENVIKING_CPUS:-2}
-    restart: unless-stopped
-
 volumes:
-  openviking_data:
   parser_platform_artifacts:
 
 networks:

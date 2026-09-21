@@ -15,7 +15,7 @@ from peewee import IntegrityError, fn
 
 from api.apps.services import (
     docmind_canary_policy,
-    docmind_draft_service,
+    docmind_hierarchy_draft_state,
     docmind_registration_service,
 )
 from api.db import FileType
@@ -1076,13 +1076,16 @@ def capture_hierarchy_draft(
         "expected_active_version_id": expected_active_version_id,
         "source_tree_hash": source_tree_hash,
     }
-    operation, replay = docmind_draft_service._idempotency_start(
-        context,
-        tenant_id,
-        "CAPTURE_HIERARCHY_DRAFT",
-        idempotency_key,
-        payload,
-    )
+    try:
+        operation, replay = docmind_hierarchy_draft_state.start_idempotent_operation(
+            context,
+            tenant_id,
+            "CAPTURE_HIERARCHY_DRAFT",
+            idempotency_key,
+            payload,
+        )
+    except docmind_hierarchy_draft_state.HierarchyDraftStateError as error:
+        raise DocmindHierarchyError(error.code) from error
     if replay is not None:
         return replay
 
@@ -1097,7 +1100,7 @@ def capture_hierarchy_draft(
         health_reason=None,
         snapshot_hash=_hash("{}"),
         snapshot_json="{}",
-        root_uri=f"viking://resources/docmind-catalog-{version_id}/",
+        root_uri=f"docmind://catalog/{version_id}",
         root_version=None,
         routing_card_set_hash=None,
         validation_report_hash=None,
@@ -1202,7 +1205,9 @@ def capture_hierarchy_draft(
                 to_folder_id=row.folder_id,
                 expected_parent_folder_id=parent.folder_id if parent else None,
                 expected_parent_membership_hash=(
-                    docmind_draft_service._membership_hash(parent) if parent else None
+                    docmind_hierarchy_draft_state.membership_hash(parent)
+                    if parent
+                    else None
                 ),
                 actor_id=tenant_id,
                 ordinal=ordinal,
@@ -1219,15 +1224,21 @@ def capture_hierarchy_draft(
             DocmindIdempotencyOperation.id == operation.id
         ).execute()
         raise DocmindHierarchyError("DOCMIND_SOURCE_TREE_CHANGED")
-    snapshot_json, snapshot_hash = docmind_draft_service._snapshot(version)
+    try:
+        snapshot_json, snapshot_hash = docmind_hierarchy_draft_state.snapshot(version)
+    except docmind_hierarchy_draft_state.HierarchyDraftStateError as error:
+        raise DocmindHierarchyError(error.code) from error
     DocmindCatalogVersion.update(
         snapshot_json=snapshot_json,
         snapshot_hash=snapshot_hash,
         **_updates(),
     ).where(DocmindCatalogVersion.id == version.id).execute()
-    result = docmind_draft_service._draft_result(
-        context,
-        DocmindCatalogVersion.get_by_id(version.id),
-    )
-    docmind_draft_service._idempotency_complete(operation, result)
+    try:
+        result = docmind_hierarchy_draft_state.capture_result(
+            context,
+            DocmindCatalogVersion.get_by_id(version.id),
+        )
+        docmind_hierarchy_draft_state.complete_idempotent_operation(operation, result)
+    except docmind_hierarchy_draft_state.HierarchyDraftStateError as error:
+        raise DocmindHierarchyError(error.code) from error
     return result

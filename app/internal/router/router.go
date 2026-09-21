@@ -55,8 +55,6 @@ type Router struct {
 	botHandler           *handler.BotHandler
 	componentsHandler    *handler.ComponentsHandler
 	pipelineHandler      *handler.PipelineHandler
-	folderRouterHandler  *handler.FolderRouterHandler
-
 	compilationTemplateHandler      *handler.CompilationTemplateHandler
 	compilationTemplateGroupHandler *handler.CompilationTemplateGroupHandler
 	datasetArtifactHandler          *handler.DatasetArtifactHandler
@@ -98,7 +96,6 @@ func NewRouter(
 	compilationTemplateHandler *handler.CompilationTemplateHandler,
 	compilationTemplateGroupHandler *handler.CompilationTemplateGroupHandler,
 	datasetArtifactHandler *handler.DatasetArtifactHandler,
-	folderRouterHandler *handler.FolderRouterHandler,
 ) *Router {
 	return &Router{
 		authHandler:          authHandler,
@@ -132,7 +129,6 @@ func NewRouter(
 		botHandler:           botHandler,
 		componentsHandler:    componentsHandler,
 		pipelineHandler:      pipelineHandler,
-		folderRouterHandler:  folderRouterHandler,
 
 		compilationTemplateHandler:      compilationTemplateHandler,
 		compilationTemplateGroupHandler: compilationTemplateGroupHandler,
@@ -389,9 +385,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 				datasets.POST("", r.datasetsHandler.CreateDataset)
 				datasets.DELETE("", r.datasetsHandler.DeleteDatasets)
 				datasets.POST("/search", r.datasetsHandler.SearchDatasets)
-				if r.folderRouterHandler != nil {
-					datasets.POST("/pilot/folder-router/search", r.folderRouterHandler.Search)
-				}
 				datasets.POST("/:dataset_id/search", r.datasetsHandler.SearchDataset)
 				datasets.GET("/metadata/flattened", r.datasetsHandler.ListMetadataFlattened)
 				datasets.GET("/:dataset_id/metadata/summary", r.documentHandler.MetadataSummaryByDataset)
