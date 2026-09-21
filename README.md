@@ -1,3 +1,15 @@
+# Windows 개발 시작
+
+최신 PRD와 데이터 없는 개발 소스를 준비했습니다. **[개발 브랜치 열기](https://github.com/Dongmin103/docmind-recovery/tree/windows-development-handoff)** · **[시작 안내](https://github.com/Dongmin103/docmind-recovery/tree/windows-development-handoff/START_HERE.md)** · **[PRD](https://github.com/Dongmin103/docmind-recovery/tree/windows-development-handoff/PRD.md)**
+
+```powershell
+git clone --branch windows-development-handoff --single-branch https://github.com/Dongmin103/docmind-recovery.git C:\DocMindDev\docmind
+```
+
+원본 PDF·운영 청크·DB·MinIO·기존 비밀 설정은 가져오지 않습니다. 기존 암호화 복구 릴리스와 키는 새 개발에 필요하지 않습니다. 자세한 내용은 [WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md)를 읽으세요.
+
+---
+
 # DocMind recovery
 
 OpenViking 검색 구조 변경 전의 코드 복구 지점을 보관합니다.
