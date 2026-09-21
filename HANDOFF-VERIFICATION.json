@@ -142,5 +142,13 @@
     "production document processing",
     "performance"
   ],
-  "github_clone_verification": "pending; recorded after publication"
+  "github_clone_verification": {
+    "remote_commit": "d86ec313b0e967f51730bfa08a65b96a094211ce",
+    "source_files_sha256_verified": 6047,
+    "git_objects_verified": 5991,
+    "git_fsck": "passed",
+    "executable_modes_verified": 25,
+    "forbidden_document_key_files": 0,
+    "method": "Independent GitHub shallow clone; all committed source blobs compared with SHA-256 manifest; no operational data required"
+  }
 }
