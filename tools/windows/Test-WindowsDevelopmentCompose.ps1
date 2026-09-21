@@ -64,6 +64,21 @@ if ($securityEnvironment.DOCMIND_DEV_SECURITY_MODE -ne 'isolated-synthetic-only'
     throw 'Resolved Compose does not enforce the synthetic-only development boundary.'
 }
 
+$application = $config.services.'ragflow-cpu'
+if ($application.environment.DOCMIND_HOST_WORKER_KEY_ID -ne 'windows-host-1' -or
+    $application.environment.DOCMIND_HOST_WORKER_HMAC_SECRET_FILE -ne '/run/secrets/docmind-host-worker-hmac' -or
+    $application.environment.DOCMIND_EPHEMERAL_PARSER_ROOT -ne '/run/docmind-ephemeral-parser') {
+    throw 'Host-worker authentication or ephemeral parser environment is not wired into the application.'
+}
+$workerSecretMount = @($application.volumes | Where-Object { $_.target -eq '/run/secrets/docmind-host-worker-hmac' })
+if ($workerSecretMount.Count -ne 1 -or -not $workerSecretMount[0].read_only -or $workerSecretMount[0].type -ne 'bind') {
+    throw 'Host-worker HMAC secret must be a single read-only bind mount.'
+}
+$ephemeralTmpfs = @($application.tmpfs | Where-Object { [string]$_ -like '/run/docmind-ephemeral-parser:*' })
+if ($ephemeralTmpfs.Count -ne 1 -or [string]$ephemeralTmpfs[0] -notmatch 'noexec' -or [string]$ephemeralTmpfs[0] -notmatch 'nosuid' -or [string]$ephemeralTmpfs[0] -notmatch 'nodev') {
+    throw 'Ephemeral parser root must be a hardened tmpfs mount.'
+}
+
 $forbiddenRoots = @(
     'D:\UPLEXSOFT\UDRIVE\USER\TEST1',
     'D:\UPLEXSOFT\UDRIVE\DEPT\_DEPT_2',

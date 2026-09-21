@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from peewee import BigIntegerField, CharField, DatabaseProxy, DateTimeField, FloatField, IntegerField, Model, SqliteDatabase, TextField
 
-from common import settings
 from api.db.services import chunk_set_activation_service, parser_run_service
+from common import settings
 from rag.parser_platform import ChunkSetFinalizationRequest, ParserPlatformError
 
 
@@ -159,6 +159,7 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
         doc_id="doc",
         chunk_set_id="set-b",
         lifecycle="ACTIVATING",
+        raw_artifact_ref="artifact://runs/run-b/raw.json",
         completed_task_count=1,
         staged_chunk_count=2,
         staged_token_count=20,
@@ -211,6 +212,7 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
         provenance_complete=True,
         required_ocr_complete=True,
         embedding_complete=True,
+        clear_raw_artifact_ref=True,
         target_lifecycle="READY_WITH_WARNING",
     )
 
@@ -221,6 +223,7 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
     assert TinyParserRun.get_by_id("run-a").lifecycle == "RETAINED"
     assert TinyParserRun.get_by_id("run-a").retained_from_lifecycle == "READY"
     assert TinyParserRun.get_by_id("run-b").lifecycle == "READY_WITH_WARNING"
+    assert TinyParserRun.get_by_id("run-b").raw_artifact_ref is None
 
     rolled_back = store.rollback.__wrapped__(store, document_id="doc", target_chunk_set_id="set-a")
     assert rolled_back.prior_active_chunk_set_id == "set-b"

@@ -285,6 +285,9 @@ services:
       JINA_API_KEY: ${JINA_API_KEY:-}
       DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DOCMIND_HOST_WORKER_KEY_ID: ${DOCMIND_HOST_WORKER_KEY_ID:-windows-host-1}
+      DOCMIND_HOST_WORKER_HMAC_SECRET_FILE: /run/secrets/docmind-host-worker-hmac
+      DOCMIND_EPHEMERAL_PARSER_ROOT: /run/docmind-ephemeral-parser
       PARSER_PLATFORM_ENABLED: ${PARSER_PLATFORM_ENABLED:-0}
       PARSER_PLATFORM_INTEGRATION_READY: ${PARSER_PLATFORM_INTEGRATION_READY:-0}
       TE_RUN_MODE: ${TE_RUN_MODE:-0}
@@ -296,6 +299,12 @@ services:
       - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template:ro
       - ./entrypoint.sh:/ragflow/entrypoint.sh:ro
       - ragflow_logs:/ragflow/logs
+      - type: bind
+        source: ${DOCMIND_HOST_WORKER_SECRET_FILE:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
+        target: /run/secrets/docmind-host-worker-hmac
+        read_only: true
+    tmpfs:
+      - /run/docmind-ephemeral-parser:rw,noexec,nosuid,nodev,mode=0700,size=536870912
     ulimits:
       nofile:
         soft: 65535

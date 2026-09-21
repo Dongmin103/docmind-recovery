@@ -32,9 +32,14 @@ services:
       DOCMIND_CATALOG_DB_PRIMARY_ENABLED: "1"
       DOCMIND_SHARED_WORKSPACE_ENABLED: "1"
       DOCMIND_SHARED_USER_EMAIL: ${DOCMIND_SHARED_USER_EMAIL:-docmind@internal.invalid}
+      DOCMIND_HOST_WORKER_KEY_ID: ${DOCMIND_HOST_WORKER_KEY_ID:-windows-host-1}
+      DOCMIND_HOST_WORKER_HMAC_SECRET_FILE: /ragflow/private/docmind-host-worker-hmac.key
+      DOCMIND_EPHEMERAL_PARSER_ROOT: /run/docmind-ephemeral-parser
     volumes:
       - ${DOCMIND_PRIVATE_DIR:-../runtime/private}:/ragflow/private:ro
       - parser_platform_artifacts:/ragflow/parser-platform-artifacts
+    tmpfs:
+      - /run/docmind-ephemeral-parser:rw,noexec,nosuid,nodev,mode=0700,size=536870912
     networks:
       - ragflow
       - parser_internal

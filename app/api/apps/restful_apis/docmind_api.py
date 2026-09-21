@@ -1,19 +1,53 @@
+import asyncio
 import logging
+import os
 
-from quart import request
+from quart import Response, request
 
 from api.apps import login_required, login_user
 from api.apps.services import (
     docmind_api_service,
     docmind_bootstrap_service,
     docmind_hierarchy_service,
+    docmind_ingestion_service,
     docmind_registration_service,
     docmind_shared_workspace_service,
+    docmind_worker_auth,
 )
 from api.db.services.document_service import DocmindProtectedEvidenceError
 from api.utils.api_utils import add_tenant_id_to_kwargs, get_error_argument_result, get_error_data_result, get_result
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_path_and_query() -> str:
+    query = request.query_string.decode("ascii")
+    return request.path + (f"?{query}" if query else "")
+
+
+async def _authenticate_worker(body: bytes) -> str:
+    key_id = str(request.headers.get("X-DocMind-Key-Id") or "")
+    docmind_worker_auth.verify(
+        method=request.method,
+        path_and_query=_worker_path_and_query(),
+        body=body,
+        key_id=key_id,
+        timestamp=str(request.headers.get("X-DocMind-Timestamp") or ""),
+        nonce=str(request.headers.get("X-DocMind-Nonce") or ""),
+        content_sha256=str(request.headers.get("X-DocMind-Content-SHA256") or "").lower(),
+        signature=str(request.headers.get("X-DocMind-Signature") or "").lower(),
+    )
+    return key_id
+
+
+def _signed_worker_response(payload: dict, key_id: str, status: int = 200) -> Response:
+    body, headers = docmind_worker_auth.signed_json_body(
+        payload,
+        method=request.method,
+        path_and_query=_worker_path_and_query(),
+        key_id=key_id,
+    )
+    return Response(body, status=status, content_type="application/json", headers=headers)
 
 
 def _public_search_result(result):
@@ -46,6 +80,157 @@ def _parse_search_scope(value):
     if any(not isinstance(identifier, str) or not identifier.strip() for identifier in identifiers):
         raise ValueError(f"scope.{ids_key} must contain non-empty strings")
     return {"mode": mode, ids_key: [identifier.strip() for identifier in identifiers]}
+
+
+@manager.route("/cloud-sync/host-worker/observations", methods=["POST"])  # noqa: F821
+async def observe_cloud_sync_source_version():
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate_worker(body)
+        req = await request.get_json(silent=True)
+        expected = {
+            "source_id",
+            "document_id",
+            "relative_path",
+            "ciphertext_sha256",
+            "size",
+            "mtime_ns",
+        }
+        if not isinstance(req, dict) or set(req) != expected:
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        if not isinstance(req["size"], int) or not isinstance(req["mtime_ns"], int):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_OBSERVATION_INVALID")
+        result = docmind_ingestion_service.observe_source_version_from_worker(
+            source_id=req["source_id"],
+            document_id=req["document_id"],
+            relative_path=req["relative_path"],
+            ciphertext_sha256=req["ciphertext_sha256"],
+            ciphertext_size=req["size"],
+            source_mtime_ns=req["mtime_ns"],
+        )
+        return _signed_worker_response(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+    except docmind_ingestion_service.DocmindIngestionError as error:
+        return _signed_worker_response({"error": error.code}, key_id, 409)
+    except Exception:
+        logger.exception("DocMind host worker observation failed")
+        if key_id:
+            return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+
+
+@manager.route("/cloud-sync/host-worker/claim", methods=["POST"])  # noqa: F821
+async def claim_cloud_sync_job():
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate_worker(body)
+        req = await request.get_json(silent=True)
+        if (
+            not isinstance(req, dict)
+            or set(req) - {"worker_id", "protocol_version", "lease_seconds"}
+            or req.get("protocol_version") != 1
+        ):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        worker_id = str(req.get("worker_id") or "")
+        lease_seconds = req.get("lease_seconds", 300)
+        if not isinstance(lease_seconds, int):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_LEASE_INVALID")
+        docmind_ingestion_service.maintain_parser_workspaces()
+        job = docmind_ingestion_service.claim_next(worker_id, lease_seconds=lease_seconds)
+        return _signed_worker_response({"job": job.to_dict() if job else None}, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+    except docmind_ingestion_service.DocmindIngestionError as error:
+        return _signed_worker_response({"error": error.code}, key_id, 409)
+    except Exception:
+        logger.exception("DocMind host worker claim failed")
+        if key_id:
+            return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+
+
+@manager.route("/cloud-sync/host-worker/jobs/<job_id>/artifact", methods=["PUT"])  # noqa: F821
+async def upload_cloud_sync_artifact(job_id: str):
+    key_id = ""
+    try:
+        maximum = int(os.getenv("DOCMIND_HOST_WORKER_MAX_ARTIFACT_BYTES", str(256 * 1024 * 1024)))
+        if request.content_length is None:
+            return Response(b'{"error":"CONTENT_LENGTH_REQUIRED"}', status=411, content_type="application/json")
+        if request.content_length < 0 or request.content_length > maximum:
+            return Response(b'{"error":"ARTIFACT_TOO_LARGE"}', status=413, content_type="application/json")
+        # Content-Length is checked before buffering. The explicit cap bounds
+        # memory until the parser runtime adopts a streaming adapter contract.
+        body = await request.get_data()
+        key_id = await _authenticate_worker(body)
+        if len(body) > maximum:
+            return _signed_worker_response({"error": "ARTIFACT_TOO_LARGE"}, key_id, 413)
+        worker_id = str(request.headers.get("X-DocMind-Worker-Id") or "")
+        version_id = str(request.headers.get("X-DocMind-Version-Id") or "")
+        plaintext_sha256 = str(request.headers.get("X-DocMind-Plaintext-SHA256") or "").lower()
+        try:
+            fencing_token = int(request.headers.get("X-DocMind-Fencing-Token") or "")
+            plaintext_size = int(request.headers.get("X-DocMind-Plaintext-Size") or "")
+        except ValueError as error:
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID") from error
+        adapter, runner, activator = docmind_ingestion_service.ingestion_runtime()
+        result = await asyncio.to_thread(
+            docmind_ingestion_service.process_decrypted_artifact,
+            job_id,
+            worker_id=worker_id,
+            version_id=version_id,
+            fencing_token=fencing_token,
+            plaintext=body,
+            plaintext_sha256=plaintext_sha256,
+            plaintext_size=plaintext_size,
+            adapter=adapter,
+            runner=runner,
+            activator=activator,
+        )
+        return _signed_worker_response(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+    except docmind_ingestion_service.DocmindIngestionError as error:
+        return _signed_worker_response({"error": error.code}, key_id, 409)
+    except Exception:
+        logger.exception("DocMind host worker artifact upload failed")
+        if key_id:
+            return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+
+
+@manager.route("/cloud-sync/host-worker/jobs/<job_id>/status", methods=["POST"])  # noqa: F821
+async def update_cloud_sync_job_status(job_id: str):
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate_worker(body)
+        req = await request.get_json(silent=True)
+        allowed = {"worker_id", "version_id", "fencing_token", "status", "error_code"}
+        if not isinstance(req, dict) or set(req) - allowed:
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        if not isinstance(req.get("fencing_token"), int):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        result = docmind_ingestion_service.record_worker_status(
+            job_id,
+            worker_id=str(req.get("worker_id") or ""),
+            version_id=str(req.get("version_id") or ""),
+            fencing_token=req["fencing_token"],
+            status=str(req.get("status") or ""),
+            error_code=(str(req["error_code"]) if req.get("error_code") else None),
+        )
+        return _signed_worker_response(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+    except docmind_ingestion_service.DocmindIngestionError as error:
+        return _signed_worker_response({"error": error.code}, key_id, 409)
+    except Exception:
+        logger.exception("DocMind host worker status update failed")
+        if key_id:
+            return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
 
 
 @manager.route("/docmind/shared-session", methods=["POST"])  # noqa: F821

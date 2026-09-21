@@ -41,10 +41,12 @@ from common.float_utils import normalize_overlapped_percent
 from api.db.services.document_service import DocumentService
 from api.db.services.task_service import TaskService
 from rag.nlp import search
+from rag.parser_platform.ephemeral_metadata import sanitize_ephemeral_chunk as _sanitize_ephemeral_chunk
 from rag.svr.task_executor_refactor.constants import GRAPH_RAPTOR_FAKE_DOC_ID
 from rag.svr.task_executor_refactor.task_context import TaskContext
 from rag.utils.base64_image import image2id
 from rag.utils.chunk_id import make_chunk_id
+
 
 # Re-export for backward compatibility
 from rag.svr.task_executor_refactor.chunk_builder import (
@@ -176,7 +178,7 @@ class ChunkService:
             )
             from rag.parser_platform.pdf_source import normalize_pdf_source
 
-            config = ParserPlatformConfig.from_env()
+            config = getattr(ctx, "_docmind_parser_platform_config", None) or ParserPlatformConfig.from_env()
             parser_source = normalize_pdf_source(storage_binary).content
             prepared, parser_run = ParserRunService.load_prepared_run(
                 parse_run_id=ctx.parse_run_id,
@@ -242,9 +244,12 @@ class ChunkService:
             else:
                 cks = CommonToStandardChunkAdapter().adapt(parser_platform_document)
             if not cks:
-                from rag.parser_platform.errors import parser_error
+                if getattr(ctx, "_docmind_defer_activation", False):
+                    cks = []
+                else:
+                    from rag.parser_platform.errors import parser_error
 
-                raise parser_error("PARSER_NORMALIZATION_FAILED", detail="no searchable standard chunks")
+                    raise parser_error("PARSER_NORMALIZATION_FAILED", detail="no searchable standard chunks")
             from rag.parser_platform.search_fields import prepare_parser_platform_standard_chunks
 
             prepare_parser_platform_standard_chunks(cks, document_name=ctx.name, language=ctx.language)
@@ -352,6 +357,13 @@ class ChunkService:
                 d["id"] = make_chunk_id("searchable_chunk", d["doc_id"], chunk=chunk, chunk_order_int=chunk_order)
                 d["create_time"] = str(datetime.now()).replace("T", " ")[:19]
                 d["create_timestamp_flt"] = datetime.now().timestamp()
+
+                ephemeral_workspace = getattr(ctx, "_docmind_ephemeral_workspace", None)
+                if ephemeral_workspace is not None:
+                    # Cloud-sync parsing retains searchable text/HTML and
+                    # provenance only. Images remain within the job workspace.
+                    docs.append(_sanitize_ephemeral_chunk(d, ephemeral_workspace))
+                    return
 
                 if d.get("img_id"):
                     docs.append(d)

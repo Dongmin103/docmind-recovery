@@ -21,10 +21,27 @@ powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentCompose.ps1
 powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentSecurity.ps1
 ```
 
+For an already initialized environment, add the host-worker secret without
+rotating any database, Elasticsearch, Valkey, or MinIO credential:
+
+```powershell
+powershell -NoProfile -File .\tools\windows\Initialize-DocMindHostWorkerSecret.ps1
+```
+
+This command is idempotent. It preserves a valid existing 32-byte secret and
+updates only `DOCMIND_HOST_WORKER_KEY_ID` and
+`DOCMIND_HOST_WORKER_SECRET_FILE`. Secret rotation requires the explicit
+`-RotateSecret` switch and must be coordinated with the host worker.
+
 The initializer writes random database/storage credentials to the ignored file
-`.local/docker/windows-dev.env`. It refuses to overwrite that file unless
-`-Force` is supplied. It leaves Jina and answer-model credentials blank; add
-those only to the ignored local file when they are available.
+`.local/docker/windows-dev.env` and a raw 32-byte host-worker HMAC secret to the
+ignored `.local/docker/host-worker-hmac.key`. The secret gets a restricted ACL
+and is mounted read-only only into `ragflow-cpu`; its value is never placed in
+the env file. The application receives decrypted parser input through a
+`noexec,nosuid,nodev` tmpfs rather than a named volume. The initializer refuses
+to overwrite the env file or rotate the secret unless `-Force` is supplied. It
+leaves Jina and answer-model credentials blank; add those only to the ignored
+local file when they are available.
 
 If Docker Engine is provided by WSL2 and the wrapper is not on `PATH`, pass the
 wrapper explicitly:

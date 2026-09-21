@@ -1,0 +1,28 @@
+{
+  "worker_id": "windows-host-1",
+  "api_base_uri": "http://127.0.0.1:9380",
+  "key_id": "windows-host-1",
+  "shared_secret_file": "C:\\DocMindHost\\secrets\\worker-hmac.key",
+  "executable_path": "C:\\Program Files\\Vendor\\uEncryptor2.exe",
+  "executable_sha256": "<approved-64-character-sha256>",
+  "executable_signer_thumbprint": "<approved-certificate-thumbprint>",
+  "work_root": "C:\\DocMindHost\\plaintext-jobs",
+  "job_timeout_seconds": 120,
+  "claim_lease_seconds": 1800,
+  "lease_safety_seconds": 10,
+  "reaper_minimum_age_seconds": 300,
+  "require_bitlocker": true,
+  "backup_exclusion_acknowledged": true,
+  "sources": [
+    {
+      "source_id": "source-1",
+      "root": "D:\\RegisteredEncryptedRoot",
+      "documents": [
+        {
+          "document_id": "registered-document-1",
+          "relative_path": "folder\\document.enc"
+        }
+      ]
+    }
+  ]
+}

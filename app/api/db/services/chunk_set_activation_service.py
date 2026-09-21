@@ -178,13 +178,18 @@ class PeeweeAtomicChunkSetStore:
                 ).execute()
                 if retained != 1:
                     raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="prior active run missing")
+            activated_values = {
+                "lifecycle": request.target_lifecycle,
+                "activated_at": now,
+                "retained_until": None,
+                "retained_from_lifecycle": None,
+                "error_code": None,
+                "error_message": None,
+            }
+            if request.clear_raw_artifact_ref:
+                activated_values["raw_artifact_ref"] = None
             activated = ParserRun.update(
-                lifecycle=request.target_lifecycle,
-                activated_at=now,
-                retained_until=None,
-                retained_from_lifecycle=None,
-                error_code=None,
-                error_message=None,
+                **activated_values,
             ).where((ParserRun.id == run.id) & (ParserRun.lifecycle == "ACTIVATING")).execute()
             if activated != 1:
                 raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="run lifecycle changed")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import types
 from pathlib import Path
@@ -27,12 +28,45 @@ async def _unused_graphrag(*args, **kwargs):
 graphrag_index_stub.run_graphrag_for_kb = _unused_graphrag
 sys.modules["rag.graphrag.general.index"] = graphrag_index_stub
 
-from rag.svr.task_executor_refactor.chunk_service import ChunkService
+from rag.svr.task_executor_refactor.chunk_service import ChunkService, _sanitize_ephemeral_chunk
 from rag.svr.task_executor_refactor.embedding_service import EmbeddingService
 from rag.svr.task_executor_refactor.post_processor import PostProcessor
 from rag.svr.task_executor_refactor.task_handler import TaskHandler
 
 ROOT = Path(__file__).resolve().parents[5]
+
+
+def test_ephemeral_chunk_strips_workspace_and_object_references(tmp_path: Path) -> None:
+    workspace = SimpleNamespace(derived_root=tmp_path / "derived")
+    workspace.derived_root.mkdir()
+    chunk = {
+        "content_with_weight": "searchable text",
+        "image": b"private",
+        "img_id": "object-id",
+        "metadata": {
+            "parser_platform": {
+                "raw_artifact_ref": "artifact://runs/run/raw.json",
+                "media_ref": "minio://bucket/object",
+                "file_path": str(tmp_path / "derived" / "page.png"),
+                "contributing_provenance": [{"kind": "pdf", "page": 1}],
+                "source_locators": [{"page": 1}],
+            }
+        },
+    }
+
+    sanitized = _sanitize_ephemeral_chunk(chunk, workspace)
+    serialized = json.dumps(sanitized, ensure_ascii=False).casefold()
+
+    assert sanitized["content_with_weight"] == "searchable text"
+    assert sanitized["img_id"] == ""
+    assert "image" not in sanitized
+    assert sanitized["metadata"]["parser_platform"]["contributing_provenance"]
+    assert sanitized["metadata"]["parser_platform"]["source_locators"]
+    assert str(tmp_path).casefold() not in serialized
+    assert "artifact://" not in serialized
+    assert "minio://" not in serialized
+    assert "media_ref" not in serialized
+    assert "raw_artifact_ref" not in serialized
 
 
 @pytest.mark.asyncio

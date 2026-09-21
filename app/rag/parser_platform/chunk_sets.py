@@ -29,6 +29,7 @@ class ChunkSetFinalizationRequest(FrozenModel):
     provenance_complete: bool
     required_ocr_complete: bool
     embedding_complete: bool
+    clear_raw_artifact_ref: bool = False
     target_lifecycle: Literal["READY", "READY_WITH_WARNING"] = "READY"
 
     @model_validator(mode="after")

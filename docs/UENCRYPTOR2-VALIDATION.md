@@ -79,3 +79,90 @@ The three source roots remain read-only. The output root must be a separate,
 BitLocker-protected and backup-excluded volume with an ACL limited to the
 worker account. File deletion does not claim cryptographic erasure. No result
 is persisted as a MinIO original or permanent preview fallback.
+
+### Read-only executable evidence and remaining block
+
+The Windows machine currently has one candidate executable. A read-only
+inspection found version `1.0.0.2`, SHA-256
+`8f1506520127011b0c425121fa583bcc9c1533b60ca9cd28540d45b5c645d457`, and a
+valid Authenticode signature issued to `uPlexsoft Co.,Ltd`. The executable's
+physical path is intentionally not committed; it belongs in the host-only
+configuration. The worker requires both an approved executable hash and signer
+certificate thumbprint and checks them before and after every job.
+
+No known-valid encrypted/plaintext pair is available. The existing 77-byte
+synthetic file is not a valid encrypted sample. A deliberate negative probe
+returned exit code zero and produced output, but the known-plaintext hash check
+failed; cleanup succeeded. This confirms that exit code and output existence
+cannot establish decryption success. Successful unattended validation remains
+`VALIDATION_BLOCKED` until a non-sensitive known pair is supplied.
+
+### Host worker and localhost protocol
+
+`Start-DocMindUEncryptorHostWorker.ps1` is a reverse-poll worker. It connects
+from Windows to a Docker API port published only on loopback, so the worker
+does not listen on a host-wide socket. Set only one environment variable:
+
+```powershell
+$env:DOCMIND_HOST_WORKER_CONFIG = 'C:\DocMindHost\host-worker.json'
+powershell -NoProfile -File .\tools\windows\Start-DocMindUEncryptorHostWorker.ps1
+```
+
+Start from `tools/windows/docmind-host-worker.config.example.json`, but keep the
+real file and 32-byte HMAC secret outside Git with an ACL limited to the worker
+account and SYSTEM. The API uses `DOCMIND_HOST_WORKER_KEY_ID` and
+`DOCMIND_HOST_WORKER_HMAC_SECRET_FILE` for the corresponding key ID and secret
+file. The worker refuses a work volume without active BitLocker protection by
+default and requires an explicit acknowledgement that the work root is excluded
+from backup. The host config is the sole `source_id` to physical-root mapping. A claim
+may contain only:
+
+```text
+job_id, source_id, document_id, version_id, relative_path,
+ciphertext_sha256, fencing_token, lease_expires_at
+```
+
+Every HTTP message uses `X-DocMind-Key-Id`, `X-DocMind-Timestamp`,
+`X-DocMind-Nonce`, `X-DocMind-Content-SHA256`, and `X-DocMind-Signature`.
+The HMAC-SHA256 canonical form is:
+
+```text
+METHOD\nPATH_AND_QUERY\nTIMESTAMP\nNONCE\nCONTENT_SHA256
+```
+
+The reverse-poll endpoints are:
+
+- `POST /api/v1/cloud-sync/host-worker/observations`
+- `POST /api/v1/cloud-sync/host-worker/claim`
+- `PUT /api/v1/cloud-sync/host-worker/jobs/{job_id}/artifact`
+- `POST /api/v1/cloud-sync/host-worker/jobs/{job_id}/status`
+
+The worker rejects expired leases, stale fencing tokens, unregistered sources,
+absolute paths, traversal, reparse points, changed source fingerprints, changed
+executable fingerprints, unsigned responses, replayed response nonces, and ACKs
+that do not echo the leased job/version/fence. It holds the host-wide mutex for
+one CLI process, closes standard input, bounds runtime, and treats timeout as a
+possible interactive prompt. It uploads the plaintext as a job-scoped raw
+stream with an explicit `Content-Length` and deletes the host copy after a
+signed receiver ACK. The CLI timeout remains independent from the artifact
+request timeout: the worker requests a configurable lease (1,800 seconds by
+default) and waits for parse/index/cleanup ACK only within the remaining signed
+lease, minus a five-second safety margin. Failure, missing
+ACK, timeout, and stale lease enter the same `finally` cleanup. Cleanup failure
+is reported as `CLEANUP_FAILED`; the startup reaper deletes only directories
+whose saved lease has expired and whose minimum age has passed.
+
+The observer reads only explicitly registered `(source_id, document_id,
+relative_path)` entries from the host config. It never transmits a root or
+absolute path. It reports `(size, mtime_ns, ciphertext_sha256)` repeatedly; the
+Docker API requires the same fingerprint at least twice before a job becomes
+claimable. This is a stability candidate mechanism, not the phase-4 complete
+midnight reconciliation or deletion-authority scan.
+
+```powershell
+# Run continuously (run twice or longer to provide two stable observations)
+powershell -NoProfile -File .\tools\windows\Watch-DocMindEncryptedSources.ps1
+
+# Configuration/protocol/reaper self-test; does not run uEncryptor2
+powershell -NoProfile -File .\tools\windows\Test-DocMindUEncryptorHostWorker.ps1
+```

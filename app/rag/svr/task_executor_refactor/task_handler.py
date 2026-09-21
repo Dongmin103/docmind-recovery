@@ -583,9 +583,14 @@ class TaskHandler:
         start_ts = timer()
         chunk_service = ChunkService(ctx=ctx)
 
-        # Get storage binary
-        bucket, name = File2DocumentService.get_storage_address(doc_id=ctx.doc_id)
-        binary = await self._get_storage_binary(bucket, name)
+        # Cloud-source ingestion supplies a job-scoped plaintext workspace and
+        # must never fall back to the durable object store.
+        ephemeral_workspace = getattr(ctx, "_docmind_ephemeral_workspace", None)
+        if ephemeral_workspace is not None:
+            binary = await asyncio.to_thread(ephemeral_workspace.input_path.read_bytes)
+        else:
+            bucket, name = File2DocumentService.get_storage_address(doc_id=ctx.doc_id)
+            binary = await self._get_storage_binary(bucket, name)
         if binary is None:
             raise FileNotFoundError(f"Can not find file <{ctx.name}> from minio. Could you try it again.")
 
@@ -598,6 +603,34 @@ class TaskHandler:
 
         if not chunks:
             if ctx.parse_run_id:
+                if getattr(ctx, "_docmind_defer_activation", False):
+                    from api.db.services.parser_run_service import ParserRunService
+
+                    parsed_document = getattr(ctx, "_parser_platform_document", None)
+                    if parsed_document is None:
+                        raise RuntimeError("parser-platform document evidence is missing")
+                    ParserRunService.update_lifecycle(ctx.parse_run_id, "CHUNKING_STAGING")
+                    ParserRunService.mark_staging_validating(
+                        parse_run_id=ctx.parse_run_id,
+                        staged_chunk_count=0,
+                        staged_token_count=0,
+                        raw_artifact_ref=parsed_document.raw_artifact_ref,
+                        warnings=list(parsed_document.warnings),
+                    )
+                    ParserRunService.update_lifecycle(ctx.parse_run_id, "ACTIVATING")
+                    ctx._docmind_staged_result = {
+                        "parser_run_id": ctx.parse_run_id,
+                        "chunk_set_id": ctx.chunk_set_id,
+                        "expected_chunk_count": 0,
+                        "indexed_chunk_count": 0,
+                        "provenance_complete": True,
+                        "target_lifecycle": (
+                            "READY_WITH_WARNING"
+                            if parsed_document.status.value == "READY_WITH_WARNING"
+                            else "READY"
+                        ),
+                    }
+                    return
                 raise RuntimeError("parser platform produced no searchable chunks")
             ctx.progress_cb(msg=f"No chunk built from {ctx.name}")
             if not await self._run_document_post_chunking_if_last(
@@ -710,6 +743,26 @@ class TaskHandler:
                 warnings=list(parsed_document.warnings),
             )
             ParserRunService.update_lifecycle(ctx.parse_run_id, "ACTIVATING")
+            if getattr(ctx, "_docmind_defer_activation", False):
+                provenance_complete = all(
+                    chunk.get("metadata", {}).get("parser_platform", {}).get("contributing_provenance")
+                    for chunk in chunks
+                )
+                if chunks and not provenance_complete:
+                    raise RuntimeError("parser-platform provenance incomplete")
+                ctx._docmind_staged_result = {
+                    "parser_run_id": ctx.parse_run_id,
+                    "chunk_set_id": ctx.chunk_set_id,
+                    "expected_chunk_count": chunk_count,
+                    "indexed_chunk_count": chunk_count,
+                    "provenance_complete": provenance_complete,
+                    "target_lifecycle": (
+                        "READY_WITH_WARNING"
+                        if parsed_document.status.value == "READY_WITH_WARNING"
+                        else "READY"
+                    ),
+                }
+                return
             ok, document = DocumentService.get_by_id(task_doc_id)
             if not ok or document is None:
                 raise RuntimeError("document disappeared before chunk-set activation")

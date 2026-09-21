@@ -1783,6 +1783,106 @@ class DocmindRegistrationCurrent(DataBaseModel):
         indexes = ((('project_id', 'document_id'), True),)
 
 
+class DocmindSource(DataBaseModel):
+    """Logical source registry. Physical roots remain host-local configuration."""
+
+    id = CharField(max_length=64, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    display_name = CharField(max_length=128, null=False)
+    enabled = BooleanField(default=True, null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source"
+        indexes = ((('project_id', 'id'), True),)
+
+
+class DocmindSourceDocument(DataBaseModel):
+    """Stable cloud-source identity; never stores a host physical root."""
+
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, index=True)
+    document_id = CharField(max_length=32, null=False, unique=True, index=True)
+    folder_id = CharField(max_length=32, null=False, index=True)
+    relative_path = CharField(max_length=1024, null=False)
+    relative_path_hash = CharField(max_length=64, null=False, index=True)
+    active_source_version_id = CharField(max_length=32, null=True, index=True)
+    observed_ciphertext_sha256 = CharField(max_length=64, null=True, index=True)
+    observed_size = BigIntegerField(null=True)
+    observed_mtime_ns = BigIntegerField(null=True)
+    stable_observation_count = IntegerField(default=0, null=False)
+    generation = BigIntegerField(default=0, null=False)
+    deleted_at = DateTimeField(null=True, index=True)
+
+    class Meta:
+        db_table = "docmind_source_document"
+        indexes = (
+            (("project_id", "source_id", "relative_path_hash"), True),
+            (("project_id", "source_id", "document_id"), True),
+        )
+
+
+class DocmindSourceVersion(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    source_document_id = CharField(max_length=32, null=False, index=True)
+    document_id = CharField(max_length=32, null=False, index=True)
+    ciphertext_sha256 = CharField(max_length=64, null=False, index=True)
+    ciphertext_size = BigIntegerField(null=False)
+    source_mtime_ns = BigIntegerField(null=False)
+    content_sha256 = CharField(max_length=64, null=True, index=True)
+    parser_run_id = CharField(max_length=32, null=True, index=True)
+    chunk_set_id = CharField(max_length=32, null=True, index=True)
+    lifecycle_state = CharField(max_length=32, null=False, index=True)
+    activated_at = DateTimeField(null=True, index=True)
+
+    class Meta:
+        db_table = "docmind_source_version"
+        indexes = (
+            (("source_document_id", "ciphertext_sha256", "source_mtime_ns"), True),
+        )
+
+
+class DocmindIngestionJob(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, index=True)
+    source_document_id = CharField(max_length=32, null=False, index=True)
+    document_id = CharField(max_length=32, null=False, index=True)
+    version_id = CharField(max_length=32, null=False, unique=True, index=True)
+    idempotency_key = CharField(max_length=128, null=False, unique=True)
+    lifecycle_state = CharField(max_length=32, null=False, index=True)
+    attempt = IntegerField(default=0, null=False)
+    fencing_token = BigIntegerField(default=0, null=False)
+    lease_owner = CharField(max_length=128, null=True, index=True)
+    lease_expires_at = DateTimeField(null=True, index=True)
+    parser_input_token_hash = CharField(max_length=64, null=True)
+    plaintext_sha256 = CharField(max_length=64, null=True)
+    plaintext_size = BigIntegerField(null=True)
+    parser_run_id = CharField(max_length=32, null=True, index=True)
+    chunk_set_id = CharField(max_length=32, null=True, index=True)
+    host_cleanup_state = CharField(max_length=32, null=False, default="NOT_STARTED", index=True)
+    cleanup_state = CharField(max_length=32, null=False, default="NOT_STARTED", index=True)
+    error_code = CharField(max_length=64, null=True, index=True)
+    error_message = TextField(null=True)
+
+    class Meta:
+        db_table = "docmind_ingestion_job"
+        indexes = (
+            (("project_id", "source_id", "lifecycle_state"), False),
+            (("source_document_id", "fencing_token"), False),
+        )
+
+
+class DocmindWorkerRequestNonce(DataBaseModel):
+    id = CharField(max_length=64, primary_key=True)
+    key_id = CharField(max_length=128, null=False, index=True)
+    nonce_hash = CharField(max_length=64, null=False, unique=True)
+    expires_at = DateTimeField(null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_worker_request_nonce"
+
+
 class DocmindDocumentRoutingDigest(DataBaseModel):
     id = CharField(max_length=32, primary_key=True)
     project_id = CharField(max_length=32, null=False, index=True)
