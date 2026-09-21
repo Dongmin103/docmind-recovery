@@ -24,12 +24,14 @@ if ($gitCommand) {
     $issues += 'Git is not installed or not on PATH.'
 }
 if ($dockerCommand) {
+    try {
     $dockerVersion = (& $dockerCommand.Source --version 2>$null | Out-String).Trim()
     $composeVersion = (& $dockerCommand.Source compose version 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { $issues += 'Docker Compose is unavailable.' }
     $engineOS = (& $dockerCommand.Source info --format '{{.OSType}}' 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { $issues += 'Docker engine is not reachable.' }
     elseif ($engineOS -ne 'linux') { $issues += 'This source needs a Linux container engine.' }
+    } catch { $issues += 'Docker/Compose could not be queried. Check the local installation and engine status.' }
 } else {
     $issues += 'Docker is not installed or not on PATH.'
 }
