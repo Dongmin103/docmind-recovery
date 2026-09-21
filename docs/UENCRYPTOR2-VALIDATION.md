@@ -35,13 +35,17 @@ powershell -NoProfile -File .\tools\windows\Invoke-UEncryptor2ValidationProbe.ps
 ```
 
 Execution additionally requires the SHA-256 of the known plaintext. Output
-existence or a success-looking log line is never enough:
+existence or a success-looking log line is never enough. Copy the executable
+fingerprint from the dry-run into `ExpectedExecutableSha256`; the probe rejects
+a different build and verifies the executable and sample fingerprints again
+after execution:
 
 ```powershell
 powershell -NoProfile -File .\tools\windows\Invoke-UEncryptor2ValidationProbe.ps1 `
   -ExecutablePath 'C:\Program Files\Vendor\uEncryptor2.exe' `
   -EncryptedInputPath '.\.local\uEncryptor2\samples\known.enc' `
   -OutputFileName 'known.docx' `
+  -ExpectedExecutableSha256 '<dry-run executable SHA-256>' `
   -ExpectedPlaintextSha256 '<64 lowercase or uppercase hex characters>' `
   -TimeoutSeconds 120 `
   -Execute
@@ -55,6 +59,11 @@ after logout/login, and after reboot; include damaged and unencrypted inputs,
 timeout, cancellation, and cleanup-failure cases. If a prompt, OTP, GUI, or
 logged-in desktop is required, record `ACTION_REQUIRED` and do not automate UI
 input or bypass authentication.
+
+Timeout handling is bounded: the probe requests process-tree termination and
+waits at most five additional seconds before a second bounded kill attempt.
+Failure to terminate or delete the job directory is a failed probe, never a
+success. Sample/job/report paths may not traverse junctions or symbolic links.
 
 ## Production worker boundary
 

@@ -84,13 +84,19 @@ powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentSecurity.ps1 
   -RequireModelCredentials
 ```
 
-To additionally require BitLocker on the Windows volume holding the env file:
+To additionally require BitLocker on the Windows volumes holding both the env
+file and Docker/WSL data:
 
 ```powershell
 powershell -NoProfile -File .\tools\windows\Test-WindowsDevelopmentSecurity.ps1 `
   -DockerCommand C:\Users\uplex\bin\docker.cmd `
+  -DockerStoragePath 'C:\path\to\Docker\or\WSL\data\ext4.vhdx' `
   -RequireEncryptedHostStorage
 ```
+
+`DockerStoragePath` is mandatory for this assertion. Point it to the actual
+Docker Desktop or WSL data/VHD location; the check covers both that drive and
+the env-file drive and fails if either location cannot be verified.
 
 Do not paste secret values into commands, issue reports, screenshots, or test
 logs. Enter them directly into the ignored local env file. Docker must expose

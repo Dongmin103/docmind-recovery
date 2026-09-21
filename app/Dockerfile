@@ -286,6 +286,10 @@ COPY memory memory
 COPY bin bin
 COPY tools/scripts tools/scripts
 
+# Fail the image build if the retired catalog runtime re-enters any copied
+# product source, configuration, dependency manifest, or executable path.
+RUN python scripts/verify_removed_runtime.py --root /ragflow
+
 RUN mkdir -p /ragflow/parser-platform-artifacts /ragflow/private && \
     chmod 0770 /ragflow/parser-platform-artifacts /ragflow/private
 

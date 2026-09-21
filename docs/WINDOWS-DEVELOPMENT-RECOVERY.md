@@ -55,7 +55,7 @@ powershell -NoProfile -File tools/windows/Export-WindowsDevelopmentRecovery.ps1 
   -DockerHostPathStyle Wsl
 ```
 
-결과는 암호화 package와 공개 sidecar manifest 두 파일이다. sidecar에는 package checksum, 크기, backup ID, 서비스 이름만 있고 자격증명·파일 목록·원문은 없다. 작업 중 평문 archive는 `.local/recovery/work`에만 생성되고 성공·실패 모두 `finally`에서 삭제된다. 비정상 종료 시 다음 실행 전에 이 work 폴더의 잔여물을 민감정보로 간주해 확인 없이 열거나 백업하지 말고 삭제한다.
+결과는 암호화 package와 공개 sidecar manifest 두 파일이다. sidecar에는 package checksum, 크기, backup ID, 서비스 이름만 있고 자격증명·파일 목록·원문은 없다. 작업 중 평문 archive는 `.local/recovery/work`에만 생성되고 성공·실패 모두 `finally`에서 삭제를 검증한다. 삭제가 완료되지 않으면 작업 자체가 실패한다. 강제 프로세스 종료나 호스트 장애 뒤에는 다음 실행 전에 이 work 폴더의 잔여물을 민감정보로 간주해 확인 없이 열거나 백업하지 말고 삭제한다. recovery 경로에 junction/symbolic link가 있으면 도구는 실행을 거부한다.
 
 ## 3. package 검증
 

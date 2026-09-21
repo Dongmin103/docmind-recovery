@@ -13,7 +13,7 @@ python .\app\scripts\verify_removed_runtime.py
 python -m pytest .\app\test\unit_test\scripts\test_verify_removed_runtime.py -q
 ```
 
-검사는 Git에 기록된 파일과 ignore되지 않은 새 파일을 함께 읽는다. 제품 코드, 테스트, Docker/Compose, 셸·PowerShell 도구, 환경 예제와 dependency lockfile에서는 이전 통합 이름과 프로토콜·환경 설정을 허용하지 않는다. 큰 tokenizer 자원과 바이너리 확장자는 실행 설정이 아니므로 제외한다.
+검사는 Git에 기록된 파일과 ignore되지 않은 새 파일을 함께 읽고, 실제 운영 Compose 입력인 ignored `app/docker/.env.docmind.cpu`가 존재하면 값은 출력하지 않은 채 함께 검사한다. 제품 코드, 테스트, Docker/Compose, 셸·PowerShell 도구, 환경 예제와 dependency lockfile에서는 이전 통합 이름과 프로토콜·환경 설정을 허용하지 않는다. 실행 파일·디렉터리 이름과 UTF-8/UTF-16 실행 설정도 검사하며 해석할 수 없는 실행 텍스트는 실패 처리한다. 큰 tokenizer 자원과 바이너리 확장자는 실행 설정이 아니므로 제외한다.
 
 예외는 스크립트의 `ALLOWED_EVIDENCE_FILES`에 파일 단위로 고정한다. 현재 허용 대상은 복구 manifest/checkpoint/검증 파일, 복구 안내·도구와 읽기 전용 trim 조사 자료뿐이다. 디렉터리나 glob 예외는 추가하지 않는다. 새 예외가 필요하면 다음을 모두 기록한다.
 
@@ -37,7 +37,7 @@ python -m pytest .\app\test\unit_test\scripts\test_verify_removed_runtime.py -q
 4. 별도 프로젝트와 빈 개발 볼륨에서 인프라를 올린다. 운영 DB, 검색 색인, 객체 저장소와 원본 source를 mount하지 않는다.
 5. 새 애플리케이션 이미지를 빌드하고 이미지 ID·digest·Git revision을 기록한다. 캐시된 이전 이미지를 실행 결과로 오인하지 않는다.
 6. 합성 문서로 로그인, 등록, 파싱, BM25/dense C128 검색, 전체/폴더/문서 scope, Jina v3.5 Top5와 답변 인용을 검증한다.
-7. 컨테이너 내부의 실제 배포 소스에도 이전 통합 이름이 없는지 읽기 전용으로 검사한다. 이미지 레이아웃에 맞는 루트에서 텍스트 소스·설정·설치 패키지를 검사하고 결과에는 파일 본문이나 비밀값을 남기지 않는다.
+7. `app/Dockerfile`의 build gate가 최종 이미지에 복사된 제품 표면을 `python scripts/verify_removed_runtime.py --root /ragflow`로 검사한다. Git metadata가 없는 이미지에서는 안전한 filesystem fallback을 사용하고 `.venv`, `node_modules`, `.local` 등 비제품 자료는 제외한다. 별도 이미지 레이아웃은 같은 명령에 해당 root를 명시하며 결과에는 파일 본문이나 비밀값을 남기지 않는다.
 8. 재기동 후 동일 합성 문서와 활성 버전이 유지되는지 확인한다. 실패하면 개발 프로젝트만 내리고 볼륨을 보존해 원인을 조사한다.
 
 개발 완료 증거에는 명령, 시간, commit, 이미지 digest, Compose 프로젝트명, 테스트 결과와 실패 항목을 남긴다. `docker compose down -v`, 이미지 prune, 볼륨 삭제는 이 검증 절차에 포함하지 않는다.
@@ -82,7 +82,7 @@ python -m pytest .\app\test\unit_test\scripts\test_verify_removed_runtime.py -q
 
 ## 현재 단계의 완료와 미완료
 
-- 완료: 저장소 제품 경로의 정적 호출·의존성·환경변수·서비스 제거, 재발 방지 검사와 합성 단위 테스트, 개발·운영 cutover 절차 작성.
+- 완료: 저장소 제품 경로의 정적 호출·의존성·환경변수·서비스 제거, 운영 env·경로명·UTF-16을 포함한 재발 방지 검사, 이미지 build gate와 합성 단위 테스트, 개발·운영 cutover 절차 작성.
 - 미완료: 실제 운영 이미지 내부 검사, 운영 DB/index 복원 훈련, 승인된 canary와 성능 측정, 제품용 서비스 중지와 운영 배포.
 
 이 구분을 유지해 정적 검사 통과를 운영 전환 완료로 표시하지 않는다.

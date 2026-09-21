@@ -9,6 +9,26 @@ function Get-RecoveryRepositoryRoot {
     return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 }
 
+function Assert-RecoveryNoReparsePoints {
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$Purpose
+    )
+
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($current) {
+        if (Test-Path -LiteralPath $current) {
+            $item = Get-Item -LiteralPath $current -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$Purpose must not traverse a junction or symbolic link: $current"
+            }
+        }
+        $parent = Split-Path -Parent $current
+        if (-not $parent -or $parent -eq $current) { break }
+        $current = $parent
+    }
+}
+
 function Assert-RecoveryPath {
     param(
         [Parameter(Mandatory)] [string]$Path,
@@ -17,6 +37,7 @@ function Assert-RecoveryPath {
     )
 
     $resolved = [IO.Path]::GetFullPath($Path)
+    Assert-RecoveryNoReparsePoints -Path $resolved -Purpose $Purpose
     $forbidden = @(
         'D:\UPLEXSOFT\UDRIVE\USER\TEST1',
         'D:\UPLEXSOFT\UDRIVE\DEPT\_DEPT_2',
@@ -350,4 +371,27 @@ function New-RecoveryWorkingDirectory {
     $path = Join-Path $workRoot ([Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($path) | Out-Null
     return $path
+}
+
+function Remove-RecoveryWorkingDirectory {
+    param([Parameter(Mandatory)] [string]$Path)
+
+    $workRoot = [IO.Path]::GetFullPath((Join-Path (Get-RecoveryRepositoryRoot) '.local/recovery/work'))
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $prefix = $workRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a path outside the recovery work root: $resolved"
+    }
+    if (-not (Test-Path -LiteralPath $resolved)) { return }
+    Assert-RecoveryNoReparsePoints -Path $resolved -Purpose 'Recovery cleanup target'
+    $reparseChild = Get-ChildItem -LiteralPath $resolved -Force -Recurse -ErrorAction Stop |
+        Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 } |
+        Select-Object -First 1
+    if ($reparseChild) {
+        throw 'Refusing to clean a recovery work directory containing a junction or symbolic link.'
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $resolved) {
+        throw 'Recovery plaintext cleanup did not complete.'
+    }
 }

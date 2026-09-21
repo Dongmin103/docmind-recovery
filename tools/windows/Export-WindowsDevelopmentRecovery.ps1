@@ -47,27 +47,31 @@ if (-not $PSCmdlet.ShouldProcess($script:RecoveryProject, 'stop three developmen
 }
 
 & (Join-Path $PSScriptRoot 'Test-WindowsDevelopmentCompose.ps1') -DockerCommand $DockerCommand -EnvironmentPath $resolvedEnvironment
-$key = Read-RecoveryKey $resolvedKey
-[IO.Directory]::CreateDirectory((Split-Path -Parent $resolvedOutput)) | Out-Null
-$work = New-RecoveryWorkingDirectory
-$payloadRoot = Join-Path $work 'payload'
-[IO.Directory]::CreateDirectory($payloadRoot) | Out-Null
-$dockerPayloadRoot = Convert-RecoveryDockerBindPath -Path $payloadRoot -Style $DockerHostPathStyle
-$plainArchive = Join-Path $work 'payload.tar.gz'
 $services = @('mysql', 'es01', 'minio')
-$relativeEnvironment = $resolvedEnvironment.Substring(
-    $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar).Length + 1
-).Replace('\', '/')
-$composePrefix = @(
-    'compose', '-p', $script:RecoveryProject,
-    '--env-file', $relativeEnvironment,
-    '-f', 'app/docker/docker-compose-windows-dev.yml',
-    '--profile', 'infra'
-)
 $running = @()
-$stopped = $false
-Push-Location $repoRoot
+$stoppedServices = [Collections.Generic.List[string]]::new()
+$key = $null
+$work = $null
+$locationPushed = $false
 try {
+    $key = Read-RecoveryKey $resolvedKey
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $resolvedOutput)) | Out-Null
+    $work = New-RecoveryWorkingDirectory
+    $payloadRoot = Join-Path $work 'payload'
+    [IO.Directory]::CreateDirectory($payloadRoot) | Out-Null
+    $dockerPayloadRoot = Convert-RecoveryDockerBindPath -Path $payloadRoot -Style $DockerHostPathStyle
+    $plainArchive = Join-Path $work 'payload.tar.gz'
+    $relativeEnvironment = $resolvedEnvironment.Substring(
+        $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar).Length + 1
+    ).Replace('\', '/')
+    $composePrefix = @(
+        'compose', '-p', $script:RecoveryProject,
+        '--env-file', $relativeEnvironment,
+        '-f', 'app/docker/docker-compose-windows-dev.yml',
+        '--profile', 'infra'
+    )
+    Push-Location $repoRoot
+    $locationPushed = $true
     $runningText = Invoke-RecoveryDocker -DockerCommand $DockerCommand -Arguments ($composePrefix + @('ps', '--services', '--filter', 'status=running')) -Capture
     $running = @($runningText -split "`r?`n" | Where-Object { $_ })
     foreach ($service in $services) {
@@ -88,8 +92,10 @@ try {
     # Pull the archive helper before entering the cold-snapshot window.
     Invoke-RecoveryDocker -DockerCommand $DockerCommand -Arguments @('pull', $script:RecoveryHelperImage)
 
-    Invoke-RecoveryDocker -DockerCommand $DockerCommand -Arguments ($composePrefix + @('stop', '--timeout', '60') + $services)
-    $stopped = $true
+    foreach ($service in $services) {
+        Invoke-RecoveryDocker -DockerCommand $DockerCommand -Arguments ($composePrefix + @('stop', '--timeout', '60', $service))
+        $stoppedServices.Add($service)
+    }
 
     $volumeMap = [ordered]@{
         'mysql-data.tgz' = [ordered]@{ service = 'mysql'; volume = 'docmind-windows-dev_mysql_data' }
@@ -169,15 +175,25 @@ try {
         [Text.UTF8Encoding]::new($false)
     )
 } finally {
-    if ($stopped) {
-        $toStart = @($services | Where-Object { $running -contains $_ })
-        if ($toStart.Count -gt 0) {
-            Invoke-RecoveryDocker -DockerCommand $DockerCommand -Arguments ($composePrefix + @('up', '-d', '--no-recreate') + $toStart)
+    $finalizationErrors = [Collections.Generic.List[string]]::new()
+    if ($locationPushed) {
+        try {
+            if ($stoppedServices.Count -gt 0) {
+                Invoke-RecoveryDocker -DockerCommand $DockerCommand -Arguments ($composePrefix + @('up', '-d', '--no-recreate') + @($stoppedServices))
+            }
+        } catch {
+            $finalizationErrors.Add('one or more development services could not be restarted')
+        } finally {
+            Pop-Location
         }
     }
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-    [Array]::Clear($key, 0, $key.Length)
-    Pop-Location
+    if ($work) {
+        try { Remove-RecoveryWorkingDirectory -Path $work } catch { $finalizationErrors.Add('recovery plaintext cleanup failed') }
+    }
+    if ($null -ne $key) { [Array]::Clear($key, 0, $key.Length) }
+    if ($finalizationErrors.Count -gt 0) {
+        throw "Recovery export finalization failed: $($finalizationErrors -join '; ')."
+    }
 }
 
 Write-Output "Encrypted recovery package created: $resolvedOutput"

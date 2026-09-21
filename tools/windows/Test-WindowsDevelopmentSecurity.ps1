@@ -2,6 +2,7 @@
 param(
     [string]$DockerCommand = 'docker',
     [string]$EnvironmentPath,
+    [string]$DockerStoragePath,
     [switch]$RequireModelCredentials,
     [switch]$RequireEncryptedHostStorage
 )
@@ -116,16 +117,28 @@ if ($RequireEncryptedHostStorage) {
     if (-not $command) {
         throw 'Cannot verify host storage encryption because Get-BitLockerVolume is unavailable.'
     }
-    $driveRoot = [IO.Path]::GetPathRoot($resolvedEnvironment).TrimEnd('\')
-    try {
-        $bitLocker = Get-BitLockerVolume -MountPoint $driveRoot -ErrorAction Stop
-    } catch {
-        throw 'Cannot verify host storage encryption. Run this optional assertion from an elevated PowerShell session.'
+    if (-not $DockerStoragePath) {
+        throw 'DockerStoragePath is required so the Docker/WSL data location is checked, not only the env-file drive.'
     }
-    if ($bitLocker.ProtectionStatus -ne 'On' -or $bitLocker.VolumeStatus -ne 'FullyEncrypted') {
-        throw "Host storage encryption is not fully protected for $driveRoot."
+    $resolvedDockerStorage = [IO.Path]::GetFullPath($DockerStoragePath)
+    if (-not (Test-Path -LiteralPath $resolvedDockerStorage)) {
+        throw 'DockerStoragePath does not exist.'
     }
-    $storageMessage = "BitLocker protection is on and fully encrypted for $driveRoot."
+    $driveRoots = @(
+        [IO.Path]::GetPathRoot($resolvedEnvironment).TrimEnd('\'),
+        [IO.Path]::GetPathRoot($resolvedDockerStorage).TrimEnd('\')
+    ) | Sort-Object -Unique
+    foreach ($driveRoot in $driveRoots) {
+        try {
+            $bitLocker = Get-BitLockerVolume -MountPoint $driveRoot -ErrorAction Stop
+        } catch {
+            throw 'Cannot verify host storage encryption. Run this optional assertion from an elevated PowerShell session.'
+        }
+        if ($bitLocker.ProtectionStatus -ne 'On' -or $bitLocker.VolumeStatus -ne 'FullyEncrypted') {
+            throw "Host storage encryption is not fully protected for $driveRoot."
+        }
+    }
+    $storageMessage = "BitLocker protection is on and fully encrypted for the env-file and Docker-storage drive(s): $($driveRoots -join ', ')."
 }
 
 Write-Output 'Windows development security validation passed.'

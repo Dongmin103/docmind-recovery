@@ -24,6 +24,7 @@ ALLOWED_EVIDENCE_FILES = frozenset(
         "VERIFICATION.json",
         "checkpoint.json",
         "docs/HANDOFF-STATUS.md",
+        "docs/" + "OPEN" + "VIKING" + "-CUTOVER.md",
         "docs/RAGFLOW-TRIM-AUDIT.md",
         "restore_backup.py",
     }
@@ -121,12 +122,20 @@ class Finding:
 
 
 def _repository_files(root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        cwd=root,
-        check=True,
-        capture_output=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        excluded = {".git", ".local", ".venv", "__pycache__", "node_modules"}
+        return sorted(
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file() and not any(part in excluded for part in path.relative_to(root).parts)
+        )
     return sorted(path for path in result.stdout.decode("utf-8").split("\0") if path)
 
 
@@ -135,7 +144,7 @@ def _is_runtime_surface(relative_path: str) -> bool:
     lower_parts = tuple(part.lower() for part in path.parts)
     name = path.name.lower()
 
-    if path.suffix.lower() in RUNTIME_SUFFIXES and lower_parts[:1] in {("app",), ("tools",)}:
+    if path.suffix.lower() in RUNTIME_SUFFIXES:
         return True
     if lower_parts[:2] in {("app", "docker"), ("app", "scripts")}:
         return True
@@ -164,21 +173,34 @@ def scan_paths(root: Path, relative_paths: Iterable[str]) -> list[Finding]:
         if normalized in ALLOWED_EVIDENCE_FILES or normalized in IMMUTABLE_TEXT_ASSETS:
             continue
 
+        normalized_lower = normalized.lower()
+        for removed_name in _REMOVED_NAMES:
+            if removed_name in normalized_lower:
+                findings.append(Finding(normalized, 0, "retired integration in path"))
+                break
+
         path = root / Path(normalized)
         if not path.is_file() or path.suffix.lower() in BINARY_SUFFIXES:
             continue
+        runtime_surface = _is_runtime_surface(normalized)
         try:
-            text = path.read_text(encoding="utf-8")
+            raw = path.read_bytes()
+            if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+                text = raw.decode("utf-16")
+            else:
+                text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
+            if runtime_surface:
+                findings.append(Finding(normalized, 0, "unreadable runtime text"))
             continue
 
-        runtime_surface = _is_runtime_surface(normalized)
         markdown = path.suffix.lower() in {".md", ".mdx"}
         in_fenced_block = False
         for line_number, line in enumerate(text.splitlines(), start=1):
             stripped = line.lstrip()
             fence_boundary = markdown and stripped.startswith(("```", "~~~"))
-            patterns = RUNTIME_PATTERNS if runtime_surface or in_fenced_block else GLOBAL_PATTERNS
+            indented_code = markdown and line.startswith(("    ", "\t"))
+            patterns = RUNTIME_PATTERNS if runtime_surface or in_fenced_block or indented_code else GLOBAL_PATTERNS
             for rule, pattern in patterns:
                 if pattern.search(line):
                     findings.append(Finding(normalized, line_number, rule))
@@ -188,7 +210,13 @@ def scan_paths(root: Path, relative_paths: Iterable[str]) -> list[Finding]:
 
 
 def scan_repository(root: Path = REPOSITORY_ROOT) -> list[Finding]:
-    return scan_paths(root, _repository_files(root))
+    paths = _repository_files(root)
+    # This ignored file is the actual production Compose input when present.
+    # Read only key names/patterns and never echo its contents or values.
+    runtime_env = root / "app" / "docker" / ".env.docmind.cpu"
+    if runtime_env.is_file():
+        paths.append(runtime_env.relative_to(root).as_posix())
+    return scan_paths(root, paths)
 
 
 def _build_parser() -> argparse.ArgumentParser:

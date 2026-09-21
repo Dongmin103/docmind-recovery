@@ -64,3 +64,35 @@ def test_only_exact_recovery_evidence_path_is_allowed(tmp_path):
     assert MODULE.scan_paths(tmp_path, ["checkpoint.json"]) == []
     findings = MODULE.scan_paths(tmp_path, ["nested/checkpoint.json"])
     assert [(finding.path, finding.rule) for finding in findings] == [("nested/checkpoint.json", "retired URI scheme")]
+
+
+def test_retired_name_in_runtime_path_is_rejected(tmp_path):
+    retired_name = "open" + "viking"
+    runtime_path = tmp_path / "app" / "api" / f"{retired_name}_api.py"
+    runtime_path.parent.mkdir(parents=True)
+    runtime_path.write_text("VALUE = 1\n", encoding="utf-8")
+
+    findings = MODULE.scan_paths(tmp_path, [runtime_path.relative_to(tmp_path).as_posix()])
+
+    assert [(finding.line, finding.rule) for finding in findings] == [(0, "retired integration in path")]
+
+
+def test_utf16_runtime_configuration_is_scanned(tmp_path):
+    runtime_path = tmp_path / "deploy" / "service.ps1"
+    runtime_path.parent.mkdir(parents=True)
+    retired_name = "open" + "viking"
+    runtime_path.write_text(f"$service = '{retired_name}'\n", encoding="utf-16")
+
+    findings = MODULE.scan_paths(tmp_path, ["deploy/service.ps1"])
+
+    assert [(finding.line, finding.rule) for finding in findings] == [(1, "retired integration name")]
+
+
+def test_unreadable_runtime_text_fails_closed(tmp_path):
+    runtime_path = tmp_path / "deploy" / "service.ps1"
+    runtime_path.parent.mkdir(parents=True)
+    runtime_path.write_bytes(b"\x80\x81\x82")
+
+    findings = MODULE.scan_paths(tmp_path, ["deploy/service.ps1"])
+
+    assert [(finding.line, finding.rule) for finding in findings] == [(0, "unreadable runtime text")]

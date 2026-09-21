@@ -38,16 +38,18 @@ if (-not $PSCmdlet.ShouldProcess($resolvedInput, 'decrypt and restore into new d
     return
 }
 
-$key = Read-RecoveryKey $resolvedKey
-$work = New-RecoveryWorkingDirectory
-$plainArchive = Join-Path $work 'payload.tar.gz'
-$payloadRoot = Join-Path $work 'payload'
-[IO.Directory]::CreateDirectory($payloadRoot) | Out-Null
-$dockerPayloadRoot = Convert-RecoveryDockerBindPath -Path $payloadRoot -Style $DockerHostPathStyle
 $createdVolumes = [Collections.Generic.List[string]]::new()
 $backupId = $null
 $completed = $false
+$key = $null
+$work = $null
 try {
+    $key = Read-RecoveryKey $resolvedKey
+    $work = New-RecoveryWorkingDirectory
+    $plainArchive = Join-Path $work 'payload.tar.gz'
+    $payloadRoot = Join-Path $work 'payload'
+    [IO.Directory]::CreateDirectory($payloadRoot) | Out-Null
+    $dockerPayloadRoot = Convert-RecoveryDockerBindPath -Path $payloadRoot -Style $DockerHostPathStyle
     Unprotect-RecoveryFile -InputPath $resolvedInput -OutputPath $plainArchive -Key $key
     Assert-ArchiveEntriesSafe $plainArchive
     & tar -xzf $plainArchive -C $payloadRoot
@@ -114,8 +116,11 @@ try {
             }
         }
     }
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-    [Array]::Clear($key, 0, $key.Length)
+    try {
+        if ($work) { Remove-RecoveryWorkingDirectory -Path $work }
+    } finally {
+        if ($null -ne $key) { [Array]::Clear($key, 0, $key.Length) }
+    }
 }
 
 Write-Output "Recovery volumes created without replacing development data. Receipt: $resolvedReceipt"

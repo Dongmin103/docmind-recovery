@@ -78,7 +78,7 @@ if ($SelfTest) {
         Write-Output 'Recovery self-test passed: encryption round trip, HMAC tamper rejection, safe archive paths, and payload checksums.'
     } finally {
         if ($null -ne $key) { [Array]::Clear($key, 0, $key.Length) }
-        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-RecoveryWorkingDirectory -Path $work
     }
     return
 }
@@ -145,6 +145,9 @@ try {
     Write-Output "Recovery package verified: backup $($manifest.backupId)."
     Write-Output 'Verified authenticated encryption, outer and inner checksums, fixed project identity, and three expected payloads.'
 } finally {
-    [Array]::Clear($key, 0, $key.Length)
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+        Remove-RecoveryWorkingDirectory -Path $work
+    } finally {
+        [Array]::Clear($key, 0, $key.Length)
+    }
 }
