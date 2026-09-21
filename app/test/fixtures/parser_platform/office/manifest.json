@@ -1,0 +1,45 @@
+{
+  "schema": "parser-platform-office-fixtures-v1",
+  "files": {
+    "structured.docx": {
+      "sha256": "eae97a5c3b3294d12db63f4ed4868294a8023fd3578c1da9360355e44e66b560",
+      "bytes": 39489
+    },
+    "structured.xlsx": {
+      "sha256": "139e6365da5d6b6e3db97e8ed87161fa488ef93f8ac550a38eb26d6d8e6970f3",
+      "bytes": 9925
+    },
+    "structured.pptx": {
+      "sha256": "56176288183185181a87bf57fd507fe344cd80564ff9499a6742d68e0c36cb50",
+      "bytes": 37506
+    },
+    "screenshot.png": {
+      "sha256": "07f138748319fd6b9284fdb3e028c641a82302dcecccd3d6d680914ccd12acd1",
+      "bytes": 2761
+    },
+    "logo.png": {
+      "sha256": "3422cb68978e1e5c89e84530e8580268329a85a2c661bfa9e7a88ccc27ab3c84",
+      "bytes": 372
+    }
+  },
+  "required_anchors": {
+    "structured.docx": [
+      "품질관리 > 시험방법",
+      "native paragraph",
+      "2x2 table",
+      "screenshot media",
+      "logo media"
+    ],
+    "structured.xlsx": [
+      "Sheet-A",
+      "Sheet-B!B3:F5",
+      "merged cell",
+      "native chart data",
+      "screenshot media"
+    ],
+    "structured.pptx": [
+      "slide 1 title/body/table/chart",
+      "slide 2 image-only media"
+    ]
+  }
+}

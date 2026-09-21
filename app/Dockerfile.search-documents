@@ -1,0 +1,5 @@
+FROM docmind-ragflow:0.27.1-cpu-amd64-resilience-v18
+
+COPY api/db/services/docmind_document_path_service.py /ragflow/api/db/services/docmind_document_path_service.py
+COPY api/apps/services/docmind_api_service.py /ragflow/api/apps/services/docmind_api_service.py
+COPY web/dist/ /ragflow/web/dist/

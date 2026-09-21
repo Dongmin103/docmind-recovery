@@ -1,0 +1,39 @@
+.docmind {
+  [hidden] {
+    display: none !important;
+  }
+
+  .docmind-snippet {
+    max-height: 5.25rem;
+
+    p {
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+
+    em {
+      border-radius: 0.2rem;
+      background: rgb(var(--accent-primary) / 0.15);
+      color: rgb(var(--text-primary));
+      font-style: normal;
+      padding: 0 0.1rem;
+    }
+  }
+}
+
+.docmind-document-preview {
+  .Highlight__part {
+    background: rgb(var(--accent-primary) / 0.3) !important;
+    transition:
+      background-color 120ms ease,
+      outline-color 120ms ease;
+  }
+
+  .Highlight--scrolledTo .Highlight__part {
+    background: rgb(var(--accent-primary) / 0.65) !important;
+    outline: 2px solid rgb(var(--accent-primary) / 0.95);
+    outline-offset: 1px;
+  }
+}

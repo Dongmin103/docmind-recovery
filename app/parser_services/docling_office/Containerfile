@@ -1,0 +1,41 @@
+ARG UV_BASE_IMAGE=ghcr.io/astral-sh/uv:0.11.7@sha256:733b4042187702f832f7fdecb3aff14a61b288c4ca37af188bb5715c1caebaf8
+ARG PYTHON_BASE_IMAGE=python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64
+FROM ${UV_BASE_IMAGE} AS uv
+FROM ${PYTHON_BASE_IMAGE}
+
+USER root
+WORKDIR /opt/docling-office
+
+COPY --from=uv /uv /uvx /bin/
+COPY parser_services/docling_office/pyproject.toml parser_services/docling_office/uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project && \
+    groupadd --gid 10001 parser && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser
+
+COPY parser_services/docling_office/service.py /opt/docling-office/service.py
+
+ENV PATH="/opt/docling-office/.venv/bin:${PATH}" \
+    DOCLING_OFFICE_SERVICE_HOST=0.0.0.0 \
+    DOCLING_OFFICE_SERVICE_PORT=8092 \
+    DOCLING_OFFICE_MAX_SOURCE_BYTES=536870912 \
+    DOCLING_ALLOW_EXTERNAL_PLUGINS=0 \
+    HF_HUB_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    DO_NOT_TRACK=1
+
+EXPOSE 8092
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=12 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health', timeout=3).read()"]
+
+USER 10001:10001
+ENTRYPOINT ["python", "/opt/docling-office/service.py"]
+
+LABEL io.docmind.service="docling-office-parser" \
+      io.docmind.docling-version="2.115.0" \
+      io.docmind.ocr-enabled="false" \
+      io.docmind.concurrency="1" \
+      io.docmind.runtime-network-downloads="forbidden"

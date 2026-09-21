@@ -1,0 +1,201 @@
+services:
+  ragflow-cpu:
+    environment:
+      PARSER_PLATFORM_ENABLED: ${PARSER_PLATFORM_ENABLED:-0}
+      PARSER_PLATFORM_INTEGRATION_READY: ${PARSER_PLATFORM_INTEGRATION_READY:-0}
+      PARSER_PLATFORM_PDF_ENABLED: ${PARSER_PLATFORM_PDF_ENABLED:-1}
+      PARSER_PLATFORM_OFFICE_ENABLED: ${PARSER_PLATFORM_OFFICE_ENABLED:-1}
+      PARSER_PLATFORM_OFFICE_CANARY_DOCUMENT_IDS: ${PARSER_PLATFORM_OFFICE_CANARY_DOCUMENT_IDS:-}
+      PARSER_PLATFORM_POLICY_VERSION: ${PARSER_PLATFORM_POLICY_VERSION:-parser-platform-policy-v1}
+      PARSER_PLATFORM_SURYA_URL: http://surya-parser:8091
+      PARSER_PLATFORM_SURYA_REQUEST_BATCH_PAGES: ${PARSER_PLATFORM_SURYA_REQUEST_BATCH_PAGES:-1}
+      PARSER_PLATFORM_SURYA_CHUNKER_VERSION: "2.95.0"
+      PARSER_PLATFORM_SURYA_CHUNK_MAX_TOKENS: "512"
+      PARSER_PLATFORM_SURYA_CHUNK_TOKENIZER_REVISION: "e8f8c211226b894fcb81acc59f3b34ba3efd5f42"
+      PARSER_PLATFORM_SURYA_CHUNK_TOKENIZER_PATH: /ragflow/parser-platform-tokenizers/multilingual-minilm
+      PARSER_PLATFORM_DOCLING_OFFICE_URL: http://docling-office-parser:8092
+      PARSER_PLATFORM_RHWP_URL: http://rhwp-parser:8093
+      PARSER_PLATFORM_HWP_ENABLED: ${PARSER_PLATFORM_HWP_ENABLED:-0}
+      PARSER_PLATFORM_HWP_INTEGRATION_READY: ${PARSER_PLATFORM_HWP_INTEGRATION_READY:-0}
+      PARSER_PLATFORM_HWP_REGISTRATION_MODE: ${PARSER_PLATFORM_HWP_REGISTRATION_MODE:-off}
+      PARSER_PLATFORM_HWP_CANARY_FORMAT: ${PARSER_PLATFORM_HWP_CANARY_FORMAT:-}
+      PARSER_PLATFORM_HWP_CANARY_DOCUMENT_IDS: ${PARSER_PLATFORM_HWP_CANARY_DOCUMENT_IDS:-}
+      PARSER_PLATFORM_HWP_DEADLINE_SECONDS: ${PARSER_PLATFORM_HWP_DEADLINE_SECONDS:-900}
+      PARSER_PLATFORM_HWP_PARSER_VERSION: "0.8.1"
+      PARSER_PLATFORM_HWP_CORE_REVISION: "10f5c51e65e0e8e9260cf1498972db14ea04c29e"
+      PARSER_PLATFORM_HWP_BACKEND: "rhwp-core-0.7.17"
+      PARSER_PLATFORM_HWP_CHUNKER_VERSION: "2.92.0+docmind-compact-rowspan-v1"
+      PARSER_PLATFORM_HWP_CHUNK_MAX_TOKENS: "512"
+      PARSER_PLATFORM_HWP_CHUNK_TOKENIZER_REVISION: "e8f8c211226b894fcb81acc59f3b34ba3efd5f42"
+      PARSER_PLATFORM_APP_IMAGE_FINGERPRINT: ${PARSER_PLATFORM_APP_IMAGE_FINGERPRINT:-}
+      PARSER_PLATFORM_RHWP_IMAGE_FINGERPRINT: ${PARSER_PLATFORM_RHWP_IMAGE_FINGERPRINT:-}
+      PARSER_PLATFORM_HWP_PROMOTION_ARTIFACT: ${PARSER_PLATFORM_HWP_PROMOTION_ARTIFACT:-/ragflow/parser-platform-artifacts/rhwp-canary/promotion-approval.json}
+      PARSER_PLATFORM_HWP_PROMOTION_SHA256: ${PARSER_PLATFORM_HWP_PROMOTION_SHA256:-}
+      PARSER_PLATFORM_ARTIFACT_ROOT: /ragflow/parser-platform-artifacts
+      PARSER_PLATFORM_SVG_RENDERER: /usr/bin/rsvg-convert
+      PARSER_PLATFORM_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      PARSER_PLATFORM_MAX_PDF_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      PARSER_PLATFORM_PDF_DEADLINE_SECONDS: ${PARSER_PLATFORM_PDF_DEADLINE_SECONDS:-7200}
+      PARSER_PLATFORM_PDF_HEARTBEAT_TIMEOUT_SECONDS: ${PARSER_PLATFORM_PDF_HEARTBEAT_TIMEOUT_SECONDS:-1800}
+      PARSER_PLATFORM_PDF_ROUTING_ENABLED: ${PARSER_PLATFORM_PDF_ROUTING_ENABLED:-0}
+      PARSER_PLATFORM_PDF_ROUTING_CANARY_DOCUMENT_IDS: ${PARSER_PLATFORM_PDF_ROUTING_CANARY_DOCUMENT_IDS:-}
+      PARSER_PLATFORM_PDF_ROUTING_MIN_TEXT_CHARS_PER_PAGE: ${PARSER_PLATFORM_PDF_ROUTING_MIN_TEXT_CHARS_PER_PAGE:-120}
+      PARSER_PLATFORM_PDF_ROUTING_MAX_IMAGE_AREA_PERCENT: ${PARSER_PLATFORM_PDF_ROUTING_MAX_IMAGE_AREA_PERCENT:-60}
+      PARSER_PLATFORM_PDF_ROUTING_MIN_TEXT_FIDELITY_PERCENT: ${PARSER_PLATFORM_PDF_ROUTING_MIN_TEXT_FIDELITY_PERCENT:-97}
+      PARSER_PLATFORM_PDF_ROUTING_SURYA_FALLBACK_MAX_PAGES: ${PARSER_PLATFORM_PDF_ROUTING_SURYA_FALLBACK_MAX_PAGES:-20}
+      PARSER_PLATFORM_SURYA_CHECKPOINT_WAVE_PAGES: ${PARSER_PLATFORM_SURYA_CHECKPOINT_WAVE_PAGES:-5}
+      PARSER_PLATFORM_SURYA_PAGE_RETRY_COUNT: ${PARSER_PLATFORM_SURYA_PAGE_RETRY_COUNT:-1}
+      PARSER_PLATFORM_DOCLING_PDF_URL: http://docling-pdf-parser:8094
+      PARSER_PLATFORM_DOCLING_PDF_DEADLINE_SECONDS: ${PARSER_PLATFORM_DOCLING_PDF_DEADLINE_SECONDS:-900}
+      PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS: ${PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS:-900}
+      TE_RUN_MODE: ${TE_RUN_MODE:-0}
+    volumes:
+      - parser_platform_artifacts:/ragflow/parser-platform-artifacts
+    networks:
+      - ragflow
+      - parser_internal
+
+  surya-parser-cpu:
+    profiles: [parser-platform-cpu]
+    platform: linux/amd64
+    image: ${SURYA_CPU_IMAGE:-docmind-surya-parser:cpu-0.22.1-amd64}
+    build:
+      context: ..
+      dockerfile: parser_services/surya/Containerfile.cpu-amd64
+    environment:
+      SURYA_INFERENCE_BACKEND: llamacpp
+      SURYA_INFERENCE_PARALLEL: "1"
+      SURYA_INFERENCE_TIMEOUT_SECONDS: ${SURYA_INFERENCE_TIMEOUT_SECONDS:-570}
+      SURYA_SERVICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      SURYA_SERVICE_MAX_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      SURYA_SERVICE_MAX_MEDIA_BYTES: ${PARSER_PLATFORM_MAX_MEDIA_BYTES:-33554432}
+      SURYA_SERVICE_PAGE_TIMEOUT_SECONDS: ${SURYA_SERVICE_PAGE_TIMEOUT_SECONDS:-600}
+      SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS: ${SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS:-1800}
+    networks:
+      parser_internal:
+        aliases: [surya-parser]
+    volumes:
+      - ${SURYA_MODEL_DIR:-../models/surya}:/models:ro
+      - ${SURYA_CACHE_DIR:?Set SURYA_CACHE_DIR to a writable persistent host directory}:/home/parser/.cache
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+      - /opt/surya/runtime:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SURYA_CPU_MEMORY_LIMIT:-8g}
+    cpus: ${SURYA_CPU_CPUS:-8}
+    pids_limit: 128
+    restart: unless-stopped
+
+  surya-parser-gpu:
+    profiles: [parser-platform-gpu]
+    platform: linux/amd64
+    image: ${SURYA_GPU_IMAGE:-docmind-surya-parser:gpu-runtime-not-configured}
+    environment:
+      SURYA_INFERENCE_BACKEND: vllm
+      SURYA_INFERENCE_PARALLEL: "1"
+      SURYA_SERVICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      SURYA_SERVICE_MAX_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      SURYA_SERVICE_MAX_MEDIA_BYTES: ${PARSER_PLATFORM_MAX_MEDIA_BYTES:-33554432}
+    networks:
+      parser_internal:
+        aliases: [surya-parser]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=2g
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    shm_size: ${SURYA_GPU_SHM_SIZE:-4g}
+    mem_limit: ${SURYA_GPU_MEMORY_LIMIT:-16g}
+    pids_limit: 256
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  docling-office-parser:
+    profiles: [parser-platform-office]
+    platform: linux/amd64
+    image: ${DOCLING_OFFICE_IMAGE:-docmind-docling-office:2.115.0-amd64}
+    build:
+      context: ..
+      dockerfile: parser_services/docling_office/Containerfile
+      args:
+        UV_BASE_IMAGE: ${DOCLING_UV_BASE_IMAGE:-ghcr.io/astral-sh/uv:0.11.7@sha256:733b4042187702f832f7fdecb3aff14a61b288c4ca37af188bb5715c1caebaf8}
+        PYTHON_BASE_IMAGE: ${DOCLING_PYTHON_BASE_IMAGE:-python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64}
+    environment:
+      DOCLING_OFFICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+    networks:
+      parser_internal:
+        aliases: [docling-office-parser]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${DOCLING_OFFICE_MEMORY_LIMIT:-2g}
+    cpus: ${DOCLING_OFFICE_CPUS:-2}
+    pids_limit: 128
+    restart: unless-stopped
+
+  docling-pdf-parser:
+    profiles: [parser-platform-pdf-routing]
+    platform: linux/amd64
+    image: ${DOCLING_PDF_IMAGE:-docmind-docling-pdf:2.115.0-native-amd64}
+    build:
+      context: ..
+      dockerfile: parser_services/docling_pdf/Containerfile
+      args:
+        UV_BASE_IMAGE: ${DOCLING_UV_BASE_IMAGE:-ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a}
+        PYTHON_BASE_IMAGE: ${DOCLING_PYTHON_BASE_IMAGE:-python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64}
+    environment:
+      DOCLING_PDF_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      DOCLING_PDF_MAX_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      DOCLING_PDF_PARSER_THREADS: ${DOCLING_PDF_CPUS:-4}
+    networks:
+      parser_internal:
+        aliases: [docling-pdf-parser]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${DOCLING_PDF_MEMORY_LIMIT:-2g}
+    cpus: ${DOCLING_PDF_CPUS:-4}
+    pids_limit: 128
+    restart: unless-stopped
+
+  rhwp-parser:
+    profiles: [parser-platform-hwp]
+    platform: linux/amd64
+    image: ${RHWP_IMAGE:-docmind-rhwp-parser:0.8.1-compact-rowspan-amd64-v1}
+    build:
+      context: ..
+      dockerfile: parser_services/rhwp/Containerfile
+    environment:
+      RHWP_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      RHWP_CHUNK_MAX_TOKENS: ${PARSER_PLATFORM_HWP_CHUNK_MAX_TOKENS:-512}
+    networks:
+      parser_internal:
+        aliases: [rhwp-parser]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${RHWP_MEMORY_LIMIT:-2g}
+    cpus: ${RHWP_CPUS:-2}
+    pids_limit: 64
+    restart: unless-stopped
+
+networks:
+  parser_internal:
+    internal: true
+
+volumes:
+  parser_platform_artifacts:

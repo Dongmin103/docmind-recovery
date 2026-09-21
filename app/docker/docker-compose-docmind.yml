@@ -1,0 +1,121 @@
+services:
+  mysql:
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-2g}
+
+  minio:
+    mem_limit: ${MINIO_MEMORY_LIMIT:-2g}
+
+  redis:
+    mem_limit: ${REDIS_MEMORY_LIMIT:-512m}
+
+  ragflow-cpu:
+    image: ${RAGFLOW_IMAGE:-docmind-ragflow:0.27.1-cpu-amd64}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        RAGFLOW_VERSION: v0.27.1-docmind-production-routing-v3-hybrid-redacted-20260912
+    depends_on:
+      openviking:
+        condition: service_healthy
+      surya-parser-cpu:
+        condition: service_healthy
+        required: false
+      bge-m3-cpu:
+        condition: service_healthy
+        required: true
+    env_file:
+      - path: .env.docmind.cpu
+        required: true
+    environment:
+      DOCMIND_OPENVIKING_URL: http://openviking:1933
+      DOCMIND_OPENVIKING_API_KEY: ${OPENVIKING_DATA_API_KEY:?set OPENVIKING_DATA_API_KEY}
+      DOCMIND_OPENVIKING_CAPABILITY_ARTIFACT: /ragflow/private/docmind-openviking-capability.json
+      DOCMIND_RERANK_ID: ${DOCMIND_RERANK_ID:-jina-reranker-v3@jina@Jina}
+      DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-qwen3.6-plus@QwenCloud@Tongyi-Qianwen}
+      DOCMIND_CATALOG_SHADOW_ENABLED: "0"
+      DOCMIND_CATALOG_DB_PRIMARY_ENABLED: "1"
+      DOCMIND_SHARED_WORKSPACE_ENABLED: "1"
+      DOCMIND_SHARED_USER_EMAIL: ${DOCMIND_SHARED_USER_EMAIL:-docmind@internal.invalid}
+    volumes:
+      - ${DOCMIND_PRIVATE_DIR:-../runtime/private}:/ragflow/private:ro
+      - parser_platform_artifacts:/ragflow/parser-platform-artifacts
+    networks:
+      - ragflow
+      - parser_internal
+    mem_limit: ${RAGFLOW_MEMORY_LIMIT:-6g}
+
+  bge-m3-cpu:
+    profiles:
+      - bge-cpu
+    platform: linux/amd64
+    image: ${BGE_M3_IMAGE:-ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07}
+    container_name: docmind-bge-m3
+    command:
+      - --model-id
+      - BAAI/bge-m3
+      - --revision
+      - ${BGE_M3_REVISION:-5617a9f61b028005a4858fdac845db406aefb181}
+      - --tokenization-workers
+      - "1"
+      - --max-concurrent-requests
+      - "16"
+      - --max-batch-tokens
+      - "2048"
+      - --max-client-batch-size
+      - "32"
+      - --auto-truncate
+    environment:
+      MALLOC_ARENA_MAX: "2"
+      OMP_NUM_THREADS: "4"
+    ports:
+      - 127.0.0.1:${BGE_M3_PORT:-6380}:80
+    volumes:
+      - ${BGE_M3_MODEL_DIR:-/home/uplexsoft/docmind-data/embedding-models/tei-bge-m3}:/data
+    networks:
+      - ragflow
+    mem_limit: ${BGE_M3_MEMORY_LIMIT:-6g}
+    memswap_limit: ${BGE_M3_MEMORY_SWAP_LIMIT:-8g}
+    cpus: ${BGE_M3_CPUS:-8}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  openviking:
+    platform: linux/amd64
+    image: ghcr.io/volcengine/openviking@sha256:7616dce87069dc94fb1a197569c36f7ec4d14aed85a169ba8cb7b99461250617
+    container_name: docmind-openviking
+    command: ["--without-bot"]
+    env_file:
+      - path: .env.docmind.cpu
+        required: true
+    depends_on:
+      bge-m3-cpu:
+        condition: service_healthy
+    environment:
+      OPENVIKING_ROOT_API_KEY: ${OPENVIKING_ROOT_API_KEY:?set OPENVIKING_ROOT_API_KEY}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?set DASHSCOPE_API_KEY}
+      OPENVIKING_CONFIG_FILE: /app/.openviking/ov.conf
+      OPENVIKING_CONF_CONTENT: >-
+        {"storage":{"workspace":"/app/.openviking/workspace","vectordb":{"name":"context","backend":"local"},"agfs":{"backend":"local"}},"server":{"auth_mode":"api_key","root_api_key":"${OPENVIKING_ROOT_API_KEY}"},"embedding":{"dense":{"provider":"openai","api_key":"local-no-key-required","api_base":"http://docmind-bge-m3:80/v1","model":"BAAI/bge-m3","dimension":1024},"max_concurrent":2,"max_retries":1,"text_source":"summary_only"},"vlm":{"provider":"openai","api_base":"https://dashscope-intl.aliyuncs.com/compatible-mode/v1","api_key":"${DASHSCOPE_API_KEY}","model":"${OPENVIKING_VLM_MODEL:-qwen3.6-plus}","max_concurrent":1,"max_retries":1}}
+    ports:
+      - 127.0.0.1:${OPENVIKING_PORT:-1933}:1933
+    volumes:
+      - ${OPENVIKING_DATA_DIR:-/home/uplexsoft/docmind-data/openviking-bge}:/app/.openviking
+    networks:
+      - ragflow
+    mem_limit: ${OPENVIKING_MEMORY_LIMIT:-3g}
+    cpus: ${OPENVIKING_CPUS:-2}
+    restart: unless-stopped
+
+volumes:
+  openviking_data:
+  parser_platform_artifacts:
+
+networks:
+  parser_internal:
+    internal: true

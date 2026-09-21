@@ -1,3 +1,15 @@
+# Windows 개발 인수인계
+
+**새 개발은 [START_HERE.md](START_HERE.md)에서 시작하세요.** 소스는 app/, 최신 요구사항은 PRD.md에 있습니다. Windows 서버에서 이 브랜치만 clone하면 개발을 시작할 수 있습니다. 기존 PDF·운영 청크·암호화 복구 파일은 필요하지 않습니다.
+
+```powershell
+git clone --branch windows-development-handoff --single-branch https://github.com/Dongmin103/docmind-recovery.git
+```
+
+아래는 변경 전 복구 기록이며, 새 개발용 데이터 준비 절차가 아닙니다.
+
+---
+
 # DocMind recovery
 
 OpenViking 검색 구조 변경 전의 코드 복구 지점을 보관합니다.

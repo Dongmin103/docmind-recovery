@@ -1,0 +1,90 @@
+{
+  "schema_version": "parser-platform-v1",
+  "cases": [
+    {
+      "id": "PDF-SCHEMA-1",
+      "source_format": "pdf",
+      "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "blocks": [
+        {
+          "key": "heading",
+          "source_item_id": "pdf:p1:b0",
+          "block_type": "heading",
+          "reading_order": 0,
+          "text": "Background",
+          "children_keys": ["body"],
+          "provenance": [
+            {"kind": "pdf", "page": 1, "bbox": [10, 20, 110, 45], "rendered_size": [1200, 1600]}
+          ]
+        },
+        {
+          "key": "body",
+          "source_item_id": "pdf:p2:b0",
+          "block_type": "text",
+          "reading_order": 1,
+          "text": "Cross-page body",
+          "parent_key": "heading",
+          "provenance": [
+            {"kind": "pdf", "page": 2, "bbox": [10, 50, 500, 200], "rendered_size": [1200, 1600]}
+          ]
+        }
+      ],
+      "required_anchors": ["page_1_heading", "page_2_body", "bidirectional_parent_relation"]
+    },
+    {
+      "id": "DOCX-SCHEMA-1",
+      "source_format": "docx",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "blocks": [
+        {
+          "key": "paragraph",
+          "source_item_id": "docx:item:4",
+          "block_type": "text",
+          "reading_order": 0,
+          "text": "시험방법 본문",
+          "provenance": [
+            {"kind": "docx", "heading_path": ["품질관리", "시험방법"], "item_locator": "body/item[4]"}
+          ]
+        }
+      ],
+      "required_anchors": ["heading_path", "structural_item_locator"]
+    },
+    {
+      "id": "XLSX-SCHEMA-1",
+      "source_format": "xlsx",
+      "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "blocks": [
+        {
+          "key": "table",
+          "source_item_id": "xlsx:sheet-b:region-1",
+          "block_type": "table",
+          "reading_order": 0,
+          "text": "시험 결과",
+          "table_html": "<table><tr><th>시험</th></tr></table>",
+          "provenance": [
+            {"kind": "xlsx", "sheet": "Sheet-B", "cell_range": "B3:F12", "region_locator": "region[1]"}
+          ]
+        }
+      ],
+      "required_anchors": ["sheet_name", "cell_range", "table_html"]
+    },
+    {
+      "id": "PPTX-SCHEMA-1",
+      "source_format": "pptx",
+      "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "blocks": [
+        {
+          "key": "figure",
+          "source_item_id": "pptx:slide-2:shape-7",
+          "block_type": "figure",
+          "reading_order": 0,
+          "text": "공정 흐름도",
+          "provenance": [
+            {"kind": "pptx", "slide": 2, "shape_locator": "shape[7]", "bbox": [20, 30, 600, 420]}
+          ]
+        }
+      ],
+      "required_anchors": ["slide_number", "shape_locator", "shape_bbox"]
+    }
+  ]
+}

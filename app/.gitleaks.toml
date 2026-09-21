@@ -1,0 +1,25 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Pinned public tokenizer source revision"
+regexes = [
+  '''e8f8c211226b894fcb81acc59f3b34ba3efd5f42''',
+]
+
+[[allowlists]]
+description = "Unmodified upstream RAGFlow test and example credentials"
+paths = [
+  '''(^|/)common/crypto_utils\.py$''',
+  '''(^|/)conf/private\.pem$''',
+  '''(^|/)example/http/dataset_example\.sh$''',
+  '''(^|/)internal/agent/sandbox/ssh_test\.go$''',
+  '''(^|/)internal/tokenizer/bpe_loader\.go$''',
+  '''(^|/)sdk/python/test/conftest\.py$''',
+  '''(^|/)test/testcases/configs\.py$''',
+  '''(^|/)test/testcases/test_http_api/test_dataset_management/test_update_dataset\.py$''',
+  '''(^|/)test/testcases/test_http_api/test_session_management/test_session_sdk_routes_unit\.py$''',
+  '''(^|/)test/testcases/test_web_api/test_memory_app/test_rm_memory\.py$''',
+  '''(^|/)test/unit_test/rag/llm/test_model_meta_base_get_api_key\.py$''',
+  '''(^|/)test/unit_test/rag/llm/test_provider_credentials_three_sites\.py$''',
+]

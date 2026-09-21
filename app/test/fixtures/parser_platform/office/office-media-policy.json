@@ -1,0 +1,21 @@
+{
+  "policy_version": "office-media-policy-v1",
+  "calibration": {
+    "selected_screenshot": {
+      "width": 640,
+      "height": 320,
+      "pixels": 204800
+    },
+    "excluded_logo": {
+      "width": 48,
+      "height": 48,
+      "pixels": 2304
+    }
+  },
+  "cutoffs": {
+    "minimum_ocr_pixels": 120000,
+    "minimum_ocr_dimension": 200,
+    "maximum_logo_pixels": 16384,
+    "repeated_asset_threshold": 2
+  }
+}

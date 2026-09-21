@@ -1,0 +1,872 @@
+{
+  "schema_name": "DoclingDocument",
+  "version": "1.10.0",
+  "name": "structured",
+  "origin": {
+    "mimetype": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "binary_hash": 10282401216548401395,
+    "filename": "structured.xlsx"
+  },
+  "furniture": {
+    "self_ref": "#/furniture",
+    "children": [],
+    "content_layer": "furniture",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "body": {
+    "self_ref": "#/body",
+    "children": [
+      {
+        "$ref": "#/groups/0"
+      },
+      {
+        "$ref": "#/groups/1"
+      }
+    ],
+    "content_layer": "body",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "groups": [
+    {
+      "self_ref": "#/groups/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/tables/0"
+        },
+        {
+          "$ref": "#/pictures/0"
+        }
+      ],
+      "content_layer": "body",
+      "name": "Sheet-A",
+      "label": "sheet"
+    },
+    {
+      "self_ref": "#/groups/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/pictures/1"
+        },
+        {
+          "$ref": "#/texts/0"
+        },
+        {
+          "$ref": "#/tables/1"
+        }
+      ],
+      "content_layer": "body",
+      "name": "Sheet-B",
+      "label": "sheet"
+    }
+  ],
+  "texts": [
+    {
+      "self_ref": "#/texts/0",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 1.0,
+            "t": 2.0,
+            "r": 6.0,
+            "b": 3.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "orig": "병합된 시험 결과 영역",
+      "text": "병합된 시험 결과 영역"
+    }
+  ],
+  "pictures": [
+    {
+      "self_ref": "#/pictures/0",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "meta": {
+        "classification": {
+          "predictions": [
+            {
+              "class_name": "bar_chart"
+            }
+          ]
+        },
+        "tabular_chart": {
+          "chart_data": {
+            "table_cells": [
+              {
+                "row_span": 1,
+                "col_span": 1,
+                "start_row_offset_idx": 0,
+                "end_row_offset_idx": 1,
+                "start_col_offset_idx": 0,
+                "end_col_offset_idx": 1,
+                "text": "",
+                "column_header": true,
+                "row_header": false,
+                "row_section": false,
+                "fillable": false
+              },
+              {
+                "row_span": 1,
+                "col_span": 1,
+                "start_row_offset_idx": 0,
+                "end_row_offset_idx": 1,
+                "start_col_offset_idx": 1,
+                "end_col_offset_idx": 2,
+                "text": "결과",
+                "column_header": true,
+                "row_header": false,
+                "row_section": false,
+                "fillable": false
+              },
+              {
+                "row_span": 1,
+                "col_span": 1,
+                "start_row_offset_idx": 1,
+                "end_row_offset_idx": 2,
+                "start_col_offset_idx": 0,
+                "end_col_offset_idx": 1,
+                "text": "함량",
+                "column_header": false,
+                "row_header": true,
+                "row_section": false,
+                "fillable": false
+              },
+              {
+                "row_span": 1,
+                "col_span": 1,
+                "start_row_offset_idx": 1,
+                "end_row_offset_idx": 2,
+                "start_col_offset_idx": 1,
+                "end_col_offset_idx": 2,
+                "text": "99.5",
+                "column_header": false,
+                "row_header": false,
+                "row_section": false,
+                "fillable": false
+              },
+              {
+                "row_span": 1,
+                "col_span": 1,
+                "start_row_offset_idx": 2,
+                "end_row_offset_idx": 3,
+                "start_col_offset_idx": 0,
+                "end_col_offset_idx": 1,
+                "text": "순도",
+                "column_header": false,
+                "row_header": true,
+                "row_section": false,
+                "fillable": false
+              },
+              {
+                "row_span": 1,
+                "col_span": 1,
+                "start_row_offset_idx": 2,
+                "end_row_offset_idx": 3,
+                "start_col_offset_idx": 1,
+                "end_col_offset_idx": 2,
+                "text": "98.1",
+                "column_header": false,
+                "row_header": false,
+                "row_section": false,
+                "fillable": false
+              }
+            ],
+            "num_rows": 3,
+            "num_cols": 2,
+            "orientation": "rot_0",
+            "grid": [
+              [
+                {
+                  "row_span": 1,
+                  "col_span": 1,
+                  "start_row_offset_idx": 0,
+                  "end_row_offset_idx": 1,
+                  "start_col_offset_idx": 0,
+                  "end_col_offset_idx": 1,
+                  "text": "",
+                  "column_header": true,
+                  "row_header": false,
+                  "row_section": false,
+                  "fillable": false
+                },
+                {
+                  "row_span": 1,
+                  "col_span": 1,
+                  "start_row_offset_idx": 0,
+                  "end_row_offset_idx": 1,
+                  "start_col_offset_idx": 1,
+                  "end_col_offset_idx": 2,
+                  "text": "결과",
+                  "column_header": true,
+                  "row_header": false,
+                  "row_section": false,
+                  "fillable": false
+                }
+              ],
+              [
+                {
+                  "row_span": 1,
+                  "col_span": 1,
+                  "start_row_offset_idx": 1,
+                  "end_row_offset_idx": 2,
+                  "start_col_offset_idx": 0,
+                  "end_col_offset_idx": 1,
+                  "text": "함량",
+                  "column_header": false,
+                  "row_header": true,
+                  "row_section": false,
+                  "fillable": false
+                },
+                {
+                  "row_span": 1,
+                  "col_span": 1,
+                  "start_row_offset_idx": 1,
+                  "end_row_offset_idx": 2,
+                  "start_col_offset_idx": 1,
+                  "end_col_offset_idx": 2,
+                  "text": "99.5",
+                  "column_header": false,
+                  "row_header": false,
+                  "row_section": false,
+                  "fillable": false
+                }
+              ],
+              [
+                {
+                  "row_span": 1,
+                  "col_span": 1,
+                  "start_row_offset_idx": 2,
+                  "end_row_offset_idx": 3,
+                  "start_col_offset_idx": 0,
+                  "end_col_offset_idx": 1,
+                  "text": "순도",
+                  "column_header": false,
+                  "row_header": true,
+                  "row_section": false,
+                  "fillable": false
+                },
+                {
+                  "row_span": 1,
+                  "col_span": 1,
+                  "start_row_offset_idx": 2,
+                  "end_row_offset_idx": 3,
+                  "start_col_offset_idx": 1,
+                  "end_col_offset_idx": 2,
+                  "text": "98.1",
+                  "column_header": false,
+                  "row_header": false,
+                  "row_section": false,
+                  "fillable": false
+                }
+              ]
+            ]
+          }
+        }
+      },
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 3.0,
+            "t": 1.0,
+            "r": 4.0,
+            "b": 2.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/1",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 7.0,
+            "t": 1.0,
+            "r": 8.0,
+            "b": 2.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "image": {
+        "mimetype": "image/png",
+        "dpi": 72,
+        "size": {
+          "width": 640.0,
+          "height": 320.0
+        },
+        "uri": "data:image/png;base64,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2USRiZEUKKEkVJGJkRQwMzObKDIxkgIllIQqMjGSAmZmZhNFJkZSoISSUEUmRlLAzMxsosjESAqUUBKqyMRICpiZmU0UmRhJgRJKQhWZGEkBMzOziSITIylQQkmoIhMjKWBmZjZRZGIkBUooCVVkYiQFzMzMJopMjKRACSWhikyMpICZmdlEkYmRFCihJFSRiZEUMDMzmygyMZICJZSEKjIxkgJmZmYTRSZGUqCEklBFJkZSwMzMbKLIxEgKlFASqsjESAqYmZlNFJkYSYESSkIVmRhJATMzs4kiEyMpUEJJqCITIylgZmY2UWRiJAVKKAlVZGIkBczMzCaKTIykQAkloYpMjKSAmZnZRJGJkRQooSRUkYmRFDAzM5soMjGSAiWUhCoyMZICZmZmE0UmRlKghJJQRSZGUsDMzGyiyMRICpRQEqrIxEgKmJmZTRSZGEmBEkpCFZkYSQEzM7OJIhMjKVBCSagiEyMpYGZmNlFkYiQFSigJVWRiJAXMzMwmikyMpEAJJaGKTIykgJmZ2USRiZEUKKEkVJGJkRT4uTc7Ozs3N0dyaWnp6aefvvnmm2dnZ+fm5iR98cUXTz/99MaNG1944YVdu3ZdcsklZ8+effTRRx988EEAzz///LPPPnvZZZddeumlzz333Lp16wDMzs7Ozc1h2d133/3YY4998MEHW7duXVpauuiii/bu3btu3boPPvhg69atS0tLF1100d69e9etW4dlH3zwwdatW5eWli666KK9e/euW7fu+eeff/bZZy+77LJLL730ueeeW7duHYDZ2dm5uTlJX3zxxdNPP71x48bZ2dm5uTksu/vuux977LHZ2dm5uTksu/vuux977LHVq1ffeuut//zP/4xlrbXeO4APPvhg69atS0tLF1100d69e9etW9da673jnNZa7x3ACy+8sGvXrksuueTs2bOPPvrogw8++Nprrz3zzDMA3nnnndtuuw3Aww8/fO+99wJ44YUXdu3adckll5w9e/bRRx998MEHATz//PPPPvvsZZdddumllz733HPr1q0DMDs7Ozc3J+mLL754+umnN27cCOC111575plnALzzzju33XYbgIcffvjee+/ds2fPH/3RH/3Xf/3XL/zCLwCYnZ2dm5uT9MUXXzz99NMbN278wQ9+sGfPnosuuqi19oMf/GDt2rUAZmdn5+bmsOzuu+/+5V/+5WeeeQbAO++8c9tttwF4+OGH7733XpiZ/X8iEyMpUEJJqCITIynwc6+11nsHcPz48d///d//t3/7t9Za7x3A8ePH77vvvr/6q79aWFg4cOBAa633vnnz5m3btklaXFw8ePDg6tWr33rrrSeffPLtt98G0FrrveM869evP3DgwNq1a/fv3//qq6++8sor69evP3DgwNq1a/fv3//qq6++8sorWLZ+/foDBw6sXbt2//79r7766h/8wR8sLi4ePHhw9erVb7311pNPPvn2228DaK313gEcP378vvvu+8lPftJa673jPK213jvO01q74YYbFhYWfvM3fxNAa633DmD9+vUHDhxYu3bt/v37X3311VdeeaW11nvHOa213vvhw4cXFhYOHDjQWuu9b968edu2bXfccQeWtdZ67zjn8OHDCwsLBw4caK313jdv3rxt2zZJi4uLBw8eXL169VtvvfXkk0++/fbbAFprvXcAx48fv++++37yk5/gPK213jvO+a3f+q1f+ZVf+bVf+7Xf+73fA9Ba670DOH78+H333ffXf/3XTz311JtvvnnxxRf/5V/+5T/90z8dPnwYQGut947/o7XWe4eZWRWZGEmBEkpCFZkYSYGfe6213juWrVmz5vTp06213jsASWvWrPn1X//1hYWF+fl5LDt69GhEXHDBBZl56623YtlDDz20e/fuiy++uLXWe8d5rrrqqiNHjlx77bVLS0vvvffe7bffftVVVx05cuTaa69dWlp67733br/9diy76qqrjhw5cu211y4tLb333ntPPPFEZt56661Y9tBDD+3evfviiy9urfXeAUhas2bNz372s9Za7x3naa313nGe1tqPfvSjzPzXf/1XAK213juAq6666siRI9dee+3S0tJ77713++23t9Z67zintdZ7v+OOOxYWFubn57Hs6NGjEfEP//APWNZa673jnDvuuGNhYWF+fh7Ljh49GhEXXHBBZt56661Y9tBDD+3evfviiy9urfXeAUhas2bNz372M5yntdZ7x7IzZ87cfffdu3fv/tM//dP9+/cDaK313gFIWrNmzW/8xm888cQTN998M4Avvvjid3/3d/fv33/hhRe21nrv+D9aa713mJlVkYmRFCihJFSRiZEU+LnXWuu9A3j77bcXFxf/8R//sbXWewdw+PDhPXv2HD169OTJk6tWrcKyr7766pprriF58uTJmZkZjFprvXec58UXX3z88cfvuuuu+++/f9OmTQBefPHFxx9//K677rr//vs3bdqEc1588cXHH3/8rrvuuv/++zdt2rR27dqTJ0/OzMxg1FrrvQM4fPjwnj17fvjDH7bWeu84T2ut947ztNZ67xs3bty2bdumTZtaa713AC+++OLjjz9+11133X///Zs2bQLQWuu945zWWu/96quvPnny5KpVq7Dsq6++uuaaa/7nf/4Hy1prvXecc/XVV588eXLVqlVY9tVXX11zzTUkT548OTMzg1FrrfcO4PDhw3v27PnhD3+I87TWeu9Y9tprr508efJP/uRPbrrppmPHjl1yySWttd47gMOHD+/Zs+fYsWMnT56cmZnBqLXWe8f/0VrrvcPMrIpMjKRACSWhikyMpMDPvdnZ2bm5OUmXX3753/zN3/zSL/3S7Ozs3Nzc0tLSiRMnPvroo5tuuunkyZOrVq3Csi+//PK66677+uuvP/3005mZGYxmZ2fn5uawbHFxcX5+HsDnn3/++uuv79y585577tm2bRuAzz///PXXX9+5c+c999yzbds2nPP555+//vrrO3fuvOeee/72b//2008/nZmZwWh2dnZubm5paenEiRMfffTRd77zndnZ2bm5OSxbXFycn5+fnZ2dm5vDssXFxfn5+dZa7/1f/uVf/vzP//zIkSOttd47ln3++eevv/76zp0777nnnm3bts3Ozs7NzeGc999//8yZM1dfffXJkydXrVqFZV9++eV111333//931jWWuu945yrr7765MmTq1atwrIvv/zyuuuu+/rrrz/99NOZmRmMZmdn5+bmlpaWTpw48dFHH33nO9/BeVprvXcs27Jly7//+7+vWrXqpz/96d/93d/deeeds7Ozc3NzS0tLJ06c+Oijj9avX//Tn/50ZmbmqaeeevPNNz/77LMTJ04AmJ2dnZubw7LFxcX5+Xksa6313mFmVkUmRlKghJJQRSZGUuDnXmut947ztNZ67wB27NjxzTffvP3225m5YcMGLHv33Xe3b9/+1Vdf7dix45ZbbgEgacuWLS+99BKA1lrvHeecOnXqk08+2bBhA4BTp07dcMMNx48f/+STTzZs2ADg1KlTN9xww2effQbg1KlTn3zyyYYNGwCcOnXqhhtu+NVf/dUdO3bccsstACRt2bLlpZdeAtBa670D2LFjxzfffLN169bWWu8d52mt9d5xntZa7x3Apk2bvv/97//2b/927/3UqVOffPLJhg0bAJw6deqGG2747LPPWmu9d5zTWuu933nnnZm5YcMGLHv33Xe3b99++PBhLGut9d5xzp133pmZGzZswLJ33313+/btX3311Y4dO2655RYAkrZs2fLSSy8BaK313gHs2LHjm2++2bp1K87TWuu9A/j6669vv/32o0ePAjh8+PChQ4eeeeaZ1lrvHcCOHTu++eabgwcPPvXUUzfffDOA3vsv/uIvfvnllwBaa713/B+ttd47zMyqyMRICpRQEqrIxEgK/NxrrfXecZ7WWu8dwIcffriwsPCHf/iH27dvP3jw4OWXX95737x5c2aePn16z549Bw4cmJmZefnll9944419+/YBaK313nHO6dOn169ff+zYsXXr1p04ceKBBx44dOjQ+vXrjx07tm7duhMnTjzwwAPvv/8+gNOnT69fv/7YsWPr1q07ceLEAw888L3vfW/Pnj0HDhyYmZl5+eWX33jjjX379gForfXeAXz44YcLCws/+tGPWmu9d5yntdZ7x3laa713AEeOHPmzP/uz48eP995Pnz69fv36Y8eOrVu37sSJEw888MD777/fWuu945zWWu/9xz/+8fbt2w8ePHj55Zf33jdv3pyZ3/3ud7GstdZ7xzk//vGPt2/ffvDgwcsvv7z3vnnz5sw8ffr0nj17Dhw4MDMz8/LLL7/xxhv79u0D0FrrvQP48MMPFxYWfvSjH+E8rbXeO4AjR468/PLLzz77LIAzZ87cdNNN//Ef/9Fa670D+PDDDxcWFu65556///u/f/PNNy+++OK/+Iu/WFxc/N///V8ArbXeO/6P1lrvHWZmVWRiJAVKKAlVZGIkBX7utdZ67zhPa633DuDMmTM33njjxx9//OKLL+7atWtmZubs2bOPPPLIli1bADzxxBP79u274oorrrzyyt27d69ZswbA7Ozs3Nwcls3Pzy8uLh46dGj79u2rV6++8MILd+7cef311x86dGj79u2rV6++8MILd+7cef3112PZoUOHtm/fvnr16gsvvHDnzp3XX3/9E088sW/fviuuuOLKK6/cvXv3mjVrALTWeu8Azpw5c+ONN3788ceXXnrp3Nwcls3Pzy8uLs7Ozs7NzWHZ/Pz8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"
+      },
+      "annotations": []
+    }
+  ],
+  "tables": [
+    {
+      "self_ref": "#/tables/0",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "table",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 0.0,
+            "t": 0.0,
+            "r": 2.0,
+            "b": 3.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "data": {
+        "table_cells": [
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 0,
+            "end_col_offset_idx": 1,
+            "text": "시험",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 1,
+            "end_col_offset_idx": 2,
+            "text": "결과",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 0,
+            "end_col_offset_idx": 1,
+            "text": "함량",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 1,
+            "end_col_offset_idx": 2,
+            "text": "99.5",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 2,
+            "end_row_offset_idx": 3,
+            "start_col_offset_idx": 0,
+            "end_col_offset_idx": 1,
+            "text": "순도",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 2,
+            "end_row_offset_idx": 3,
+            "start_col_offset_idx": 1,
+            "end_col_offset_idx": 2,
+            "text": "98.1",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          }
+        ],
+        "num_rows": 3,
+        "num_cols": 2,
+        "orientation": "rot_0",
+        "grid": [
+          [
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 0,
+              "end_col_offset_idx": 1,
+              "text": "시험",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 1,
+              "end_col_offset_idx": 2,
+              "text": "결과",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            }
+          ],
+          [
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 0,
+              "end_col_offset_idx": 1,
+              "text": "함량",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 1,
+              "end_col_offset_idx": 2,
+              "text": "99.5",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            }
+          ],
+          [
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 2,
+              "end_row_offset_idx": 3,
+              "start_col_offset_idx": 0,
+              "end_col_offset_idx": 1,
+              "text": "순도",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 2,
+              "end_row_offset_idx": 3,
+              "start_col_offset_idx": 1,
+              "end_col_offset_idx": 2,
+              "text": "98.1",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            }
+          ]
+        ]
+      },
+      "annotations": []
+    },
+    {
+      "self_ref": "#/tables/1",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "table",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 1.0,
+            "t": 3.0,
+            "r": 6.0,
+            "b": 5.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "data": {
+        "table_cells": [
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 0,
+            "end_col_offset_idx": 1,
+            "text": "검체",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 1,
+            "end_col_offset_idx": 2,
+            "text": "값",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 2,
+            "end_col_offset_idx": 3,
+            "text": "",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 3,
+            "end_col_offset_idx": 4,
+            "text": "",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 0,
+            "end_row_offset_idx": 1,
+            "start_col_offset_idx": 4,
+            "end_col_offset_idx": 5,
+            "text": "",
+            "column_header": true,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 0,
+            "end_col_offset_idx": 1,
+            "text": "A",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 1,
+            "end_col_offset_idx": 2,
+            "text": "10",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 2,
+            "end_col_offset_idx": 3,
+            "text": "",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 3,
+            "end_col_offset_idx": 4,
+            "text": "",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          },
+          {
+            "row_span": 1,
+            "col_span": 1,
+            "start_row_offset_idx": 1,
+            "end_row_offset_idx": 2,
+            "start_col_offset_idx": 4,
+            "end_col_offset_idx": 5,
+            "text": "",
+            "column_header": false,
+            "row_header": false,
+            "row_section": false,
+            "fillable": false
+          }
+        ],
+        "num_rows": 2,
+        "num_cols": 5,
+        "orientation": "rot_0",
+        "grid": [
+          [
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 0,
+              "end_col_offset_idx": 1,
+              "text": "검체",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 1,
+              "end_col_offset_idx": 2,
+              "text": "값",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 2,
+              "end_col_offset_idx": 3,
+              "text": "",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 3,
+              "end_col_offset_idx": 4,
+              "text": "",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 0,
+              "end_row_offset_idx": 1,
+              "start_col_offset_idx": 4,
+              "end_col_offset_idx": 5,
+              "text": "",
+              "column_header": true,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            }
+          ],
+          [
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 0,
+              "end_col_offset_idx": 1,
+              "text": "A",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 1,
+              "end_col_offset_idx": 2,
+              "text": "10",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 2,
+              "end_col_offset_idx": 3,
+              "text": "",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 3,
+              "end_col_offset_idx": 4,
+              "text": "",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            },
+            {
+              "row_span": 1,
+              "col_span": 1,
+              "start_row_offset_idx": 1,
+              "end_row_offset_idx": 2,
+              "start_col_offset_idx": 4,
+              "end_col_offset_idx": 5,
+              "text": "",
+              "column_header": false,
+              "row_header": false,
+              "row_section": false,
+              "fillable": false
+            }
+          ]
+        ]
+      },
+      "annotations": []
+    }
+  ],
+  "key_value_items": [],
+  "form_items": [],
+  "pages": {
+    "1": {
+      "size": {
+        "width": 4.0,
+        "height": 3.0
+      },
+      "page_no": 1
+    },
+    "2": {
+      "size": {
+        "width": 8.0,
+        "height": 5.0
+      },
+      "page_no": 2
+    }
+  }
+}

@@ -1,0 +1,19 @@
+FROM --platform=linux/amd64 docker-ragflow:latest
+
+USER root
+WORKDIR /ragflow
+
+# Fast local rollout image: extend the already-running RAGFlow image instead of
+# rebuilding its full frontend and base system layers. The canonical Dockerfile
+# contains the same dependency and model steps for clean builds.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN /ragflow/.venv/bin/pip3 install --no-cache-dir paddleocr==3.7.0 paddlepaddle==3.3.1
+
+ARG PADDLEOCR_KOREAN_V5_MODEL_URL=https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/korean_PP-OCRv5_mobile_rec_infer.tar
+RUN mkdir -p /ragflow/rag/res/paddleocr && \
+    curl -fsSL "$PADDLEOCR_KOREAN_V5_MODEL_URL" | tar -x -C /ragflow/rag/res/paddleocr
+
+COPY deepdoc/vision/ocr.py deepdoc/vision/paddleocr_recognizer.py /ragflow/deepdoc/vision/

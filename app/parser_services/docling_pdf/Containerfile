@@ -1,0 +1,43 @@
+ARG UV_BASE_IMAGE=ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a
+ARG PYTHON_BASE_IMAGE=python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64
+FROM ${UV_BASE_IMAGE} AS uv
+FROM ${PYTHON_BASE_IMAGE}
+
+USER root
+WORKDIR /opt/docling-pdf
+
+COPY --from=uv /uv /uvx /bin/
+COPY parser_services/docling_pdf/pyproject.toml parser_services/docling_pdf/uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project && \
+    groupadd --gid 10001 parser && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser
+
+COPY parser_services/docling_pdf/service.py /opt/docling-pdf/service.py
+
+ENV PATH="/opt/docling-pdf/.venv/bin:${PATH}" \
+    DOCLING_PDF_SERVICE_HOST=0.0.0.0 \
+    DOCLING_PDF_SERVICE_PORT=8094 \
+    DOCLING_PDF_MAX_SOURCE_BYTES=536870912 \
+    DOCLING_PDF_MAX_PAGES=2000 \
+    DOCLING_PDF_PARSER_THREADS=4 \
+    DOCLING_ALLOW_EXTERNAL_PLUGINS=0 \
+    HF_HUB_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    DO_NOT_TRACK=1
+
+EXPOSE 8094
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=12 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8094/health', timeout=3).read()"]
+
+USER 10001:10001
+ENTRYPOINT ["python", "/opt/docling-pdf/service.py"]
+
+LABEL io.docmind.service="docling-pdf-parser" \
+      io.docmind.docling-version="2.115.0" \
+      io.docmind.pipeline="native-pdf" \
+      io.docmind.ocr-enabled="false" \
+      io.docmind.runtime-network-downloads="forbidden"

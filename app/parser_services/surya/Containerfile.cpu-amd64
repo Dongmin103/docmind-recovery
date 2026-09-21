@@ -1,0 +1,78 @@
+FROM ghcr.io/astral-sh/uv:0.11.7@sha256:733b4042187702f832f7fdecb3aff14a61b288c4ca37af188bb5715c1caebaf8 AS uv
+FROM python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64
+
+USER root
+WORKDIR /opt/surya
+
+COPY --from=uv /uv /uvx /bin/
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      libgl1 \
+      libglib2.0-0 \
+      libgomp1 \
+      libstdc++6 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY parser_services/surya/pyproject.toml parser_services/surya/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+ARG LLAMA_CPP_RELEASE=b10718
+ARG LLAMA_CPP_ARCHIVE=llama-b10718-bin-ubuntu-x64.tar.gz
+ARG LLAMA_CPP_SHA256=85aa547a672dfa6cc619bf0fa1176cc585a33c29e82bc9c29ed4ad90c7663aec
+RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL \
+      "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_RELEASE}/${LLAMA_CPP_ARCHIVE}" \
+      -o /tmp/llama.tar.gz && \
+    echo "${LLAMA_CPP_SHA256}  /tmp/llama.tar.gz" | sha256sum -c - && \
+    mkdir -p /opt/llama && \
+    tar -xzf /tmp/llama.tar.gz --strip-components=1 -C /opt/llama && \
+    test -x /opt/llama/llama-server && \
+    rm /tmp/llama.tar.gz
+
+COPY parser_services/surya/service.py /opt/surya/service.py
+
+RUN groupadd --gid 10001 parser && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser && \
+    mkdir -p /opt/surya/runtime && \
+    chown -R 10001:10001 /opt/surya/runtime
+
+ENV PATH="/opt/surya/.venv/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/llama" \
+    HF_HUB_OFFLINE="1" \
+    HF_HUB_DISABLE_TELEMETRY="1" \
+    TRANSFORMERS_OFFLINE="1" \
+    DO_NOT_TRACK="1" \
+    SURYA_SERVICE_HOST="0.0.0.0" \
+    SURYA_SERVICE_PORT="8091" \
+    SURYA_INFERENCE_BACKEND="llamacpp" \
+    SURYA_INFERENCE_AUTOSTART="1" \
+    SURYA_INFERENCE_PARALLEL="1" \
+    SURYA_INFERENCE_CTX_SIZE="16384" \
+    SURYA_INFERENCE_CTX_PER_SLOT="16384" \
+    SURYA_INFERENCE_TIMEOUT_SECONDS="7200" \
+    SURYA_INFERENCE_STARTUP_TIMEOUT="900" \
+    SURYA_INFERENCE_LOGPROBS="0" \
+    SURYA_GGUF_LOCAL_MODEL_PATH="/models/surya-2.gguf" \
+    SURYA_GGUF_LOCAL_MMPROJ_PATH="/models/surya-2-mmproj.gguf" \
+    LLAMA_CPP_BINARY="/opt/llama/llama-server" \
+    LLAMA_CPP_NGL="0" \
+    LLAMA_CPP_EXTRA_ARGS="--threads 8"
+
+EXPOSE 8091
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=20 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3).read()"]
+
+USER 10001:10001
+ENTRYPOINT ["python", "/opt/surya/service.py"]
+
+LABEL org.opencontainers.image.title="DocMind Surya CPU parser" \
+      org.opencontainers.image.version="surya-ocr-0.22.1" \
+      org.opencontainers.image.source="https://github.com/Dongmin103/docmind-ragflow" \
+      io.docmind.platform="linux/amd64" \
+      io.docmind.surya-model-distribution="external-volume" \
+      io.docmind.llama-cpp.release="b10718" \
+      io.docmind.concurrency="1"

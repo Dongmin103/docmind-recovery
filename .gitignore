@@ -15,3 +15,20 @@ __pycache__/
 restore-test/
 
 # Encrypted archives are distributed as release assets, not Git blobs.
+
+# Development handoff: no local secrets or data
+.local/
+**/.env
+**/.env.local
+**/.env.docmind.cpu
+**/.env.*.local
+app/conf/private.pem
+app/conf/public.pem
+app/conf/service_conf.yaml
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/node_modules/
+**/runtime/
+**/uploads/
+**/logs/

@@ -1,0 +1,419 @@
+schema: docmind-protected-evidence-mutation-inventory-v1
+version: 1
+denial_code: DOCMIND_VERSION_PROTECTED
+guard: DocumentService.assert_docmind_evidence_mutable
+batch_guard: DocumentService.assert_documents_docmind_evidence_mutable
+protected_lifecycle_states: [READY, PUBLISHED, SUPERSEDED]
+health_independent: true
+allowed_denial_side_effect: one_append_only_docmind_audit_event
+paths:
+  - id: DM-MUT-001
+    entrypoint: DocumentService.remove_document
+    service_chain: remove_document -> delete_document_and_update_kb_counts -> task/blob/index cleanup
+    mutated_resources: [document_db, knowledgebase_db, task_db, object_storage, chunk_index, metadata_index]
+    first_side_effect: document row delete and knowledgebase counter update
+    guard_boundary: remove_document before delete_document_and_update_kb_counts
+    operation: DELETE_DOCUMENT
+    test_id: test_remove_document_denies_before_delete_or_cleanup
+  - id: DM-MUT-002
+    entrypoint: DocumentService.delete_document_and_update_kb_counts
+    service_chain: direct document row and knowledgebase counter transaction
+    mutated_resources: [document_db, knowledgebase_db]
+    first_side_effect: document row delete
+    guard_boundary: method entry before DB.atomic
+    operation: DELETE_DOCUMENT_ROW
+    test_id: test_direct_document_delete_denies_before_transaction
+  - id: DM-MUT-003
+    entrypoint: document_api_service.reset_document_for_reparse
+    service_chain: document reset -> counter reset -> doc-store delete -> image delete
+    mutated_resources: [document_db, knowledgebase_db, object_storage, chunk_index]
+    first_side_effect: document progress/parser update
+    guard_boundary: function entry before update_fields persistence
+    operation: RESET_DOCUMENT_FOR_REPARSE
+    test_id: test_reparse_denies_before_document_or_docstore_mutation
+  - id: DM-MUT-004
+    entrypoint: document_api_service.update_document_name_only
+    service_chain: document/file rename -> indexed title update
+    mutated_resources: [document_db, file_db, chunk_index]
+    first_side_effect: document name update
+    guard_boundary: function entry before DocumentService.update_by_id
+    operation: RENAME_DOCUMENT
+    test_id: test_rename_denies_before_document_file_or_index_update
+  - id: DM-MUT-005
+    entrypoint: document_api_service.update_document_status_only
+    service_chain: document status update -> indexed availability update
+    mutated_resources: [document_db, chunk_index]
+    first_side_effect: document status update
+    guard_boundary: function entry before DocumentService.update_by_id
+    operation: UPDATE_DOCUMENT_AVAILABILITY
+    test_id: test_availability_change_denies_before_document_or_index_update
+  - id: DM-MUT-006
+    entrypoint: DocumentService.update_parser_config
+    service_chain: parser config merge -> document update
+    mutated_resources: [document_db]
+    first_side_effect: document parser_config update
+    guard_boundary: method entry before config merge/update
+    operation: UPDATE_PARSER_CONFIG
+    test_id: test_parser_config_denies_before_document_update
+  - id: DM-MUT-007
+    entrypoint: chunk_api.add_chunk
+    service_chain: embed -> image store -> doc-store insert -> counters
+    mutated_resources: [object_storage, chunk_index, document_db, knowledgebase_db]
+    first_side_effect: optional image store or doc-store insert
+    guard_boundary: after ownership/document resolution and before request embedding
+    operation: ADD_MANUAL_CHUNK
+    test_id: test_manual_chunk_add_denies_before_embedding_storage_or_counts
+  - id: DM-MUT-008
+    entrypoint: chunk_api.rm_chunk
+    service_chain: image delete -> doc-store delete -> counters
+    mutated_resources: [object_storage, chunk_index, document_db, knowledgebase_db]
+    first_side_effect: image or doc-store delete
+    guard_boundary: after ownership/document resolution and before request mutation
+    operation: DELETE_MANUAL_CHUNK
+    test_id: test_manual_chunk_delete_denies_before_storage_or_counts
+  - id: DM-MUT-009
+    entrypoint: chunk_api.update_chunk
+    service_chain: optional image store -> embedding -> doc-store update
+    mutated_resources: [object_storage, chunk_index]
+    first_side_effect: optional image store
+    guard_boundary: after ownership/document resolution and before chunk read/update
+    operation: UPDATE_MANUAL_CHUNK
+    test_id: test_manual_chunk_update_denies_before_storage_embedding_or_index
+  - id: DM-MUT-010
+    entrypoint: chunk_api.switch_chunks
+    service_chain: document resolution -> per-chunk availability update
+    mutated_resources: [chunk_index]
+    first_side_effect: doc-store availability update
+    guard_boundary: synchronous mutation closure before first chunk update
+    operation: SWITCH_MANUAL_CHUNKS
+    test_id: test_manual_chunk_switch_denies_before_first_index_update
+  - id: DM-MUT-011
+    entrypoint: chunk_api.delete_document_structure_graph
+    service_chain: graph/entity/relation doc-store deletes
+    mutated_resources: [chunk_index]
+    first_side_effect: graph row delete
+    guard_boundary: before first _delete call
+    operation: DELETE_DOCUMENT_STRUCTURE_GRAPH
+    test_id: test_structure_graph_delete_denies_before_docstore_delete
+  - id: DM-MUT-012
+    entrypoint: document_api.delete_documents
+    service_chain: REST batch -> FileService.delete_docs -> document/file/task/storage cleanup
+    mutated_resources: [document_db, file_db, file_relation_db, task_db, object_storage, chunk_index, metadata_index]
+    first_side_effect: task row delete in FileService.delete_docs
+    guard_boundary: FileService batch guard before root-folder initialization and loop
+    operation: DELETE_DOCUMENT_BATCH
+    test_id: test_document_batch_denies_whole_operation_before_first_side_effect
+  - id: DM-MUT-013
+    entrypoint: dataset_api_service.delete_datasets
+    service_chain: tenant/delete_all expansion -> document cleanup -> index drop -> dataset delete
+    mutated_resources: [dataset_db, document_db, file_db, file_relation_db, task_db, object_storage, chunk_index, metadata_index]
+    first_side_effect: first document deletion
+    guard_boundary: aggregate all dataset document IDs before deletion loop
+    operation: DELETE_DATASET_BATCH
+    test_id: test_dataset_delete_denies_all_datasets_before_first_document_or_index_mutation
+  - id: DM-MUT-014
+    entrypoint: file_api_service.delete_files
+    service_chain: recursive file tree -> blob/document/relation/file/bucket cleanup
+    mutated_resources: [object_storage, file_db, file_relation_db, document_db, task_db, chunk_index, metadata_index]
+    first_side_effect: skill index, blob, or file/document delete
+    guard_boundary: recursive document-ID collection before _rm_sync
+    operation: DELETE_FILE_TREE
+    test_id: test_file_tree_delete_denies_whole_tree_before_first_side_effect
+  - id: DM-MUT-015
+    entrypoint: ConnectorService.rebuild
+    service_chain: sync-log delete -> connector documents delete -> reschedule
+    mutated_resources: [sync_log_db, document_db, file_db, file_relation_db, task_db, object_storage, chunk_index]
+    first_side_effect: SyncLogs delete
+    guard_boundary: collect connector documents before SyncLogs.filter_delete
+    operation: CONNECTOR_REBUILD
+    test_id: test_connector_rebuild_denies_before_sync_log_or_document_mutation
+  - id: DM-MUT-016
+    entrypoint: ConnectorService.cleanup_stale_documents_for_task
+    service_chain: stale document batch delete -> sync counters
+    mutated_resources: [sync_log_db, document_db, file_db, file_relation_db, task_db, object_storage, chunk_index]
+    first_side_effect: first stale document delete
+    guard_boundary: guard complete stale set before batch loop
+    operation: CONNECTOR_PRUNE_STALE_DOCUMENTS
+    test_id: test_connector_prune_denies_before_first_batch_or_sync_counter_update
+  - id: DM-MUT-017
+    entrypoint: dataset_api_service.delete_index
+    service_chain: task cancel/delete -> graph/raptor/skill index wipe -> dataset task fields update
+    mutated_resources: [redis, task_db, chunk_index, dataset_db]
+    first_side_effect: Redis cancel flag or task delete
+    guard_boundary: guard all dataset documents before task cancellation
+    operation: DELETE_INDEX
+    test_id: test_dataset_index_delete_denies_before_task_or_index_mutation
+  - id: DM-MUT-018
+    entrypoint: dataset_api_service.run_index
+    service_chain: schedule graph/raptor/mindmap/artifact/skill rebuild
+    mutated_resources: [task_db, dataset_db, redis]
+    first_side_effect: task scheduling or dataset task-id update
+    guard_boundary: guard all selected dataset documents before scheduling
+    operation: RUN_INDEX
+    test_id: test_dataset_index_run_denies_before_task_scheduling
+  - id: DM-MUT-019
+    entrypoint: dataset_api_service.run_embedding
+    service_chain: queue per-document reembedding tasks
+    mutated_resources: [document_db, task_db, chunk_index, redis]
+    first_side_effect: first DocumentService.run task mutation
+    guard_boundary: guard all dataset documents before iteration
+    operation: REBUILD_DOCUMENT_EMBEDDINGS
+    test_id: test_dataset_reembedding_denies_before_first_task
+  - id: DM-MUT-020
+    entrypoint: task_executor.do_handle_task
+    service_chain: legacy parser task -> model/index initialization -> metadata/chunk writes
+    mutated_resources: [task_db, document_db, chunk_index, metadata_index]
+    first_side_effect: task progress or index initialization
+    guard_boundary: after immutable task identity extraction and before progress/model/index work
+    operation: TASK_EXECUTOR
+    test_id: test_legacy_task_executor_denies_before_first_task_or_index_side_effect
+  - id: DM-MUT-021
+    entrypoint: TaskHandler.handle
+    service_chain: refactor parser task -> model/index initialization -> metadata/chunk writes
+    mutated_resources: [task_db, document_db, chunk_index, metadata_index]
+    first_side_effect: model/index initialization or task progress
+    guard_boundary: after cancellation check and before embedding/index initialization
+    operation: TASK_EXECUTOR
+    test_id: test_refactor_task_executor_denies_before_first_task_or_index_side_effect
+  - id: DM-MUT-022
+    entrypoint: task_executor.delete_raptor_chunks
+    service_chain: RAPTOR marker lookup -> doc-store summary delete
+    mutated_resources: [chunk_index]
+    first_side_effect: RAPTOR doc-store delete
+    guard_boundary: function entry before lookup/delete
+    operation: DELETE_RAPTOR_CHUNKS
+    test_id: test_legacy_raptor_cleanup_denies_before_docstore_delete
+  - id: DM-MUT-023
+    entrypoint: task_executor_refactor.raptor_utils.delete_raptor_chunks
+    service_chain: RAPTOR marker lookup -> doc-store summary delete
+    mutated_resources: [chunk_index]
+    first_side_effect: RAPTOR doc-store delete
+    guard_boundary: function entry before lookup/delete
+    operation: DELETE_RAPTOR_CHUNKS
+    test_id: test_refactor_raptor_cleanup_denies_before_docstore_delete
+  - id: DM-MUT-024
+    entrypoint: DocumentService.clear_chunk_num_when_rerun
+    service_chain: document lookup -> knowledgebase counter decrement
+    mutated_resources: [knowledgebase_db]
+    first_side_effect: knowledgebase counter update
+    guard_boundary: method entry before document lookup/update
+    operation: RESET_DOCUMENT_FOR_RERUN
+    test_id: test_rerun_counter_reset_denies_before_kb_update
+  - id: DM-MUT-025
+    entrypoint: chunk_api.parse
+    service_chain: batch document reset -> doc-store delete -> task delete -> queue parse
+    mutated_resources: [document_db, task_db, chunk_index, redis]
+    first_side_effect: first document run/progress/chunk counter update
+    guard_boundary: batch guard after request ID normalization and before document loop
+    operation: PARSE_DOCUMENT_BATCH
+    test_id: test_parse_batch_denies_whole_operation_before_first_document_update
+  - id: DM-MUT-026
+    entrypoint: chunk_api.stop_parsing
+    service_chain: cancel task -> document run/progress update -> doc-store delete
+    mutated_resources: [redis, task_db, document_db, chunk_index]
+    first_side_effect: cancel flag for first document
+    guard_boundary: batch guard after request ID normalization and before document loop
+    operation: STOP_PARSING_DOCUMENT_BATCH
+    test_id: test_stop_parsing_batch_denies_before_first_cancel_or_document_update
+  - id: DM-MUT-027
+    entrypoint: document_api._run_sync
+    service_chain: legacy ingest batch -> cancel/reset/update -> task/index cleanup -> parse queue
+    mutated_resources: [redis, task_db, document_db, knowledgebase_db, chunk_index]
+    first_side_effect: first task cancellation or document update
+    guard_boundary: batch guard after all accessibility checks and before mutation loop
+    operation: PARSE_DOCUMENT_BATCH or STOP_PARSING_DOCUMENT_BATCH
+    test_id: test_legacy_ingest_batch_denies_before_first_cancel_update_or_index_delete
+  - id: DM-MUT-028
+    entrypoint: document_api.parse_documents
+    service_chain: REST dataset parse -> rerun counter reset -> task/index cleanup -> parse queue
+    mutated_resources: [task_db, document_db, knowledgebase_db, chunk_index, redis]
+    first_side_effect: first rerun counter or document update
+    guard_boundary: batch guard after dataset membership validation and before worker closure
+    operation: PARSE_DOCUMENT_BATCH
+    test_id: test_rest_parse_batch_denies_before_first_document_or_index_mutation
+  - id: DM-MUT-029
+    entrypoint: document_api.stop_parse_documents
+    service_chain: REST dataset stop -> cancel task -> document update -> index delete
+    mutated_resources: [redis, task_db, document_db, chunk_index]
+    first_side_effect: first task cancellation
+    guard_boundary: batch guard after dataset membership validation and before worker closure
+    operation: STOP_PARSING_DOCUMENT_BATCH
+    test_id: test_rest_stop_batch_denies_before_first_cancel_update_or_index_delete
+  - id: DM-MUT-030
+    entrypoint: FileService.upload_document existing-document branch
+    service_chain: connector reupload -> blob replacement -> document content-hash/size update
+    mutated_resources: [object_storage, document_db]
+    first_side_effect: object-storage put replacing existing bytes
+    guard_boundary: existing-document branch after knowledgebase identity check and before file read/storage put
+    operation: REUPLOAD_DOCUMENT_CONTENT
+    test_id: test_reupload_denies_before_blob_read_storage_or_document_update
+  - id: DM-MUT-031
+    entrypoint: DocumentService.run
+    service_chain: document parse dispatch -> queue_tasks or queue_dataflow
+    mutated_resources: [task_db, document_db, knowledgebase_db, chunk_index, redis]
+    first_side_effect: task cancellation/deletion/insertion or parse status update
+    guard_boundary: method entry before parser dispatch
+    operation: RUN_DOCUMENT_PARSE
+    test_id: test_document_run_denies_before_queue_dispatch
+  - id: DM-MUT-032
+    entrypoint: task_service.queue_tasks
+    service_chain: storage read -> prior task reuse/delete -> old chunk delete -> new task queue
+    mutated_resources: [task_db, document_db, chunk_index, redis]
+    first_side_effect: prior task mutation or old chunk delete
+    guard_boundary: function entry before storage read and task construction
+    operation: QUEUE_DOCUMENT_PARSE
+    test_id: test_queue_tasks_denies_before_storage_task_index_or_redis_mutation
+  - id: DM-MUT-033
+    entrypoint: task_service.queue_dataflow
+    service_chain: cancel old task -> delete chunks -> decrement counters -> insert dataflow task
+    mutated_resources: [redis, task_db, document_db, knowledgebase_db, chunk_index]
+    first_side_effect: old task cancellation
+    guard_boundary: function entry for real document IDs before task construction
+    operation: QUEUE_DATAFLOW_PARSE or QUEUE_DATAFLOW_RERUN
+    test_id: test_queue_dataflow_denies_before_cancel_index_counter_or_task_mutation
+  - id: DM-MUT-034
+    entrypoint: DocumentService.begin2parse
+    service_chain: update document progress/run status
+    mutated_resources: [document_db]
+    first_side_effect: document status update
+    guard_boundary: method entry before info construction/update
+    operation: BEGIN_DOCUMENT_PARSE
+    test_id: test_begin_parse_denies_before_document_status_update
+  - id: DM-MUT-035
+    entrypoint: TaskService.delete_by_doc_ids
+    service_chain: direct task-row batch deletion
+    mutated_resources: [task_db]
+    first_side_effect: task row delete
+    guard_boundary: method entry before delete query execution
+    operation: DELETE_DOCUMENT_TASKS
+    test_id: test_task_batch_delete_denies_before_task_row_delete
+  - id: DM-MUT-036
+    entrypoint: task_service.cancel_all_task_of
+    service_chain: clear chunking counters -> set per-task Redis cancellation flags
+    mutated_resources: [redis]
+    first_side_effect: Redis counter deletion
+    guard_boundary: function entry before abort_doc_chunking_counter
+    operation: CANCEL_DOCUMENT_TASKS
+    test_id: test_cancel_all_tasks_denies_before_redis_mutation
+  - id: DM-MUT-037
+    entrypoint: document_api.update_document
+    service_chain: metadata/name/parser/pipeline/status patch -> DB/index mutation
+    mutated_resources: [metadata_index, document_db, file_db, chunk_index]
+    first_side_effect: metadata index update
+    guard_boundary: after ownership/request validation and before first requested update
+    operation: UPDATE_DOCUMENT
+    test_id: test_document_patch_denies_before_metadata_document_or_index_update
+  - id: DM-MUT-038
+    entrypoint: document_api.metadata_batch_update
+    service_chain: select target documents -> batch metadata index update
+    mutated_resources: [metadata_index]
+    first_side_effect: first metadata row/index update
+    guard_boundary: after selector resolution and before batch_update_metadata
+    operation: UPDATE_DOCUMENT_METADATA_BATCH
+    test_id: test_metadata_batch_update_denies_before_first_metadata_mutation
+  - id: DM-MUT-039
+    entrypoint: document_api.update_metadata
+    service_chain: compatibility metadata selection -> batch metadata index update
+    mutated_resources: [metadata_index]
+    first_side_effect: first metadata row/index update
+    guard_boundary: after selector resolution and before batch_update_metadata
+    operation: UPDATE_DOCUMENT_METADATA_BATCH
+    test_id: test_compat_metadata_batch_update_denies_before_first_metadata_mutation
+  - id: DM-MUT-040
+    entrypoint: document_api.update_metadata_config
+    service_chain: metadata configuration request -> parser-config update
+    mutated_resources: [document_db]
+    first_side_effect: document parser_config update
+    guard_boundary: DocumentService.update_parser_config before config merge/update
+    operation: UPDATE_PARSER_CONFIG
+    test_id: test_metadata_config_denial_preserves_stable_code_and_zero_mutation
+  - id: DM-MUT-041
+    entrypoint: document_api.batch_update_document_status
+    service_chain: batch status change -> document row and available_int index update
+    mutated_resources: [document_db, chunk_index]
+    first_side_effect: first document status update
+    guard_boundary: dataset-owned batch preflight before result loop
+    operation: UPDATE_DOCUMENT_AVAILABILITY_BATCH
+    test_id: test_status_batch_denies_before_first_document_or_index_update
+  - id: DM-MUT-042
+    entrypoint: file_api_service.move_files
+    service_chain: recursive file move/rename -> object storage/file/document name updates
+    mutated_resources: [object_storage, file_db, document_db, chunk_index]
+    first_side_effect: object-storage move or file row update
+    guard_boundary: recursive linked-document preflight before move closure
+    operation: MOVE_OR_RENAME_FILE_TREE
+    test_id: test_file_move_or_rename_denies_whole_tree_before_storage_or_db_update
+  - id: DM-MUT-043
+    entrypoint: user_account_service.delete_user_data
+    service_chain: account cleanup -> buckets/documents/tasks/files/index/datasets/tenant/user deletion
+    mutated_resources: [user_db, tenant_db, dataset_db, document_db, file_db, file_relation_db, task_db, object_storage, chunk_index, metadata_index]
+    first_side_effect: first owned-dataset bucket removal
+    guard_boundary: union of owned-tenant and creator documents before cleanup try block
+    operation: DELETE_USER_ACCOUNT_DATA
+    test_id: test_account_cleanup_denies_before_bucket_user_tenant_document_or_index_mutation
+  - id: DM-MUT-044
+    entrypoint: agent_api.rerun_agent
+    service_chain: dataflow rerun -> chunk delete -> counters/task reset -> queue dataflow
+    mutated_resources: [chunk_index, document_db, knowledgebase_db, task_db, redis]
+    first_side_effect: document chunk-index delete
+    guard_boundary: after access/progress validation and before index delete
+    operation: RERUN_DATAFLOW_DOCUMENT
+    test_id: test_agent_rerun_denies_before_index_counter_task_or_queue_mutation
+  - id: DM-MUT-045
+    entrypoint: task_api._cancel_task
+    service_chain: task cancel -> Redis flag -> task progress -> document status update
+    mutated_resources: [redis, task_db, document_db]
+    first_side_effect: Redis cancellation flag
+    guard_boundary: task/document resolution before Redis set
+    operation: CANCEL_DOCUMENT_TASK
+    test_id: test_task_cancel_denies_before_redis_task_or_document_mutation
+  - id: DM-MUT-046
+    entrypoint: TaskService.get_task
+    service_chain: worker task claim -> task retry/progress update -> possible document failure update
+    mutated_resources: [task_db, document_db, redis]
+    first_side_effect: task receipt/retry update
+    guard_boundary: after task/document identity query and before task update
+    operation: CLAIM_DOCUMENT_TASK
+    test_id: test_worker_task_claim_denies_before_task_or_document_progress_update
+  - id: DM-MUT-047
+    entrypoint: TaskService.update_progress
+    service_chain: worker progress callback -> task progress/duration -> possible document failure update
+    mutated_resources: [task_db, document_db]
+    first_side_effect: task progress message/update
+    guard_boundary: after task identity lookup and before first task update
+    operation: UPDATE_DOCUMENT_TASK_PROGRESS
+    test_id: test_worker_progress_denies_before_task_or_document_update
+  - id: DM-MUT-048
+    entrypoint: document_api_service.update_chunk_method
+    service_chain: chunk-method/parser change -> document reset -> counter/blob/index cleanup
+    mutated_resources: [document_db, knowledgebase_db, object_storage, chunk_index]
+    first_side_effect: document parser/progress update
+    guard_boundary: function entry before reset_document_for_reparse or parser-config update
+    operation: UPDATE_CHUNK_METHOD
+    test_id: test_chunk_method_change_denies_before_document_counter_blob_or_index_mutation
+  - id: DM-MUT-049
+    entrypoint: DocumentService.clear_chunk_num
+    service_chain: deprecated direct document counter clear -> knowledgebase decrement
+    mutated_resources: [knowledgebase_db]
+    first_side_effect: knowledgebase counter update
+    guard_boundary: method entry before document lookup/update
+    operation: CLEAR_DOCUMENT_CHUNK_COUNTS
+    test_id: test_deprecated_chunk_counter_clear_denies_before_knowledgebase_update
+  - id: DM-MUT-050
+    entrypoint: dataset_api_service.delete_knowledge_graph
+    service_chain: dataset knowledge-graph cancellation -> graph index delete -> dataset task reset
+    mutated_resources: [redis, task_db, chunk_index, dataset_db]
+    first_side_effect: task cancellation or graph index delete
+    guard_boundary: all dataset documents before task/index mutation
+    operation: DELETE_KNOWLEDGE_GRAPH
+    test_id: test_knowledge_graph_delete_denies_before_task_index_or_dataset_update
+coverage_notes:
+  tenant_membership_delete:
+    status: not_a_document_mutation
+    evidence: tenant_api removes team membership and does not delete dataset documents
+  account_delete:
+    status: covered_by_DM-MUT-043
+    evidence: delete_user_data preflights the union of owned-tenant and creator documents before bucket, database, task, file, index, tenant, or user cleanup
+  system_maintenance:
+    status: no_general_document_purge_job_found
+    required_action: CI code-search must fail when a new document/chunk/index mutator lacks an inventory row
