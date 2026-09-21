@@ -32,6 +32,6 @@
     "component_hashes": "passed: 11 components",
     "working_tree_hashes": "passed: 6069 entries",
     "git_bundle_restore": "passed: clone --mirror, fsck --full, source HEAD present",
-    "github_download": "pending"
+    "github_download": "passed: independently downloaded all bytes and matched SHA-256 and length"
   }
 }

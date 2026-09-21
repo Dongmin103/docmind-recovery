@@ -1,0 +1,18 @@
+{
+  "checkpoint": "pre-openviking-refactor-20260921T061958Z",
+  "release_url": "https://github.com/Dongmin103/docmind-recovery/releases/tag/pre-openviking-refactor-20260921T061958Z",
+  "download_url": "https://github.com/Dongmin103/docmind-recovery/releases/download/pre-openviking-refactor-20260921T061958Z/pre-openviking-refactor-20260921T061958Z.tar.enc",
+  "downloaded_bytes": 805529658,
+  "sha256": "1e3e34b005deb15dd070bbce5d25235d3a45bb6e647b29291731e115d4b703b3",
+  "duration_seconds": 89.02,
+  "result": "passed",
+  "local_restore_verification": {
+    "decrypt_roundtrip": "passed",
+    "component_hashes": "passed: 11 components",
+    "working_tree_hashes": "passed: 6069 entries",
+    "git_bundle_restore": "passed: clone --mirror, fsck --full, source HEAD present",
+    "github_download": "passed: independently downloaded all bytes and matched SHA-256 and length"
+  },
+  "source_unchanged_after_backup": true,
+  "recovery_tag_commit": "e86dc84ea410bb7b3712fb9b32f1c32bc8d8491c"
+}
