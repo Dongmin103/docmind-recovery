@@ -198,6 +198,45 @@ def test_calibrated_relevance_scores_are_preserved():
     assert np.allclose(rank, [0.8, 0.2, 0.5])
 
 
+@pytest.mark.parametrize(
+    "results",
+    [
+        None,
+        [],
+        [{"index": 0, "relevance_score": 0.8}],
+        [{"index": 0, "relevance_score": 0.8}, {"index": 0, "relevance_score": 0.2}],
+        [{"index": -1, "relevance_score": 0.8}, {"index": 1, "relevance_score": 0.2}],
+        [{"index": 2, "relevance_score": 0.8}, {"index": 1, "relevance_score": 0.2}],
+        [{"index": True, "relevance_score": 0.8}, {"index": 1, "relevance_score": 0.2}],
+        [{"index": 0, "relevance_score": float("nan")}, {"index": 1, "relevance_score": 0.2}],
+        [{"index": 0, "relevance_score": True}, {"index": 1, "relevance_score": 0.2}],
+        [{"index": 0, "relevance_score": "0.8"}, {"index": 1, "relevance_score": 0.2}],
+    ],
+)
+def test_jina_requires_complete_unique_finite_index_mapping(results):
+    jina = JinaRerank("key", model_name="jina-reranker-v3.5", base_url="http://x/rerank")
+    payload = {} if results is None else {"results": results}
+
+    with _mock_post(payload), pytest.raises(ValueError, match="Jina"):
+        jina.similarity("q", ["a", "b"])
+
+
+def test_jina_maps_out_of_order_results_back_to_request_indices():
+    jina = JinaRerank("key", model_name="jina-reranker-v3.5", base_url="http://x/rerank")
+    payload = {
+        "results": [
+            {"index": 2, "relevance_score": 0.2},
+            {"index": 0, "relevance_score": 0.9},
+            {"index": 1, "relevance_score": 0.5},
+        ]
+    }
+
+    with _mock_post(payload):
+        rank, _ = jina.similarity("q", ["a", "b", "c"])
+
+    assert np.allclose(rank, [0.9, 0.5, 0.2])
+
+
 # --- Structural guarantee: providers override _compute_rank, not similarity --
 
 

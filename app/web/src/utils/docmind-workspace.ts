@@ -1,11 +1,6 @@
 import { buildRagFlowInspectionPath } from './docmind-inspection-link';
 
-export const DocMindSections = [
-  'search',
-  'library',
-  'catalog',
-  'settings',
-] as const;
+export const DocMindSections = ['search', 'library', 'settings'] as const;
 export type DocMindSection = (typeof DocMindSections)[number];
 export type DocMindView = DocMindSection | 'document';
 
@@ -17,7 +12,7 @@ export function parseDocMindView(value: string | null): DocMindView {
 }
 
 export function parseDocMindReturnView(value: string | null): DocMindSection {
-  return value === 'library' || value === 'catalog' ? value : 'search';
+  return value === 'library' ? value : 'search';
 }
 
 export function buildDocMindSectionPath(view: DocMindSection): string {

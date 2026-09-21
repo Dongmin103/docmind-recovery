@@ -109,12 +109,33 @@ class JinaRerank(Base):
         response = requests.post(self.base_url, headers=self.headers, json=data, timeout=30)
         response.raise_for_status()
         res = response.json()
+        results = res.get("results") if isinstance(res, dict) else None
+        if not isinstance(results, list) or len(results) != len(texts):
+            count = len(results) if isinstance(results, list) else 0
+            raise ValueError(f"Jina returned {count} rerank results for {len(texts)} documents")
         rank = np.zeros(len(texts), dtype=float)
-        try:
-            for d in res.get("results", []):
-                rank[d["index"]] = d["relevance_score"]
-        except Exception as _e:
-            log_exception(_e, res)
+        seen: set[int] = set()
+        for result in results:
+            index = result.get("index") if isinstance(result, dict) else None
+            if (
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or index < 0
+                or index >= len(texts)
+                or index in seen
+            ):
+                raise ValueError(f"unexpected Jina rerank index: {index}")
+            relevance_score = result.get("relevance_score")
+            if (
+                isinstance(relevance_score, bool)
+                or not isinstance(relevance_score, (int, float))
+                or not math.isfinite(relevance_score)
+            ):
+                raise ValueError(
+                    f"unexpected Jina rerank relevance_score at index {index}: {relevance_score!r}"
+                )
+            seen.add(index)
+            rank[index] = relevance_score
         return rank, total_token_count_from_response(res)
 
 

@@ -32,6 +32,39 @@ class _DummyFulltextQueryer:
 _fake_query.FulltextQueryer = _DummyFulltextQueryer
 sys.modules.setdefault("rag.nlp.query", _fake_query)
 
+_fake_infinity = types.ModuleType("infinity")
+_fake_infinity_tokenizer = types.ModuleType("infinity.rag_tokenizer")
+
+
+class _DummyRagTokenizer:
+    def tokenize(self, text):
+        return text
+
+    def fine_grained_tokenize(self, text):
+        return text
+
+    def tag(self, *_args):
+        return ""
+
+    def freq(self, *_args):
+        return 0
+
+    def _tradi2simp(self, text):
+        return text
+
+    def _strQ2B(self, text):
+        return text
+
+
+_fake_infinity_tokenizer.RagTokenizer = _DummyRagTokenizer
+_fake_infinity_tokenizer.is_chinese = lambda _text: False
+_fake_infinity_tokenizer.is_number = lambda _text: False
+_fake_infinity_tokenizer.is_alphabet = lambda _text: True
+_fake_infinity_tokenizer.naive_qie = lambda text: text
+_fake_infinity.rag_tokenizer = _fake_infinity_tokenizer
+sys.modules.setdefault("infinity", _fake_infinity)
+sys.modules.setdefault("infinity.rag_tokenizer", _fake_infinity_tokenizer)
+
 import rag.nlp.search as search_module  # noqa: E402
 from rag.nlp.search import Dealer, settings  # noqa: E402
 
@@ -239,6 +272,44 @@ async def test_search_dense_candidate_mode_sends_only_dense_expression(monkeypat
     await dealer.search({"question": "risk validation", "knn_top_k": 10, "candidate_mode": "dense"}, "idx", ["kb"], emb_mdl=object())
 
     assert captured == [[dense_expression]]
+
+
+@pytest.mark.asyncio
+async def test_search_bm25_candidate_mode_is_lexical_only(monkeypatch):
+    dealer = _candidate_mode_dealer()
+    lexical_expression = SimpleNamespace(min_match=0.3)
+    dealer.qryr = SimpleNamespace(question=lambda *_args, **_kwargs: (lexical_expression, []))
+    captured = []
+
+    async def get_vector(*_args, **_kwargs):
+        pytest.fail("BM25 lane must not generate an embedding")
+
+    async def thread_pool_exec(_func, _src, _highlights, _filters, match_exprs, *_args, **_kwargs):
+        captured.append(match_exprs)
+        return object()
+
+    dealer.get_vector = get_vector
+    monkeypatch.setattr(search_module, "thread_pool_exec", thread_pool_exec)
+
+    await dealer.search({"question": "risk validation", "candidate_mode": "bm25"}, "idx", ["kb"], emb_mdl=object())
+
+    assert captured == [[lexical_expression]]
+
+
+@pytest.mark.asyncio
+async def test_search_bm25_with_no_lexical_expression_fails_closed(monkeypatch):
+    dealer = _candidate_mode_dealer()
+    dealer.qryr = SimpleNamespace(question=lambda *_args, **_kwargs: (None, []))
+    dealer.dataStore = SimpleNamespace(search=lambda *_args, **_kwargs: pytest.fail("datastore must not run"))
+
+    async def get_vector(*_args, **_kwargs):
+        pytest.fail("embedding must not run")
+
+    dealer.get_vector = get_vector
+    result = await dealer.search({"question": "???", "candidate_mode": "bm25"}, "idx", ["kb"], emb_mdl=object())
+
+    assert result.total == 0
+    assert result.ids == []
 
 
 @pytest.mark.asyncio

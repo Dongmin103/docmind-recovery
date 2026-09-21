@@ -1534,8 +1534,8 @@ async def search_datasets(tenant_id: str, req: dict, *, candidate_mode: str = "h
     from rag.app.tag import label_question
     from rag.prompts.generator import cross_languages, keyword_extraction
 
-    if candidate_mode not in {"hybrid", "dense"}:
-        return False, "candidate_mode must be 'hybrid' or 'dense'"
+    if candidate_mode not in {"hybrid", "dense", "bm25"}:
+        return False, "candidate_mode must be 'hybrid', 'dense', or 'bm25'"
 
     kb_ids = req.get("dataset_ids", [])
     page = int(req.get("page", 1))
@@ -1701,7 +1701,13 @@ async def search_datasets(tenant_id: str, req: dict, *, candidate_mode: str = "h
                 ranks["chunks"].insert(0, ck)
         except Exception:
             logging.warning("search_datasets KG retrieval failed: datasets=%s tenant=%s", kb_ids, tenant_id, exc_info=True)
-    ranks["chunks"] = settings.retriever.retrieval_by_children(ranks["chunks"], tenant_ids)
+    if candidate_mode == "hybrid":
+        ranks["chunks"] = settings.retriever.retrieval_by_children(ranks["chunks"], tenant_ids)
+    else:
+        # DocMind's independent BM25/dense lanes must preserve datastore rank
+        # positions for RRF. Parent-to-child expansion can reorder and enlarge
+        # a lane, so it belongs only to the legacy hybrid retrieval path.
+        ranks["chunks"] = ranks["chunks"][:size]
 
     for c in ranks["chunks"]:
         c.pop("vector", None)

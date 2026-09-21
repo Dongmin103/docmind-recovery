@@ -15,12 +15,8 @@ type Props = {
   registrations: DocMindRegistration[];
   folderNames: Map<string, string>;
   documentFolderNames?: Map<string, string>;
-  hasDraft: boolean;
-  draftedDocumentIds: Set<string>;
   retryPending: boolean;
-  addPending: boolean;
   onRetry: (id: string) => void;
-  onAdd: (registration: DocMindRegistration) => void;
   renderInspection: (registration: DocMindRegistration) => ReactNode;
 };
 
@@ -34,9 +30,7 @@ export default function RegistrationPanel(props: Props) {
     (r) => r.state === 'FAILED' || r.state === 'CANCELLED',
   );
   const work = current.filter(
-    (r) =>
-      !attention.includes(r) &&
-      !(r.state === 'INDEXED' && r.active_catalog_member),
+    (r) => !attention.includes(r) && !(r.state === 'INDEXED' && r.index_ready),
   );
   const rows =
     filter === 'history'
@@ -141,14 +135,6 @@ function RegistrationRow({
   ...props
 }: Props & { registration: DocMindRegistration }) {
   const retry = () => props.onRetry(r.registration_id);
-  const add = () => props.onAdd(r);
-  const canAdd =
-    r.document_exists &&
-    r.is_current &&
-    r.draft_eligible &&
-    props.hasDraft &&
-    !r.active_catalog_member &&
-    !props.draftedDocumentIds.has(r.document_id);
   const message = r.parser_run?.error_message || r.error_message;
   return (
     <article className="py-4">
@@ -162,7 +148,7 @@ function RegistrationRow({
               props.folderNames.get(r.folder_id || '') ||
               '폴더 정보 없음'}{' '}
             · {r.chunk_count}개 청크 ·{' '}
-            {r.active_catalog_member ? '검색 반영됨' : '검색 미반영'}
+            {r.index_ready ? '검색 가능' : '검색 준비 중'}
           </p>
         </div>
         <span
@@ -173,16 +159,6 @@ function RegistrationRow({
         </span>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {r.document_exists && props.renderInspection(r)}
-          {canAdd && (
-            <button
-              type="button"
-              onClick={add}
-              disabled={props.addPending}
-              className="rounded border border-border-button px-2 py-1 disabled:opacity-40"
-            >
-              초안에 추가
-            </button>
-          )}
           {r.document_exists && r.is_current && r.retry_allowed && (
             <button
               type="button"

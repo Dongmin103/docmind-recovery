@@ -63,3 +63,36 @@ def test_search_datasets_rejects_invalid_candidate_weight_before_retrieval(monke
 
     assert success is False
     assert message == "candidate_vector_similarity_weight must be a finite number in [0, 1]"
+
+
+@pytest.mark.parametrize("candidate_mode", ["bm25", "dense"])
+def test_independent_lanes_preserve_rank_and_cap_before_rrf(monkeypatch, candidate_mode):
+    kb = SimpleNamespace(tenant_id="kb-tenant", embd_id="embedding")
+    chunks = [{"chunk_id": f"chunk-{index:03}"} for index in range(140)]
+
+    monkeypatch.setattr(service.KnowledgebaseService, "accessible", staticmethod(lambda *_args: True))
+    monkeypatch.setattr(service.KnowledgebaseService, "get_by_ids", staticmethod(lambda *_args: [kb]))
+    monkeypatch.setattr(service.KnowledgebaseService, "query", staticmethod(lambda *_args, **_kwargs: [kb]))
+    monkeypatch.setattr(service.UserTenantService, "query", staticmethod(lambda *_args, **_kwargs: [SimpleNamespace(tenant_id="tenant")]))
+    monkeypatch.setattr(tenant_model_service, "get_model_config_from_provider_instance", lambda *_args: {})
+    monkeypatch.setattr(service, "resolve_model_config", lambda *_args: {})
+    monkeypatch.setattr(llm_service, "LLMBundle", lambda *_args: object())
+    monkeypatch.setattr(tag, "label_question", lambda *_args: {})
+
+    async def retrieval(*_args, **_kwargs):
+        return {"chunks": list(chunks), "total": len(chunks)}
+
+    def expand_children(*_args, **_kwargs):
+        pytest.fail("independent lanes must not expand or reorder child chunks")
+
+    monkeypatch.setattr(
+        service.settings,
+        "retriever",
+        SimpleNamespace(retrieval=retrieval, retrieval_by_children=expand_children),
+    )
+    request = _request()
+    request["size"] = 128
+    success, result = asyncio.run(service.search_datasets("tenant", request, candidate_mode=candidate_mode))
+
+    assert success is True
+    assert [chunk["chunk_id"] for chunk in result["chunks"]] == [f"chunk-{index:03}" for index in range(128)]

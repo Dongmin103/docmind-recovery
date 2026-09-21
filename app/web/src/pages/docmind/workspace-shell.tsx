@@ -18,12 +18,6 @@ const Sections: {
     description: '폴더 · 문서 · 인덱싱',
     admin: true,
   },
-  {
-    id: 'catalog',
-    label: 'Catalog',
-    description: 'L0/L1 · Publish · 버전',
-    admin: true,
-  },
   { id: 'settings', label: '설정', description: '계정 · 모델' },
 ];
 

@@ -11,9 +11,8 @@ export interface DocMindFolder {
 }
 
 export interface DocMindFolderCatalog {
+  project_id?: string;
   dataset_id: string;
-  catalog_source: 'static' | 'database';
-  catalog_version_id: string;
   folders: DocMindFolder[];
   hierarchical?: boolean;
   initialized?: boolean;
@@ -28,24 +27,22 @@ export interface DocMindSearchResult {
   ranked_total?: number;
   total: number;
   candidate_count: number;
-  selected_folders: Array<{ id: string; score?: number }>;
-  catalog_source: 'static' | 'database';
-  catalog_version_id: string;
-  scope_mode: 'automatic' | 'manual';
-  effective_folder_ids: string[];
-  caps: {
-    folders: number;
+  caps?: {
     candidates: number;
-    per_folder: number;
     per_document: number;
     results: number;
   };
 }
 
+export type DocMindSearchScope =
+  | { mode: 'all' }
+  | { mode: 'folders'; folderIds: string[] }
+  | { mode: 'documents'; documentIds: string[] };
+
 export interface DocMindSearchRequest {
   question: string;
-  folderIds?: string[];
-  catalogVersionId?: string;
+  projectId?: string;
+  scope: DocMindSearchScope;
 }
 
 export type DocMindRegistrationState =
@@ -93,8 +90,6 @@ export interface DocMindRegistration {
   progress: number;
   chunk_count: number;
   index_ready: boolean;
-  draft_eligible: boolean;
-  active_catalog_member: boolean;
   retry_allowed: boolean;
   is_current: boolean;
   retry_of_id?: string;
@@ -106,160 +101,7 @@ export interface DocMindRegistration {
 export interface DocMindRegistrationList {
   project_id: string;
   dataset_id: string;
-  catalog_version_id: string;
   registrations: DocMindRegistration[];
-}
-
-export type DocMindDraftOperation = 'ADD' | 'REMOVE' | 'MOVE';
-export type DocMindReadinessMode = 'SEARCH_VALIDATED' | 'ADMIN_SAVED';
-
-export interface DocMindDraftChange {
-  operation: DocMindDraftOperation;
-  document_id: string;
-  document_name?: string;
-  registration_id?: string;
-  from_folder_id?: string;
-  to_folder_id?: string;
-  expected_parent_folder_id?: string;
-  ordinal: number;
-}
-
-export interface DocMindDraft {
-  draft_id: string;
-  version_label: string;
-  parent_version_id: string;
-  lifecycle_state:
-    | 'DRAFT'
-    | 'GENERATING'
-    | 'GENERATED'
-    | 'VALIDATING'
-    | 'READY'
-    | 'FAILED';
-  health_state: 'UNVALIDATED' | 'VALID' | 'EXPIRED' | 'INVALID';
-  health_reason?: string;
-  snapshot_hash: string;
-  active_parent_is_current: boolean;
-  change_count: number;
-  has_effective_changes: boolean;
-  generation_progress: number;
-  digest_ready_count: number;
-  membership_count: number;
-  card_ready_count: number;
-  can_generate: boolean;
-  validation_report_hash?: string;
-  validated_at?: string;
-  validation_expires_at?: string;
-  readiness_mode?: DocMindReadinessMode;
-  search_validation_performed?: boolean;
-  source_ready_version_id?: string;
-  snapshot_schema_version?: number;
-  folders: Array<{
-    id: string;
-    name: string;
-    ordinal: number;
-    document_count: number;
-    parent_id?: string;
-    relative_path?: string;
-    depth?: number;
-  }>;
-  changes: DocMindDraftChange[];
-  routing_cards?: Array<{
-    folder_id: string;
-    folder_name: string;
-    l0: string;
-    l1: string;
-    l0_hash?: string;
-    l1_hash?: string;
-  }>;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface DocMindDraftList {
-  project_id: string;
-  active_version_id: string;
-  drafts: DocMindDraft[];
-}
-
-export interface DocMindDraftChangeRequest {
-  operation: DocMindDraftOperation;
-  documentId: string;
-  registrationId?: string;
-  fromFolderId?: string;
-  toFolderId?: string;
-  expectedParentFolderId?: string;
-}
-
-export interface DocMindCatalogVersion {
-  version_id: string;
-  version_label: string;
-  parent_version_id?: string;
-  lifecycle_state:
-    | 'DRAFT'
-    | 'GENERATING'
-    | 'GENERATED'
-    | 'VALIDATING'
-    | 'READY'
-    | 'PUBLISHED'
-    | 'SUPERSEDED'
-    | 'FAILED';
-  health_state: 'UNVALIDATED' | 'VALID' | 'EXPIRED' | 'INVALID';
-  health_reason?: string;
-  membership_count: number;
-  active: boolean;
-  publish_allowed: boolean;
-  rollback_allowed: boolean;
-  delete_allowed: boolean;
-  delete_blocker?: string;
-  deletion_pending?: boolean;
-  validation_report_hash?: string;
-  validated_at?: string;
-  validation_expires_at?: string;
-  readiness_mode?: DocMindReadinessMode;
-  search_validation_performed?: boolean;
-  source_ready_version_id?: string;
-  routing_cards?: Array<{
-    folder_id: string;
-    folder_name: string;
-    relative_path?: string;
-    l0: string;
-    l1: string;
-  }>;
-}
-
-export interface DocMindManualRoutingCard {
-  folder_id: string;
-  l0: string;
-  l1: string;
-}
-
-export interface DocMindManualCardRevisionRequest {
-  sourceReadyVersionId: string;
-  expectedActiveVersionId: string;
-  expectedSourceSnapshotHash: string;
-  cards: DocMindManualRoutingCard[];
-}
-
-export interface DocMindManualCardRevisionResponse {
-  draft_id: string;
-  version_label: string;
-  parent_version_id: string;
-  source_ready_version_id: string;
-  lifecycle_state: 'READY';
-  health_state: 'VALID';
-  snapshot_hash: string;
-  routing_card_set_hash: string;
-  root_identity_sha256: string;
-  manual_save_report_hash: string;
-  readiness_mode: 'ADMIN_SAVED';
-  search_validation_performed: false;
-}
-
-export interface DocMindCatalogVersionList {
-  project_id: string;
-  active_version_id: string;
-  catalog_source_mode: 'static' | 'database';
-  versions: DocMindCatalogVersion[];
 }
 
 export interface DocMindHierarchyNode {
@@ -322,14 +164,19 @@ export const bootstrapDocMindWorkspace = () =>
 
 export const searchDocMind = ({
   question,
-  folderIds,
-  catalogVersionId,
+  projectId,
+  scope,
 }: DocMindSearchRequest) => {
-  const data: Record<string, unknown> = { question };
-  if (folderIds?.length) {
-    data.folder_ids = folderIds;
-    data.catalog_version_id = catalogVersionId;
-  }
+  const data: Record<string, unknown> = {
+    question,
+    scope:
+      scope.mode === 'folders'
+        ? { mode: scope.mode, folder_ids: scope.folderIds }
+        : scope.mode === 'documents'
+          ? { mode: scope.mode, document_ids: scope.documentIds }
+          : { mode: scope.mode },
+  };
+  if (projectId) data.project_id = projectId;
   return request.post('/api/v1/docmind/search', { data });
 };
 
@@ -404,15 +251,6 @@ export const updateDocMindHierarchyFolder = (
 export const deleteDocMindHierarchyFolder = (folderId: string) =>
   request.delete(`/api/v1/docmind/admin/hierarchy/folders/${folderId}`);
 
-export const captureDocMindHierarchyDraft = (
-  expectedActiveVersionId: string,
-  idempotencyKey: string,
-) =>
-  request.post('/api/v1/docmind/admin/hierarchy/capture', {
-    data: { expected_active_version_id: expectedActiveVersionId },
-    headers: { 'Idempotency-Key': idempotencyKey },
-  });
-
 export const retryDocMindRegistration = (
   registrationId: string,
   idempotencyKey: string,
@@ -420,92 +258,4 @@ export const retryDocMindRegistration = (
   request.post(`/api/v1/docmind/admin/registrations/${registrationId}/retry`, {
     data: {},
     headers: { 'Idempotency-Key': idempotencyKey },
-  });
-
-export const getDocMindDrafts = () =>
-  request.get('/api/v1/docmind/admin/catalog/drafts');
-
-export const getDocMindDraft = (draftId: string) =>
-  request.get(`/api/v1/docmind/admin/catalog/drafts/${draftId}`);
-
-export const createDocMindDraft = (
-  expectedParentVersionId: string,
-  idempotencyKey: string,
-) =>
-  request.post('/api/v1/docmind/admin/catalog/drafts', {
-    data: { expected_parent_version_id: expectedParentVersionId },
-    headers: { 'Idempotency-Key': idempotencyKey },
-  });
-
-export const changeDocMindDraft = (
-  draftId: string,
-  change: DocMindDraftChangeRequest,
-  idempotencyKey: string,
-) =>
-  request.post(`/api/v1/docmind/admin/catalog/drafts/${draftId}/changes`, {
-    data: {
-      operation: change.operation,
-      document_id: change.documentId,
-      registration_id: change.registrationId,
-      from_folder_id: change.fromFolderId,
-      to_folder_id: change.toFolderId,
-      expected_parent_folder_id: change.expectedParentFolderId,
-    },
-    headers: { 'Idempotency-Key': idempotencyKey },
-  });
-
-export const generateDocMindDraft = (draftId: string) =>
-  request.post(`/api/v1/docmind/admin/catalog/drafts/${draftId}/generate`, {
-    data: {},
-  });
-
-export const createDocMindManualCardRevision = (
-  revision: DocMindManualCardRevisionRequest,
-  idempotencyKey: string,
-) =>
-  request.post(
-    `/api/v1/docmind/admin/catalog/drafts/${revision.sourceReadyVersionId}/manual-card-revisions`,
-    {
-      data: {
-        expected_active_version_id: revision.expectedActiveVersionId,
-        expected_source_snapshot_hash: revision.expectedSourceSnapshotHash,
-        cards: revision.cards,
-      },
-      headers: { 'Idempotency-Key': idempotencyKey },
-    },
-  );
-
-export const getDocMindCatalogVersions = () =>
-  request.get('/api/v1/docmind/admin/catalog/versions');
-
-export const publishDocMindCatalogVersion = (
-  versionId: string,
-  expectedActiveVersionId: string,
-  idempotencyKey: string,
-) =>
-  request.post(`/api/v1/docmind/admin/catalog/drafts/${versionId}/publish`, {
-    data: { expected_active_version_id: expectedActiveVersionId },
-    headers: { 'Idempotency-Key': idempotencyKey },
-  });
-
-export const rollbackDocMindCatalogVersion = (
-  versionId: string,
-  expectedActiveVersionId: string,
-  idempotencyKey: string,
-) =>
-  request.post(`/api/v1/docmind/admin/catalog/${versionId}/rollback`, {
-    data: { expected_active_version_id: expectedActiveVersionId },
-    headers: { 'Idempotency-Key': idempotencyKey },
-  });
-
-export const deleteDocMindCatalogVersion = (
-  versionId: string,
-  expectedActiveVersionId: string,
-  expectedVersionLabel: string,
-) =>
-  request.delete(`/api/v1/docmind/admin/catalog/versions/${versionId}`, {
-    data: {
-      expected_active_version_id: expectedActiveVersionId,
-      expected_version_label: expectedVersionLabel,
-    },
   });

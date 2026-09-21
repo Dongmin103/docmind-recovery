@@ -15,8 +15,6 @@ const row = (
   progress: 1,
   chunk_count: 10,
   index_ready: true,
-  draft_eligible: true,
-  active_catalog_member: false,
   retry_allowed: false,
   is_current: true,
   ...values,
@@ -26,37 +24,37 @@ const setup = (
   documentFolderNames = new Map<string, string>(),
 ) => {
   const onRetry = jest.fn();
-  const onAdd = jest.fn();
   render(
     <RegistrationPanel
       registrations={registrations}
       folderNames={new Map([['folder', 'Validation']])}
       documentFolderNames={documentFolderNames}
-      hasDraft
-      draftedDocumentIds={new Set()}
       retryPending={false}
-      addPending={false}
       onRetry={onRetry}
-      onAdd={onAdd}
       renderInspection={(r) => <a href={`#${r.document_id}`}>문서 상세</a>}
     />,
   );
-  return { onRetry, onAdd };
+  return { onRetry };
 };
 
 describe('minimal registration history', () => {
   it('uses the document parent from the source tree when folder IDs have different representations', () => {
     setup(
-      [row('doc', { folder_id: 'node-opaque-slug' })],
+      [
+        row('doc', {
+          folder_id: 'node-opaque-slug',
+          index_ready: false,
+        }),
+      ],
       new Map([['doc', 'GMP/추가 자료']]),
     );
     expect(screen.getByText(/GMP\/추가 자료/)).toBeVisible();
     expect(screen.queryByText(/폴더 정보 없음/)).toBeNull();
   });
   it('keeps current work visible and exposes failures/history only on request without mutations', () => {
-    const { onRetry, onAdd } = setup([
-      row('work'),
-      row('published', { active_catalog_member: true }),
+    const { onRetry } = setup([
+      row('work', { index_ready: false }),
+      row('published'),
       row('failed', { state: 'FAILED', retry_allowed: true }),
       row('old-failed', {
         state: 'FAILED',
@@ -75,32 +73,23 @@ describe('minimal registration history', () => {
     expect(screen.getByText('old-failed.pdf')).toBeVisible();
     expect(screen.getAllByRole('button', { name: '재시도' })).toHaveLength(1);
     expect(onRetry).not.toHaveBeenCalled();
-    expect(onAdd).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '등록 기록 닫기' }));
     expect(screen.queryByText('old-failed.pdf')).toBeNull();
     expect(screen.getByText('work.pdf')).toBeVisible();
   });
 
-  it('retains explicit add/retry actions and never treats history disclosure as an action', () => {
-    const { onAdd, onRetry } = setup([
-      row('ready'),
+  it('retains retry actions and never treats history disclosure as an action', () => {
+    const { onRetry } = setup([
+      row('ready', { index_ready: false }),
       row('failure', { state: 'FAILED', retry_allowed: true }),
     ]);
-    fireEvent.click(screen.getByRole('button', { name: '초안에 추가' }));
-    expect(onAdd).toHaveBeenCalledWith(
-      expect.objectContaining({ registration_id: 'ready' }),
-    );
     fireEvent.click(screen.getByRole('button', { name: '확인 필요 1' }));
     fireEvent.click(screen.getByRole('button', { name: '재시도' }));
     expect(onRetry).toHaveBeenCalledWith('failure');
   });
 
   it('reveals long histories five at a time without dropping any records', () => {
-    setup(
-      Array.from({ length: 12 }, (_, i) =>
-        row(`done-${i}`, { active_catalog_member: true }),
-      ),
-    );
+    setup(Array.from({ length: 12 }, (_, i) => row(`done-${i}`)));
     expect(
       screen.getByText('현재 진행하거나 반영할 작업이 없습니다.'),
     ).toBeVisible();

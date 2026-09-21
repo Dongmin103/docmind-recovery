@@ -6,10 +6,7 @@ from api.apps import login_required, login_user
 from api.apps.services import (
     docmind_api_service,
     docmind_bootstrap_service,
-    docmind_draft_service,
-    docmind_generation_service,
     docmind_hierarchy_service,
-    docmind_publish_service,
     docmind_registration_service,
     docmind_shared_workspace_service,
 )
@@ -21,6 +18,34 @@ logger = logging.getLogger(__name__)
 
 def _public_search_result(result):
     return {key: value for key, value in result.items() if key != "scope_doc_ids"}
+
+
+def _parse_search_scope(value):
+    if not isinstance(value, dict):
+        raise ValueError("scope must be an object")
+
+    mode = value.get("mode")
+    allowed_keys = {
+        "all": {"mode"},
+        "folders": {"mode", "folder_ids"},
+        "documents": {"mode", "document_ids"},
+    }
+    if mode not in allowed_keys:
+        raise ValueError("scope.mode must be one of: all, folders, documents")
+    unexpected = set(value) - allowed_keys[mode]
+    if unexpected:
+        raise ValueError(f"scope contains fields invalid for {mode} mode")
+
+    if mode == "all":
+        return {"mode": "all"}
+
+    ids_key = "folder_ids" if mode == "folders" else "document_ids"
+    identifiers = value.get(ids_key)
+    if not isinstance(identifiers, list) or not identifiers:
+        raise ValueError(f"scope.{ids_key} must be a non-empty array")
+    if any(not isinstance(identifier, str) or not identifier.strip() for identifier in identifiers):
+        raise ValueError(f"scope.{ids_key} must contain non-empty strings")
+    return {"mode": mode, ids_key: [identifier.strip() for identifier in identifiers]}
 
 
 @manager.route("/docmind/shared-session", methods=["POST"])  # noqa: F821
@@ -96,18 +121,26 @@ async def search(tenant_id: str):
     req = await request.get_json(silent=True)
     if not isinstance(req, dict):
         return get_error_argument_result("JSON body must be an object")
-    question = str((req or {}).get("question") or "").strip()
-    if not question:
+    unexpected = set(req) - {"question", "project_id", "scope"}
+    if unexpected:
+        return get_error_argument_result("request contains unsupported fields")
+    question_value = req.get("question")
+    if not isinstance(question_value, str) or not question_value.strip():
         return get_error_argument_result("question is required")
+    question = question_value.strip()
     try:
-        search_args = {}
-        if "folder_ids" in req:
-            search_args["folder_ids"] = req["folder_ids"]
-            if "catalog_version_id" in req:
-                search_args["catalog_version_id"] = req["catalog_version_id"]
-        elif "catalog_version_id" in req:
-            return get_error_argument_result("catalog_version_id requires folder_ids")
-        result = await docmind_api_service.search(tenant_id, question, **search_args)
+        project_id = None
+        if "project_id" in req:
+            if not isinstance(req["project_id"], str) or not req["project_id"].strip():
+                raise ValueError("project_id must be a non-empty string")
+            project_id = req["project_id"].strip()
+        scope = _parse_search_scope(req.get("scope"))
+        result = await docmind_api_service.search(
+            tenant_id,
+            question,
+            project_id=project_id,
+            scope=scope,
+        )
         return get_result(data=_public_search_result(result))
     except docmind_api_service.DocmindCatalogNotInitializedError as error:
         return get_error_data_result(message=error.code)
@@ -138,7 +171,6 @@ async def create_registrations(tenant_id: str):
     except Exception:
         logger.exception("DocMind registration failed")
         return get_error_data_result(message="DOCMIND_REGISTRATION_INTERNAL_ERROR")
-
 
 @manager.route("/docmind/admin/registrations", methods=["GET"])  # noqa: F821
 @login_required
@@ -294,29 +326,6 @@ async def delete_hierarchy_folder(tenant_id: str, folder_id: str):
         return get_error_data_result(message="DOCMIND_HIERARCHY_INTERNAL_ERROR")
 
 
-@manager.route("/docmind/admin/hierarchy/capture", methods=["POST"])  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def capture_hierarchy(tenant_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
-    try:
-        return get_result(
-            data=docmind_hierarchy_service.capture_hierarchy_draft(
-                tenant_id,
-                str(req.get("expected_active_version_id") or "").strip(),
-                idempotency_key,
-            )
-        )
-    except docmind_hierarchy_service.DocmindHierarchyError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind hierarchy capture failed")
-        return get_error_data_result(message="DOCMIND_HIERARCHY_INTERNAL_ERROR")
-
-
 @manager.route("/docmind/admin/registrations/<registration_id>/retry", methods=["POST"])  # noqa: F821
 @login_required
 @add_tenant_id_to_kwargs
@@ -337,230 +346,3 @@ async def retry_registration(tenant_id: str, registration_id: str):
     except Exception:
         logger.exception("DocMind registration retry failed")
         return get_error_data_result(message="DOCMIND_REGISTRATION_INTERNAL_ERROR")
-
-
-@manager.route("/docmind/admin/catalog/drafts", methods=["GET"])  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def catalog_drafts(tenant_id: str):
-    try:
-        return get_result(data=docmind_draft_service.list_drafts(tenant_id))
-    except docmind_draft_service.DocmindDraftError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind draft list failed")
-        return get_error_data_result(message="DOCMIND_DRAFT_INTERNAL_ERROR")
-
-
-@manager.route("/docmind/admin/catalog/drafts", methods=["POST"])  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def create_catalog_draft(tenant_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    expected_parent_version_id = str(req.get("expected_parent_version_id") or "").strip()
-    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
-    try:
-        return get_result(
-            data=docmind_draft_service.create_draft(
-                tenant_id,
-                expected_parent_version_id,
-                idempotency_key,
-            )
-        )
-    except docmind_draft_service.DocmindDraftError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind draft creation failed")
-        return get_error_data_result(message="DOCMIND_DRAFT_INTERNAL_ERROR")
-
-
-@manager.route("/docmind/admin/catalog/drafts/<draft_id>", methods=["GET"])  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def catalog_draft(tenant_id: str, draft_id: str):
-    try:
-        return get_result(data=docmind_draft_service.get_draft(tenant_id, draft_id))
-    except docmind_draft_service.DocmindDraftError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind draft read failed")
-        return get_error_data_result(message="DOCMIND_DRAFT_INTERNAL_ERROR")
-
-
-@manager.route("/docmind/admin/catalog/drafts/<draft_id>/changes", methods=["POST"])  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def change_catalog_draft(tenant_id: str, draft_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
-    try:
-        return get_result(
-            data=docmind_draft_service.apply_change(
-                tenant_id,
-                draft_id,
-                str(req.get("operation") or ""),
-                document_id=str(req.get("document_id") or "").strip(),
-                registration_id=(str(req.get("registration_id") or "").strip() or None),
-                from_folder_id=(str(req.get("from_folder_id") or "").strip() or None),
-                to_folder_id=(str(req.get("to_folder_id") or "").strip() or None),
-                expected_parent_folder_id=(str(req.get("expected_parent_folder_id") or "").strip() or None),
-                idempotency_key=idempotency_key,
-            )
-        )
-    except docmind_draft_service.DocmindDraftError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind draft change failed")
-        return get_error_data_result(message="DOCMIND_DRAFT_INTERNAL_ERROR")
-
-
-@manager.route(  # noqa: F821
-    "/docmind/admin/catalog/drafts/<draft_id>/generate",
-    methods=["POST"],
-)  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def generate_catalog_draft(tenant_id: str, draft_id: str):
-    try:
-        return get_result(
-            data=docmind_generation_service.start_generation(
-                tenant_id,
-                draft_id,
-            )
-        )
-    except (
-        docmind_draft_service.DocmindDraftError,
-        docmind_generation_service.DocmindGenerationError,
-    ) as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind draft generation failed to start")
-        return get_error_data_result(message="DOCMIND_GENERATION_INTERNAL_ERROR")
-
-
-@manager.route(  # noqa: F821
-    "/docmind/admin/catalog/drafts/<source_ready_id>/manual-card-revisions",
-    methods=["POST"],
-)  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def create_manual_card_revision(tenant_id: str, source_ready_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
-    try:
-        return get_result(
-            data=docmind_draft_service.create_manual_card_revision(
-                tenant_id,
-                source_ready_id,
-                expected_active_version_id=str(req.get("expected_active_version_id") or "").strip(),
-                expected_source_snapshot_hash=str(req.get("expected_source_snapshot_hash") or "").strip(),
-                cards=req.get("cards"),
-                idempotency_key=idempotency_key,
-            )
-        )
-    except docmind_draft_service.DocmindDraftError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind manual card revision failed")
-        return get_error_data_result(message="DOCMIND_MANUAL_CARD_INTERNAL_ERROR")
-
-
-@manager.route("/docmind/admin/catalog/versions", methods=["GET"])  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def catalog_versions(tenant_id: str):
-    try:
-        return get_result(data=docmind_publish_service.list_versions(tenant_id))
-    except docmind_publish_service.DocmindPublishError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind version list failed")
-        return get_error_data_result(message="DOCMIND_PUBLISH_INTERNAL_ERROR")
-
-
-@manager.route(  # noqa: F821
-    "/docmind/admin/catalog/versions/<version_id>",
-    methods=["DELETE"],
-)  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def delete_catalog_version(tenant_id: str, version_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    try:
-        return get_result(
-            data=docmind_publish_service.queue_failed_version_deletion(
-                tenant_id,
-                version_id,
-                expected_active_version_id=str(req.get("expected_active_version_id") or "").strip(),
-                expected_version_label=str(req.get("expected_version_label") or "").strip(),
-            )
-        )
-    except docmind_publish_service.DocmindPublishError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind version deletion failed")
-        return get_error_data_result(message="DOCMIND_VERSION_DELETE_INTERNAL_ERROR")
-
-
-@manager.route(  # noqa: F821
-    "/docmind/admin/catalog/drafts/<version_id>/publish",
-    methods=["POST"],
-)  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def publish_catalog_version(tenant_id: str, version_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    expected_active_version_id = str(req.get("expected_active_version_id") or "").strip()
-    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
-    try:
-        return get_result(
-            data=docmind_publish_service.publish_version(
-                tenant_id,
-                version_id,
-                expected_active_version_id,
-                idempotency_key,
-            )
-        )
-    except docmind_publish_service.DocmindPublishError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind version publish failed")
-        return get_error_data_result(message="DOCMIND_PUBLISH_INTERNAL_ERROR")
-
-
-@manager.route(  # noqa: F821
-    "/docmind/admin/catalog/<version_id>/rollback",
-    methods=["POST"],
-)  # noqa: F821
-@login_required
-@add_tenant_id_to_kwargs
-async def rollback_catalog_version(tenant_id: str, version_id: str):
-    req = await request.get_json(silent=True)
-    if not isinstance(req, dict):
-        return get_error_argument_result("JSON body must be an object")
-    expected_active_version_id = str(req.get("expected_active_version_id") or "").strip()
-    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
-    try:
-        return get_result(
-            data=docmind_publish_service.rollback_version(
-                tenant_id,
-                version_id,
-                expected_active_version_id,
-                idempotency_key,
-            )
-        )
-    except docmind_publish_service.DocmindPublishError as error:
-        return get_error_data_result(message=error.code)
-    except Exception:
-        logger.exception("DocMind version rollback failed")
-        return get_error_data_result(message="DOCMIND_PUBLISH_INTERNAL_ERROR")

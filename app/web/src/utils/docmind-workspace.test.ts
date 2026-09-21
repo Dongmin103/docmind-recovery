@@ -21,7 +21,7 @@ describe('DocMind workspace navigation', () => {
       source: 'docmind',
       return: 'library',
     });
-    expect(buildDocMindSectionPath('catalog')).toBe('/docmind?view=catalog');
+    expect(buildDocMindSectionPath('search')).toBe('/docmind?view=search');
   });
 
   it.each([
@@ -36,6 +36,7 @@ describe('DocMind workspace navigation', () => {
 
   it('does not trust arbitrary view or return URL parameters', () => {
     expect(parseDocMindView('document')).toBe('document');
+    expect(parseDocMindView('catalog')).toBe('search');
     expect(parseDocMindView('https://external.test')).toBe('search');
     expect(parseDocMindReturnView('https://external.test')).toBe('search');
     expect(parseDocMindReturnView('document')).toBe('search');

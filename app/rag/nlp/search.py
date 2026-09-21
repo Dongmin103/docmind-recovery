@@ -199,8 +199,8 @@ class Dealer:
 
         qst = req.get("question", "")
         candidate_mode = req.get("candidate_mode", "hybrid")
-        if candidate_mode not in {"hybrid", "dense"}:
-            raise ValueError("candidate_mode must be 'hybrid' or 'dense'")
+        if candidate_mode not in {"hybrid", "dense", "bm25"}:
+            raise ValueError("candidate_mode must be 'hybrid', 'dense', or 'bm25'")
         candidate_vector_similarity_weight = req.get("candidate_vector_similarity_weight", 0.95)
         if isinstance(candidate_vector_similarity_weight, bool):
             raise ValueError("candidate_vector_similarity_weight must be a finite number in [0, 1]")
@@ -227,7 +227,20 @@ class Dealer:
             elif isinstance(highlight, list):
                 highlightFields = highlight
             matchText, keywords = self.qryr.question(qst, min_match=(0.3 if min_match else 0))
-            if emb_mdl is None:
+            if candidate_mode == "bm25" and not matchText:
+                # A non-empty question which produces no lexical expression
+                # is an empty BM25 lane, not permission to run a filter-only
+                # query over every document in scope.
+                return self.SearchResult(
+                    total=0,
+                    ids=[],
+                    query_vector=[],
+                    aggregation={},
+                    highlight={},
+                    field={},
+                    keywords=[],
+                )
+            if emb_mdl is None or candidate_mode == "bm25":
                 matchExprs = [matchText] if matchText else []
                 res = await thread_pool_exec(self.dataStore.search, src, highlightFields, filters, matchExprs, orderBy, offset, limit, idx_names, kb_ids, rank_feature=rank_feature)
                 total = self.dataStore.get_total(res)
@@ -675,8 +688,8 @@ class Dealer:
         ranks = {"total": 0, "chunks": [], "doc_aggs": {}}
         if not question:
             return ranks
-        if candidate_mode not in {"hybrid", "dense"}:
-            raise ValueError("candidate_mode must be 'hybrid' or 'dense'")
+        if candidate_mode not in {"hybrid", "dense", "bm25"}:
+            raise ValueError("candidate_mode must be 'hybrid', 'dense', or 'bm25'")
         if isinstance(candidate_vector_similarity_weight, bool):
             raise ValueError("candidate_vector_similarity_weight must be a finite number in [0, 1]")
         try:
@@ -730,6 +743,8 @@ class Dealer:
 
         if candidate_mode == "dense":
             vector_similarity_weight = 1.0
+        elif candidate_mode == "bm25":
+            vector_similarity_weight = 0.0
         term_similarity_weight = 1 - vector_similarity_weight
         logging.debug(
             "[Search] retrieval weights: trace_id=%s kb_count=%s similarity_threshold=%s vector_similarity_weight=%s full_text_weight=%s rerank_enabled=%s",
@@ -741,7 +756,15 @@ class Dealer:
             bool(rerank_mdl),
         )
 
-        if rerank_mdl and sres.total > 0:
+        if candidate_mode == "bm25":
+            # A lexical lane must preserve the datastore's BM25 ordering and
+            # must not generate or fetch vectors.  The DocMind C-search layer
+            # performs cross-lane fusion and hosted reranking separately.
+            sim = [sres.field[id].get("_score", 0.0) for id in sres.ids]
+            sim = [score if score is not None else 0.0 for score in sim]
+            tsim = sim
+            vsim = [0.0] * len(sim)
+        elif rerank_mdl and sres.total > 0:
             sim, tsim, vsim = self.rerank_by_model(
                 rerank_mdl,
                 sres,
