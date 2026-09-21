@@ -89,7 +89,7 @@ def hierarchy_env(monkeypatch):
         health_reason=None,
         snapshot_hash="a" * 64,
         snapshot_json="{}",
-        root_uri="viking://resources/flat/",
+        root_uri="docmind://catalog/flat/",
         root_version="static-v0",
         snapshot_schema_version=1,
         created_by="tenant-1",
@@ -97,7 +97,7 @@ def hierarchy_env(monkeypatch):
     )
     context = SimpleNamespace(
         project=project,
-        catalog=SimpleNamespace(dataset_id="dataset-1", root_uri="viking://resources/flat/", folders={}),
+        catalog=SimpleNamespace(dataset_id="dataset-1", root_uri="docmind://catalog/flat/", folders={}),
     )
     monkeypatch.setattr(service, "_context", lambda tenant_id: context)
     monkeypatch.setattr(

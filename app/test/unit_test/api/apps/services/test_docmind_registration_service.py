@@ -40,7 +40,7 @@ def registration_db(monkeypatch):
     database = SqliteDatabase(":memory:")
     catalog = SimpleNamespace(
         dataset_id="dataset-1",
-        root_uri="viking://resources/docmind/",
+        root_uri="docmind://catalog/docmind/",
         folders={
             "quality-risk-management": ("published-1",),
             "validation": ("published-2",),

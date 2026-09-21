@@ -14,7 +14,7 @@ services:
       context: ..
       dockerfile: Dockerfile
       args:
-        RAGFLOW_VERSION: v0.27.1-docmind-production-routing-v3-hybrid-redacted-20260912
+        RAGFLOW_VERSION: v0.27.1-docmind-c128-cutover-20260921
     depends_on:
       surya-parser-cpu:
         condition: service_healthy

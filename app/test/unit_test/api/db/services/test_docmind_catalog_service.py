@@ -49,7 +49,7 @@ def catalog_db():
     database.close()
 
 
-def _catalog(*, root_uri="viking://resources/docmind/", reverse=False):
+def _catalog(*, root_uri="docmind://catalog/docmind/", reverse=False):
     folders = {
         "quality-risk-management": ("doc-2", "doc-1"),
         "validation": ("doc-3",),
@@ -87,7 +87,7 @@ def test_static_v0_import_is_idempotent_and_loads_serving_equivalent_catalog(cat
 
     assert first == second
     assert first.catalog_source == "static"
-    assert first.root_uri == "viking://resources/docmind/"
+    assert first.root_uri == "docmind://catalog/docmind/"
     assert tuple(first.folders) == tuple(_catalog().folders)
     assert first.folders["quality-risk-management"] == ("doc-1", "doc-2")
     assert DocmindProject.select().count() == 1
@@ -130,7 +130,7 @@ def test_static_v0_import_rejects_same_idempotency_key_with_different_catalog(ca
     first = service.import_static_v0("tenant-1", _catalog())
 
     with pytest.raises(service.DocmindCatalogStateError, match="IDEMPOTENCY_STATE_MISMATCH"):
-        service.import_static_v0("tenant-1", _catalog(root_uri="viking://resources/changed/"))
+        service.import_static_v0("tenant-1", _catalog(root_uri="docmind://catalog/changed/"))
 
     assert DocmindCatalogVersion.select().count() == 1
     assert DocmindProject.get().active_version_id == first.active_version_id
@@ -215,7 +215,7 @@ def test_shadow_comparison_reports_only_bounded_reason(catalog_db):
     service.import_static_v0("tenant-1", _catalog())
 
     matched = service.compare_static_to_db("tenant-1", _catalog())
-    mismatched = service.compare_static_to_db("tenant-1", _catalog(root_uri="viking://resources/other/"))
+    mismatched = service.compare_static_to_db("tenant-1", _catalog(root_uri="docmind://catalog/other/"))
 
     assert matched.matched is True
     assert matched.reason == "MATCH"
@@ -249,7 +249,7 @@ def _published_dynamic_version(loaded):
         health_reason=None,
         snapshot_hash="0" * 64,
         snapshot_json="{}",
-        root_uri="viking://resources/dynamic-version/",
+        root_uri="docmind://catalog/dynamic-version/",
         root_version="DYNAMIC-1",
         routing_card_set_hash="a" * 64,
         validation_report_hash="b" * 64,
@@ -310,7 +310,7 @@ def test_database_primary_loader_validates_and_returns_dynamic_snapshot(catalog_
     assert active == serving
     assert active.active_version_id == version.id
     assert active.catalog_source == "database"
-    assert active.root_uri == "viking://resources/dynamic-version/"
+    assert active.root_uri == "docmind://catalog/dynamic-version/"
     assert sum(len(rows) for rows in active.folders.values()) == 7
 
 
@@ -364,7 +364,7 @@ def test_database_primary_loader_accepts_hierarchical_catalog_over_five_nodes(ca
         health_reason=None,
         snapshot_hash="0" * 64,
         snapshot_json="{}",
-        root_uri="viking://resources/hierarchical-version/",
+        root_uri="docmind://catalog/hierarchical-version/",
         root_version="HIERARCHY-1",
         routing_card_set_hash="a" * 64,
         validation_report_hash="b" * 64,

@@ -46,7 +46,7 @@ def _protect(document_id="doc-protected", lifecycle="PUBLISHED", health="VALID")
         health_state=health,
         snapshot_hash="a" * 64,
         snapshot_json="{}",
-        root_uri="viking://resources/docmind/",
+        root_uri="docmind://catalog/docmind/",
     )
     DocmindFolderVersionDocument.create(
         id=f"membership-{document_id}",
@@ -107,7 +107,7 @@ def test_guard_counts_one_document_once_across_published_and_superseded_versions
         health_state="VALID",
         snapshot_hash="b" * 64,
         snapshot_json="{}",
-        root_uri="viking://resources/docmind-old/",
+        root_uri="docmind://catalog/docmind-old/",
     )
     DocmindFolderVersionDocument.create(
         id="membership-old",
@@ -133,7 +133,7 @@ def test_guard_counts_one_document_once_across_projects(guard_db):
         health_state="VALID",
         snapshot_hash="c" * 64,
         snapshot_json="{}",
-        root_uri="viking://resources/docmind-other/",
+        root_uri="docmind://catalog/docmind-other/",
     )
     DocmindFolderVersionDocument.create(
         id="membership-other-project",

@@ -1,6 +1,6 @@
 # Windows 서버에서 개발 시작
 
-이 브랜치는 **Windows 개발 기준선과 1~4단계 C 검색 구현**을 제공한다. OpenViking 의존을 제거했고, 독립된 Windows/WSL2 개발 Compose와 빈 인프라 기동을 검증했다. 다만 운영 배포판은 아니며 실제 Jina/답변 모델 자격증명, uEncryptor2 연동, 사용자 시험 문서 검증은 후속 단계다. 원본 PDF·운영 청크·DB·MinIO 데이터는 이동하지 않는다.
+이 브랜치는 **Windows 개발 기준선과 C 검색 구현을 바탕으로 후속 단계를 진행하는 checkout**이다. OpenViking 제품 의존을 제거하고 재발 방지 검사를 추가했으며, 독립된 Windows/WSL2 개발 Compose와 빈 인프라 기동을 검증했다. 다만 운영 배포판은 아니며 실제 Jina/답변 모델 자격증명, uEncryptor2 연동, 사용자 시험 문서 검증은 후속 단계다. 원본 PDF·운영 청크·DB·MinIO 데이터는 이동하지 않는다.
 
 ## 받기
 
@@ -17,13 +17,13 @@ powershell -NoProfile -File .\tools\windows\Test-DevelopmentEnvironment.ps1
 
 ## 서버 쪽 Codex에게 그대로 전달
 
-> 이 저장소의 AGENTS.md, PRD.md, WINDOWS_DEVELOPMENT.md, docs/CURRENT-ARCHITECTURE.md, docs/HANDOFF-STATUS.md를 읽고 Windows Docker 기반 DocMind 리팩터링을 진행해 주세요. app/가 기존 커스텀 소스입니다. 이전 서버의 PDF·청크·DB·MinIO 데이터는 가져오지 않습니다. 먼저 현재 Windows에서 Docker Linux 컨테이너 실행 가능 여부와 기존 클라우드/uEncryptor2 설치를 읽기 전용으로 확인하고, 독립된 개발 폴더와 빈 개발 DB/볼륨을 준비하세요. 비민감 합성 표본으로 자동 복호화 실행 조건과 요청 시 원문 미리보기를 검증하면서, OpenViking 제거·구성 C128/prefix2400/Jina v3.5·source/폴더/문서 범위 검색·동기화를 구현하세요. 대화 기록은 사용자별 30일 조회/검색을 지원합니다. 문서 쓰기는 실제 클라우드 연계가 검증된 기능부터 공개합니다. 시험 규모는 나중에 제공하므로 다른 개발을 멈추지 마세요. 기존 클라우드 원본이나 서비스는 변경하지 말고, 비밀값은 Git에 넣지 마세요. 변경과 테스트 결과를 기능별 커밋으로 남겨 주세요.
+> 이 저장소의 AGENTS.md, PRD.md, WINDOWS_DEVELOPMENT.md, docs/CURRENT-ARCHITECTURE.md, docs/HANDOFF-STATUS.md를 읽고 Windows Docker 기반 DocMind 리팩터링을 진행해 주세요. app/가 기존 커스텀 소스에서 전환된 제품 코드입니다. 이전 서버의 PDF·청크·DB·MinIO 데이터는 가져오지 않습니다. 먼저 현재 Windows에서 Docker Linux 컨테이너 실행 가능 여부와 기존 클라우드/uEncryptor2 설치를 읽기 전용으로 확인하고, 독립된 개발 폴더와 빈 개발 DB/볼륨을 준비하세요. 비민감 합성 표본으로 자동 복호화 실행 조건과 요청 시 원문 미리보기를 검증하면서, 제거된 제품 의존의 재발 방지·구성 C128/prefix2400/Jina v3.5·source/폴더/문서 범위 검색·동기화를 구현하세요. 대화 기록은 사용자별 30일 조회/검색을 지원합니다. 문서 쓰기는 실제 클라우드 연계가 검증된 기능부터 공개합니다. 시험 규모는 나중에 제공하므로 다른 구현을 멈추지 마세요. 기존 클라우드 원본이나 서비스는 변경하지 말고, 비밀값은 Git에 넣지 마세요. 변경과 테스트 결과를 기능별 커밋으로 남겨 주세요.
 
 ## 첫 작업 순서
 
 1. 사전 점검 스크립트 결과로 Windows 버전, Git, Docker/Compose, Linux 컨테이너 모드, 자원과 세 루트의 존재 여부를 확인한다. 스크립트는 설치·복호화·서비스 변경을 하지 않는다.
 2. 기존 uEncryptor2의 위치/버전/의존·실행 계정을 확인한다. exe 및 관련 상용 모듈은 이 저장소에 포함하지 않는다. 대상 서버의 설치를 사용하고 원본 저장 루트 밖의 비민감 표본으로만 시험한다.
-3. app/docker/의 기존 Compose와 env 예제를 검토한다. Linux 호스트 절대 경로·고정 container_name·포트·OpenViking 의존·공용 로그인 설정이 남아 있다. **그대로 compose up 하지 않는다.** 개발 전용 프로젝트명/볼륨, Windows 경로 및 호스트 통신, loopback 포트, 새 자격증명을 준비한다.
+3. app/docker/의 Compose와 env 예제를 검토한다. 제거된 서비스는 없지만 Linux 호스트 절대 경로·일부 고정 container_name·포트·공용 로그인 설정은 대상 환경 검증이 필요하다. **운영 Compose를 그대로 개발 환경에서 올리지 않는다.** 개발 전용 프로젝트명/볼륨, Windows 경로 및 호스트 통신, loopback 포트, 새 자격증명을 준비한다.
 4. 새 모델 파일은 필요에 따라 다운로드한다. BGE-M3 tokenizer 소스 자원은 포함하지만 모델 가중치·Docker 이미지 캐시는 없다. 다운로드·이미지 빌드 시간이 필요하다.
 5. PRD 순서대로 검색과 수집/미리보기 연계를 독립적으로 구현한다. 기존 원본을 새 Windows로 옮기지 않고 합성 문서 및 사용자가 지정할 시험 문서를 사용한다.
 
@@ -56,3 +56,7 @@ python tools/windows/initialize_auth_keys.py --check
 - 합성 fixture는 코드 테스트용으로 남아 있지만 PDF/Office 원본 파일을 읽는 기존 테스트 일부는 별도 fixture가 필요하다. 사용자 원문을 받아 이 부족분을 채우지 말고 합성 fixture를 생성한다.
 - Windows 개발 전용 MySQL·Elasticsearch·Valkey·MinIO 인프라는 이 서버에서 정상 기동을 확인했다. 전체 애플리케이션 기동은 실제 Jina/답변 모델 자격증명을 넣은 뒤 수행한다.
 - uEncryptor2·실제 사용자 문서·외부 모델 API·성능 검증은 후속 작업이다. 원본 루트에는 접근하거나 변경하지 않는다.
+- 제품 경로 제거의 자동 검사와 개발/운영 전환 절차는 [docs/OPENVIKING-CUTOVER.md](docs/OPENVIKING-CUTOVER.md)를 따른다. 이 개발 작업은 운영 서비스 중지를 수행하지 않는다.
+- 5단계 개발 범위에서는 합성 데이터 전용 보안 경계와 암호화 backup/package 검증, 새 disconnected volume으로의 실제 restore를 통과했다. BitLocker와 실제 uEncryptor2 실행은 검증하지 않았으며 복구 volume을 서비스에 연결하지 않았다.
+- 6단계 개발 범위에서는 제거된 제품 runtime의 재유입 방지 검사와 운영 전환/rollback runbook을 구현했다. 운영 이미지 배포·서비스 중지·운영 데이터 전환은 수행하지 않았다.
+- 검색 화면의 전체/폴더/문서 범위 선택은 유지한다. 폴더 선택은 하위 폴더를 재귀적으로 포함하며 같은 scope를 BM25와 dense 후보 생성 전에 적용한다.
