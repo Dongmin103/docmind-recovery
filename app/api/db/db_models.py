@@ -1789,6 +1789,7 @@ class DocmindSource(DataBaseModel):
     id = CharField(max_length=64, primary_key=True)
     project_id = CharField(max_length=32, null=False, index=True)
     display_name = CharField(max_length=128, null=False)
+    default_folder_id = CharField(max_length=32, null=True, index=True)
     enabled = BooleanField(default=True, null=False, index=True)
 
     class Meta:
@@ -1803,6 +1804,7 @@ class DocmindSourceDocument(DataBaseModel):
     project_id = CharField(max_length=32, null=False, index=True)
     source_id = CharField(max_length=64, null=False, index=True)
     document_id = CharField(max_length=32, null=False, unique=True, index=True)
+    source_object_id = CharField(max_length=255, null=True, index=True)
     folder_id = CharField(max_length=32, null=False, index=True)
     relative_path = CharField(max_length=1024, null=False)
     relative_path_hash = CharField(max_length=64, null=False, index=True)
@@ -1855,6 +1857,7 @@ class DocmindIngestionJob(DataBaseModel):
     fencing_token = BigIntegerField(default=0, null=False)
     lease_owner = CharField(max_length=128, null=True, index=True)
     lease_expires_at = DateTimeField(null=True, index=True)
+    retry_not_before = DateTimeField(null=True, index=True)
     parser_input_token_hash = CharField(max_length=64, null=True)
     plaintext_sha256 = CharField(max_length=64, null=True)
     plaintext_size = BigIntegerField(null=True)
@@ -1881,6 +1884,157 @@ class DocmindWorkerRequestNonce(DataBaseModel):
 
     class Meta:
         db_table = "docmind_worker_request_nonce"
+
+
+class DocmindSourceScan(DataBaseModel):
+    """One source-scoped, resumable full-scan/reconciliation attempt."""
+
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, index=True)
+    scan_id = CharField(max_length=64, null=False)
+    worker_id = CharField(max_length=128, null=False, index=True)
+    schedule_fencing_token = BigIntegerField(null=True)
+    trigger = CharField(max_length=32, null=False, index=True)
+    lifecycle_state = CharField(max_length=32, null=False, index=True)
+    root_access_confirmed = BooleanField(default=False, null=False)
+    received_batch_count = IntegerField(default=0, null=False)
+    observed_file_count = BigIntegerField(default=0, null=False)
+    declared_batch_count = IntegerField(null=True)
+    declared_file_count = BigIntegerField(null=True)
+    started_at = DateTimeField(null=False, index=True)
+    completed_at = DateTimeField(null=True, index=True)
+    error_code = CharField(max_length=64, null=True, index=True)
+
+    class Meta:
+        db_table = "docmind_source_scan"
+        indexes = (
+            (("source_id", "scan_id"), True),
+            (("project_id", "source_id", "lifecycle_state"), False),
+        )
+
+
+class DocmindSourceScanBatch(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    source_scan_id = CharField(max_length=32, null=False, index=True)
+    batch_index = IntegerField(null=False)
+    payload_hash = CharField(max_length=64, null=False)
+    item_count = IntegerField(default=0, null=False)
+
+    class Meta:
+        db_table = "docmind_source_scan_batch"
+        indexes = ((('source_scan_id', 'batch_index'), True),)
+
+
+class DocmindSourceScanEntry(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    source_scan_id = CharField(max_length=32, null=False, index=True)
+    relative_path = CharField(max_length=1024, null=False)
+    relative_path_hash = CharField(max_length=64, null=False, index=True)
+    ciphertext_sha256 = CharField(max_length=64, null=False, index=True)
+    ciphertext_size = BigIntegerField(null=False)
+    source_mtime_ns = BigIntegerField(null=False)
+    source_document_id = CharField(max_length=32, null=True, index=True)
+    reconciliation_state = CharField(max_length=32, null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_scan_entry"
+        indexes = ((('source_scan_id', 'relative_path_hash'), True),)
+
+
+class DocmindSourceDeletion(DataBaseModel):
+    """Search exclusion tombstone retained with metadata for thirty days."""
+
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, index=True)
+    source_document_id = CharField(max_length=32, null=False, index=True)
+    document_id = CharField(max_length=32, null=False, index=True)
+    authority_kind = CharField(max_length=32, null=False, index=True)
+    authority_scan_id = CharField(max_length=32, null=True, index=True)
+    confirmed_at = DateTimeField(null=False, index=True)
+    search_excluded_at = DateTimeField(null=True, index=True)
+    retained_until = DateTimeField(null=False, index=True)
+    lifecycle_state = CharField(max_length=32, null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_deletion"
+        indexes = ((('source_document_id', 'confirmed_at'), True),)
+
+
+class DocmindSourceReconciliationSchedule(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, unique=True, index=True)
+    timezone_name = CharField(max_length=64, null=False, default="Asia/Seoul")
+    next_due_at = DateTimeField(null=False, index=True)
+    pending_local_date = CharField(max_length=10, null=True, index=True)
+    last_claimed_local_date = CharField(max_length=10, null=True, index=True)
+    lease_owner = CharField(max_length=128, null=True, index=True)
+    lease_expires_at = DateTimeField(null=True, index=True)
+    fencing_token = BigIntegerField(default=0, null=False)
+
+    class Meta:
+        db_table = "docmind_source_reconciliation_schedule"
+
+
+class DocmindSourceFolder(DataBaseModel):
+    """Verified source folder identity without overloading catalog folders."""
+
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, index=True)
+    folder_id = CharField(max_length=32, null=False, index=True)
+    parent_source_folder_id = CharField(max_length=32, null=True, index=True)
+    relative_path = CharField(max_length=1024, null=False)
+    relative_path_hash = CharField(max_length=64, null=False, index=True)
+    source_object_id = CharField(max_length=255, null=True, index=True)
+    verified = BooleanField(default=False, null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_folder"
+        indexes = (
+            (("project_id", "source_id", "relative_path_hash"), True),
+            (("source_id", "source_object_id"), False),
+        )
+
+
+class DocmindSourceOperation(DataBaseModel):
+    """Durable source mutation intent; source and indexing completion are separate."""
+
+    id = CharField(max_length=32, primary_key=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    actor_id = CharField(max_length=32, null=False, index=True)
+    operation = CharField(max_length=16, null=False, index=True)
+    idempotency_key = CharField(max_length=128, null=False)
+    request_hash = CharField(max_length=64, null=False)
+    source_id = CharField(max_length=64, null=False, index=True)
+    source_document_id = CharField(max_length=32, null=True, index=True)
+    document_id = CharField(max_length=32, null=True, index=True)
+    destination_source_id = CharField(max_length=64, null=True, index=True)
+    destination_folder_id = CharField(max_length=32, null=True, index=True)
+    destination_relative_path = CharField(max_length=1024, null=True)
+    expected_source_version_id = CharField(max_length=32, null=True)
+    lifecycle_state = CharField(max_length=32, null=False, index=True)
+    source_operation_state = CharField(max_length=32, null=False, index=True)
+    indexing_state = CharField(max_length=32, null=False, index=True)
+    attempt = IntegerField(default=0, null=False)
+    fencing_token = BigIntegerField(default=0, null=False)
+    lease_owner = CharField(max_length=128, null=True, index=True)
+    lease_expires_at = DateTimeField(null=True, index=True)
+    result_source_document_id = CharField(max_length=32, null=True, index=True)
+    provider_operation_id = CharField(max_length=128, null=True, index=True)
+    confirmed_relative_path = CharField(max_length=1024, null=True)
+    confirmed_source_object_id = CharField(max_length=255, null=True, index=True)
+    error_code = CharField(max_length=64, null=True, index=True)
+    completed_at = DateTimeField(null=True, index=True)
+
+    class Meta:
+        db_table = "docmind_source_operation"
+        indexes = (
+            (("project_id", "actor_id", "idempotency_key"), True),
+            (("source_id", "lifecycle_state"), False),
+        )
 
 
 class DocmindDocumentRoutingDigest(DataBaseModel):
@@ -2926,6 +3080,24 @@ def migrate_db():
         "docmind_project",
         "source_root_file_id",
         CharField(max_length=32, null=True, index=True),
+    )
+    alter_db_add_column(
+        migrator,
+        "docmind_source",
+        "default_folder_id",
+        CharField(max_length=32, null=True, index=True),
+    )
+    alter_db_add_column(
+        migrator,
+        "docmind_ingestion_job",
+        "retry_not_before",
+        DateTimeField(null=True, index=True),
+    )
+    alter_db_add_column(
+        migrator,
+        "docmind_source_document",
+        "source_object_id",
+        CharField(max_length=255, null=True, index=True),
     )
     alter_db_add_column(
         migrator,

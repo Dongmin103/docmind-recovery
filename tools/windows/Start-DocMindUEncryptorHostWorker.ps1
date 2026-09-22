@@ -29,9 +29,12 @@ if (-not $apiBase.IsAbsoluteUri -or -not $apiBase.IsLoopback -or @('http', 'http
 }
 $executable = [IO.Path]::GetFullPath([string]$config.executable_path)
 $workRoot = [IO.Path]::GetFullPath([string]$config.work_root)
+$receiptRoot = if ($config.PSObject.Properties.Name -contains 'cleanup_receipt_root' -and -not [string]::IsNullOrWhiteSpace([string]$config.cleanup_receipt_root)) {
+    [IO.Path]::GetFullPath([string]$config.cleanup_receipt_root)
+} else { [IO.Path]::GetFullPath(([string]$config.work_root + '-cleanup-receipts')) }
 $secretFile = [IO.Path]::GetFullPath([string]$config.shared_secret_file)
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf) -or [IO.Path]::GetExtension($executable) -ne '.exe') { throw 'Configured executable is unavailable or is not an .exe.' }
-if ($executable.Contains('"') -or $workRoot.Contains('"')) { throw 'Configured paths containing quotation marks are unsupported.' }
+if ($executable.Contains('"') -or $workRoot.Contains('"') -or $receiptRoot.Contains('"')) { throw 'Configured paths containing quotation marks are unsupported.' }
 
 $sources = @{}
 foreach ($source in @($config.sources)) {
@@ -49,6 +52,15 @@ foreach ($sourceRoot in $sources.Values) {
     if ($workRoot.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or $workRoot.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase) -or $sourceRoot.StartsWith($workPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'work_root must be separate from every source root.'
     }
+    $receiptPrefix = $receiptRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if ($receiptRoot.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or $receiptRoot.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase) -or $sourceRoot.StartsWith($receiptPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'cleanup_receipt_root must be separate from every source root.'
+    }
+}
+$workBoundary = $workRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+$receiptBoundary = $receiptRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+if ($receiptRoot.Equals($workRoot, [StringComparison]::OrdinalIgnoreCase) -or $receiptRoot.StartsWith($workBoundary, [StringComparison]::OrdinalIgnoreCase) -or $workRoot.StartsWith($receiptBoundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'cleanup_receipt_root must be separate from work_root.'
 }
 if ($config.PSObject.Properties.Name -notcontains 'backup_exclusion_acknowledged' -or $config.backup_exclusion_acknowledged -ne $true) {
     throw 'The plaintext work root backup exclusion must be explicitly acknowledged.'
@@ -75,6 +87,9 @@ if ($config.PSObject.Properties.Name -contains 'reaper_minimum_age_seconds') { $
 $claimLeaseSeconds = 1800
 if ($config.PSObject.Properties.Name -contains 'claim_lease_seconds') { $claimLeaseSeconds = [int]$config.claim_lease_seconds }
 if ($claimLeaseSeconds -lt 30 -or $claimLeaseSeconds -gt 1800) { throw 'claim_lease_seconds must be between 30 and 1800.' }
+$cleanupReceiptReplaySeconds = 60
+if ($config.PSObject.Properties.Name -contains 'cleanup_receipt_replay_seconds') { $cleanupReceiptReplaySeconds = [int]$config.cleanup_receipt_replay_seconds }
+if ($cleanupReceiptReplaySeconds -lt 30 -or $cleanupReceiptReplaySeconds -gt 3600) { throw 'cleanup_receipt_replay_seconds must be between 30 and 3600.' }
 
 $secret = Read-DocMindSharedSecret -LiteralPath $secretFile
 $expectedExecutableHash = ([string]$config.executable_sha256).ToLowerInvariant()
@@ -183,7 +198,27 @@ function Send-WorkerStatus {
         status = $status
         error_code = $ErrorCode
     }
-    [void](Invoke-SignedJsonRequest -Method 'POST' -RelativeUri ("$jobsPath/$([Uri]::EscapeDataString([string]$Lease.job_id))/status") -Body $body)
+    Send-WorkerStatusBody -JobId ([string]$Lease.job_id) -Body $body
+}
+
+function Send-WorkerStatusBody {
+    param([string]$JobId, $Body)
+    $result = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri ("$jobsPath/$([Uri]::EscapeDataString($JobId))/status") -Body $Body
+    if ($result.Body.Length -eq 0) { throw 'STATUS_ACK_MISSING' }
+    $ack = [Text.Encoding]::UTF8.GetString($result.Body) | ConvertFrom-Json
+    if ($ack.accepted -ne $true -or [string]$ack.job_id -ne $JobId -or [string]$ack.version_id -ne [string]$Body.version_id -or [Int64]$ack.fencing_token -ne [Int64]$Body.fencing_token) { throw 'STATUS_ACK_MISMATCH' }
+}
+
+function Send-CleanupReceipt {
+    param($Receipt)
+    $body = [ordered]@{
+        worker_id = [string]$config.worker_id
+        version_id = [string]$Receipt.version_id
+        fencing_token = [Int64]$Receipt.fencing_token
+        status = [string]$Receipt.final_state
+        error_code = $Receipt.error_code
+    }
+    Send-WorkerStatusBody -JobId ([string]$Receipt.job_id) -Body $body
 }
 
 function Write-JobState {
@@ -232,6 +267,7 @@ function Invoke-LeasedDecryptJob {
     $cleanupComplete = $false
     $jobSucceeded = $false
     $errorCode = $null
+    $receiptPath = $null
     try {
         [IO.Directory]::CreateDirectory($jobDirectory) | Out-Null
         Protect-DocMindJobDirectory -LiteralPath $jobDirectory
@@ -301,6 +337,9 @@ function Invoke-LeasedDecryptJob {
         if ($mutex) { $mutex.Dispose() }
         if (Test-Path -LiteralPath $jobDirectory) {
             try {
+                $receiptPath = Write-DocMindCleanupReceiptAtomic -ReceiptRoot $receiptRoot -JobId ([string]$Lease.job_id) -VersionId ([string]$Lease.version_id) -FencingToken ([Int64]$Lease.fencing_token) -FinalState 'CLEANUP_PENDING' -ErrorCode $null
+            } catch { $errorCode = 'CLEANUP_RECEIPT_WRITE_FAILED'; $jobSucceeded = $false }
+            try {
                 Assert-DocMindNoReparsePoint -LiteralPath $jobDirectory -Boundary $workRoot -Name 'Cleanup target'
                 Remove-Item -LiteralPath $jobDirectory -Recurse -Force -ErrorAction Stop
             } catch { $errorCode = 'PLAINTEXT_CLEANUP_FAILED' }
@@ -309,18 +348,51 @@ function Invoke-LeasedDecryptJob {
         if (-not $cleanupComplete) { $errorCode = 'PLAINTEXT_CLEANUP_FAILED'; $jobSucceeded = $false }
     }
     $finalState = if ($jobSucceeded -and $cleanupComplete) { 'COMPLETE' } elseif (-not $cleanupComplete) { 'CLEANUP_FAILED' } else { 'FAILED' }
-    try { Send-WorkerStatus -Lease $Lease -State $finalState -ErrorCode $errorCode -CleanupComplete $cleanupComplete } catch { if ($jobSucceeded) { $jobSucceeded = $false; $errorCode = 'STATUS_ACK_FAILED' } }
+    if ($cleanupComplete) {
+        $receiptFinalState = if ($finalState -eq 'COMPLETE') { 'CLEANED' } else { 'FAILED' }
+        try {
+            $receiptPath = Write-DocMindCleanupReceiptAtomic -ReceiptRoot $receiptRoot -JobId ([string]$Lease.job_id) -VersionId ([string]$Lease.version_id) -FencingToken ([Int64]$Lease.fencing_token) -FinalState $receiptFinalState -ErrorCode $errorCode
+        } catch { $jobSucceeded = $false; $errorCode = 'CLEANUP_RECEIPT_WRITE_FAILED' }
+    }
+    try {
+        Send-WorkerStatus -Lease $Lease -State $finalState -ErrorCode $errorCode -CleanupComplete $cleanupComplete
+        if ($cleanupComplete -and $null -ne $receiptPath -and (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
+            Assert-DocMindNoReparsePoint -LiteralPath $receiptPath -Boundary $receiptRoot -Name 'Acknowledged cleanup receipt'
+            Remove-Item -LiteralPath $receiptPath -Force -ErrorAction Stop
+        }
+    } catch { if ($jobSucceeded) { $jobSucceeded = $false; $errorCode = 'STATUS_ACK_FAILED' } }
     if (-not $jobSucceeded) { throw $errorCode }
 }
 
 [void](Assert-ExecutableIdentity)
 [IO.Directory]::CreateDirectory($workRoot) | Out-Null
 Protect-DocMindJobDirectory -LiteralPath $workRoot
-$removed = Remove-DocMindExpiredJobDirectories -WorkRoot $workRoot -MinimumAgeSeconds $reaperMinimumAgeSeconds
-Write-Output ("Host worker ready; stale job directories removed: {0}." -f $removed)
+[IO.Directory]::CreateDirectory($receiptRoot) | Out-Null
+Protect-DocMindJobDirectory -LiteralPath $receiptRoot
+$removed = Remove-DocMindExpiredJobDirectories -WorkRoot $workRoot -ReceiptRoot $receiptRoot -MinimumAgeSeconds $reaperMinimumAgeSeconds
+$receiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt }
+$lastReceiptReplayAt = [DateTimeOffset]::UtcNow
+Write-Output ("Host worker ready; stale job directories removed: {0}; cleanup receipts acknowledged: {1}; pending: {2}." -f $removed, $receiptReplay.acknowledged, $receiptReplay.pending)
+
+$runInitialScan = $true
+if ($config.PSObject.Properties.Name -contains 'initial_scan_on_startup') { $runInitialScan = [bool]$config.initial_scan_on_startup }
+if ($runInitialScan) {
+    try {
+        & (Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1') -ConfigPath $configFile -Reason startup
+    } catch {
+        $scanError = $_.Exception.Message
+        if ($scanError -notmatch '^[A-Z0-9_]+$') { $scanError = 'SOURCE_RECONCILIATION_FAILED' }
+        Write-Warning ("Startup reconciliation failed without deletion authority: {0}" -f $scanError)
+    }
+}
 
 do {
     try {
+        if ([DateTimeOffset]::UtcNow -ge $lastReceiptReplayAt.AddSeconds($cleanupReceiptReplaySeconds)) {
+            $receiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt }
+            if ($receiptReplay.pending -gt 0) { Write-Warning ("Cleanup receipts awaiting a valid signed status ACK: {0}." -f $receiptReplay.pending) }
+            $lastReceiptReplayAt = [DateTimeOffset]::UtcNow
+        }
         $claimBody = [ordered]@{ worker_id = [string]$config.worker_id; protocol_version = 1; lease_seconds = $claimLeaseSeconds }
         $claimResult = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri $claimPath -Body $claimBody
         if ($claimResult.Body.Length -gt 0) {

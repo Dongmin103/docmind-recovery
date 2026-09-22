@@ -24,6 +24,11 @@ from api.db.db_models import (
     DocmindSourceDocument,
     DocmindSourceVersion,
 )
+from common.docmind_source_path import (
+    logical_path_identity,
+    logical_path_identity_hash,
+    normalize_logical_relative_path,
+)
 from common.time_utils import current_timestamp
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -139,6 +144,26 @@ _reaper_lock = threading.Lock()
 _last_reap_monotonic = float("-inf")
 
 
+def _cleanup_recovery_target(
+    job: DocmindIngestionJob, *, host_cleanup_state: str, cleanup_state: str
+) -> str:
+    """Distinguish post-activation cleanup recovery from failed ingestion."""
+
+    if host_cleanup_state != "COMPLETE" or cleanup_state != "COMPLETE":
+        return "CLEANUP_FAILED"
+    source_document = DocmindSourceDocument.get_or_none(
+        DocmindSourceDocument.id == job.source_document_id
+    )
+    activated = bool(
+        source_document is not None
+        and source_document.deleted_at is None
+        and source_document.active_source_version_id == job.version_id
+        and job.parser_run_id
+        and job.chunk_set_id
+    )
+    return "COMPLETE" if activated else "FAILED"
+
+
 def maintain_parser_workspaces(*, force: bool = False) -> None:
     """Rate-limited orphan cleanup guarded by the current DB lease/fence."""
 
@@ -248,7 +273,20 @@ class DocmindCleanupRecorder:
         error_code = record.error_code
         if error_code is not None and not re.fullmatch(r"[A-Z0-9_]{1,64}", error_code):
             error_code = "DOCMIND_INGESTION_CLEANUP_FAILED"
-        target = "CLEANUP_FAILED" if record.state == "CLEANUP_FAILED" else job.lifecycle_state
+        if record.state == "CLEANUP_FAILED":
+            target = "CLEANUP_FAILED"
+        elif (
+            record.state == "COMPLETE"
+            and job.lifecycle_state == "CLEANUP_FAILED"
+            and job.host_cleanup_state == "COMPLETE"
+        ):
+            target = _cleanup_recovery_target(
+                job,
+                host_cleanup_state=job.host_cleanup_state,
+                cleanup_state="COMPLETE",
+            )
+        else:
+            target = job.lifecycle_state
         changed = (
             DocmindIngestionJob.update(
                 lifecycle_state=target,
@@ -334,18 +372,10 @@ def _valid_sha256(value: str) -> str:
 
 
 def _valid_relative_path(value: str) -> str:
-    value = str(value or "").strip().replace("\\", "/")
-    parts = value.split("/")
-    if (
-        not value
-        or value.startswith("/")
-        or ":" in value
-        or "\x00" in value
-        or any(part in {"", ".", ".."} for part in parts)
-        or len(value) > 1024
-    ):
-        raise DocmindIngestionError("DOCMIND_INGESTION_RELATIVE_PATH_INVALID")
-    return value
+    try:
+        return normalize_logical_relative_path(value)
+    except ValueError as error:
+        raise DocmindIngestionError("DOCMIND_INGESTION_RELATIVE_PATH_INVALID") from error
 
 
 def register_source_document_mapping(
@@ -385,14 +415,16 @@ def register_source_document_mapping(
     )
     if source is None or folder is None:
         raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_UNAUTHORIZED")
-    path_hash = hashlib.sha256(relative_path.encode()).hexdigest()
+    path_hash = logical_path_identity_hash(relative_path)
     existing = DocmindSourceDocument.get_or_none(
         (DocmindSourceDocument.project_id == project.id)
         & (DocmindSourceDocument.source_id == source_id)
         & (DocmindSourceDocument.relative_path_hash == path_hash)
     )
     if existing is not None:
-        if existing.document_id != document_id or existing.relative_path != relative_path:
+        if existing.document_id != document_id or logical_path_identity(
+            existing.relative_path
+        ) != logical_path_identity(relative_path):
             raise DocmindIngestionError("DOCMIND_INGESTION_MAPPING_CONFLICT")
         return existing
     try:
@@ -450,7 +482,7 @@ def observe_source_version(
     )
     if source_document is None or source_document.deleted_at is not None:
         raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_UNAUTHORIZED")
-    if source_document.relative_path != relative_path:
+    if logical_path_identity(source_document.relative_path) != logical_path_identity(relative_path):
         raise DocmindIngestionError("DOCMIND_INGESTION_PATH_MISMATCH")
 
     same = (
@@ -546,11 +578,24 @@ def claim_next(worker_id: str, *, lease_seconds: int = 300) -> WorkerDecryptRequ
     with database.atomic():
         job = (
             DocmindIngestionJob.select()
+            .join(
+                DocmindSourceDocument,
+                on=(DocmindIngestionJob.source_document_id == DocmindSourceDocument.id),
+            )
             .where(
-                (DocmindIngestionJob.lifecycle_state.in_(CLAIMABLE_STATES))
+                (DocmindSourceDocument.deleted_at.is_null(True))
+                & (
+                    (
+                        DocmindIngestionJob.lifecycle_state.in_(CLAIMABLE_STATES)
+                        & (
+                            DocmindIngestionJob.retry_not_before.is_null(True)
+                            | (DocmindIngestionJob.retry_not_before <= now)
+                        )
+                    )
                 | (
                     (DocmindIngestionJob.lifecycle_state == "DECRYPTING")
                     & (DocmindIngestionJob.lease_expires_at < now)
+                )
                 )
             )
             .order_by(DocmindIngestionJob.create_time.asc())
@@ -567,6 +612,7 @@ def claim_next(worker_id: str, *, lease_seconds: int = 300) -> WorkerDecryptRequ
                 fencing_token=next_fence,
                 lease_owner=worker_id,
                 lease_expires_at=expires,
+                retry_not_before=None,
                 error_code=None,
                 error_message=None,
                 **_updates(),
@@ -890,7 +936,16 @@ def record_worker_status(
     ):
         raise DocmindIngestionError("DOCMIND_INGESTION_STALE_RESULT")
     if status in {"CLEANED", "COMPLETE"}:
-        target = "COMPLETE" if job.lifecycle_state == "CLEANUP" and job.cleanup_state == "COMPLETE" else job.lifecycle_state
+        if job.lifecycle_state == "CLEANUP" and job.cleanup_state == "COMPLETE":
+            target = "COMPLETE"
+        elif job.lifecycle_state == "CLEANUP_FAILED" and job.cleanup_state == "COMPLETE":
+            target = _cleanup_recovery_target(
+                job,
+                host_cleanup_state="COMPLETE",
+                cleanup_state=job.cleanup_state,
+            )
+        else:
+            target = job.lifecycle_state
         host_cleanup_state = "COMPLETE"
     elif status == "CLEANUP_FAILED":
         target = "CLEANUP_FAILED"
@@ -934,7 +989,15 @@ def record_parser_cleanup(job_id: str, *, succeeded: bool, error_code: str | Non
         target = "CLEANUP_FAILED"
         cleanup_state = "FAILED"
     elif job.host_cleanup_state == "COMPLETE":
-        target = "COMPLETE"
+        target = (
+            _cleanup_recovery_target(
+                job,
+                host_cleanup_state=job.host_cleanup_state,
+                cleanup_state="COMPLETE",
+            )
+            if job.lifecycle_state == "CLEANUP_FAILED"
+            else "COMPLETE"
+        )
         cleanup_state = "COMPLETE"
     else:
         target = "CLEANUP"

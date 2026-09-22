@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import sys
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -171,6 +172,24 @@ def test_claim_contains_only_logical_source_contract_and_fences_reclaim(ingestio
         service._leased_job(first.job_id, "windows-worker-1", 1)
 
 
+def test_claim_respects_retry_not_before_and_never_claims_deleted_source(ingestion_db):
+    _observe()
+    discovered = _observe()
+    future = service._now() + timedelta(minutes=5)
+    DocmindIngestionJob.update(
+        lifecycle_state="RETRY_WAIT", retry_not_before=future
+    ).where(DocmindIngestionJob.id == discovered["job_id"]).execute()
+
+    assert service.claim_next("windows-worker-1", lease_seconds=300) is None
+
+    DocmindIngestionJob.update(retry_not_before=service._now() - timedelta(seconds=1)).where(
+        DocmindIngestionJob.id == discovered["job_id"]
+    ).execute()
+    DocmindSourceDocument.update(deleted_at=service._now()).execute()
+
+    assert service.claim_next("windows-worker-1", lease_seconds=300) is None
+
+
 def test_artifact_integrity_and_parser_handoff_do_not_persist_plaintext_or_token(ingestion_db):
     _, claim = _enqueue_and_claim()
     plaintext = b"synthetic document"
@@ -304,6 +323,66 @@ def test_cleanup_recorder_rejects_old_fencing_token(ingestion_db):
                 error_code=None,
             )
         )
+
+
+def test_cleanup_failure_only_becomes_retry_eligible_after_both_sides_are_clean(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    recorder = service.DocmindCleanupRecorder()
+    DocmindIngestionJob.update(
+        lifecycle_state="CLEANUP_FAILED",
+        cleanup_state="FAILED",
+        host_cleanup_state="FAILED",
+    ).where(DocmindIngestionJob.id == claim.job_id).execute()
+
+    recorder.record_cleanup(
+        SimpleNamespace(
+            job_id=claim.job_id,
+            version_id=claim.version_id,
+            fencing_token=claim.fencing_token,
+            state="COMPLETE",
+            error_code=None,
+        )
+    )
+    assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP_FAILED"
+    assert DocmindIngestionJob.get().cleanup_state == "COMPLETE"
+
+    service.record_worker_status(
+        claim.job_id,
+        worker_id="windows-worker-1",
+        version_id=claim.version_id,
+        fencing_token=claim.fencing_token,
+        status="CLEANED",
+    )
+    assert DocmindIngestionJob.get().lifecycle_state == "FAILED"
+    assert DocmindIngestionJob.get().host_cleanup_state == "COMPLETE"
+
+
+def test_post_activation_cleanup_recovery_completes_without_reindex(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    DocmindSourceDocument.update(active_source_version_id=claim.version_id).where(
+        DocmindSourceDocument.id == DocmindIngestionJob.get().source_document_id
+    ).execute()
+    DocmindIngestionJob.update(
+        lifecycle_state="CLEANUP_FAILED",
+        cleanup_state="FAILED",
+        host_cleanup_state="COMPLETE",
+        parser_run_id="parser-run-1",
+        chunk_set_id="chunk-set-1",
+    ).where(DocmindIngestionJob.id == claim.job_id).execute()
+
+    service.DocmindCleanupRecorder().record_cleanup(
+        SimpleNamespace(
+            job_id=claim.job_id,
+            version_id=claim.version_id,
+            fencing_token=claim.fencing_token,
+            state="COMPLETE",
+            error_code=None,
+        )
+    )
+
+    job = DocmindIngestionJob.get()
+    assert job.lifecycle_state == "COMPLETE"
+    assert job.cleanup_state == "COMPLETE"
 
 
 def test_reaper_guard_refuses_live_or_newer_lease(ingestion_db):

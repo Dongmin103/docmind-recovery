@@ -133,6 +133,9 @@ METHOD\nPATH_AND_QUERY\nTIMESTAMP\nNONCE\nCONTENT_SHA256
 The reverse-poll endpoints are:
 
 - `POST /api/v1/cloud-sync/host-worker/observations`
+- `POST /api/v1/cloud-sync/host-worker/deletions`
+- `POST /api/v1/cloud-sync/host-worker/reconciliation/claim`
+- `POST /api/v1/cloud-sync/host-worker/scans/events`
 - `POST /api/v1/cloud-sync/host-worker/claim`
 - `PUT /api/v1/cloud-sync/host-worker/jobs/{job_id}/artifact`
 - `POST /api/v1/cloud-sync/host-worker/jobs/{job_id}/status`
@@ -152,12 +155,28 @@ ACK, timeout, and stale lease enter the same `finally` cleanup. Cleanup failure
 is reported as `CLEANUP_FAILED`; the startup reaper deletes only directories
 whose saved lease has expired and whose minimum age has passed.
 
+Host cleanup acknowledgement is crash-recoverable. Before deleting a plaintext
+job directory, the worker atomically writes an ACL-restricted
+`CLEANUP_PENDING` receipt under the separate `cleanup_receipt_root`. The receipt
+contains exactly `job_id`, `version_id`, `fencing_token`, `final_state`, and
+`error_code`; it contains no source root, path, content, or content hash. After
+the exact job directory is absent, the receipt is atomically promoted to
+`CLEANED` (or `FAILED` for a cleaned failed job), and the signed status is sent.
+Only a signed ACK echoing job/version/fence removes the receipt. An ACK failure
+leaves it for the next worker cycle. On startup, the stale-directory reaper
+creates the same receipt around deletion and replays it before claiming work.
+A pending receipt is never reported while a matching plaintext directory still
+exists. Stale or newer fencing tokens are rejected by the backend and the
+receipt remains for operator-visible recovery rather than being discarded.
+
 The observer reads only explicitly registered `(source_id, document_id,
 relative_path)` entries from the host config. It never transmits a root or
 absolute path. It reports `(size, mtime_ns, ciphertext_sha256)` repeatedly; the
 Docker API requires the same fingerprint at least twice before a job becomes
-claimable. This is a stability candidate mechanism, not the phase-4 complete
-midnight reconciliation or deletion-authority scan.
+claimable. If a registered path disappears, the observer sends a deletion only
+after the configured root and closest existing ancestor can be enumerated and
+the path is still absent on a second check. A disconnected root, access denial,
+reparse point, or transient replacement therefore cannot become a deletion.
 
 ```powershell
 # Run continuously (run twice or longer to provide two stable observations)
@@ -166,3 +185,75 @@ powershell -NoProfile -File .\tools\windows\Watch-DocMindEncryptedSources.ps1
 # Configuration/protocol/reaper self-test; does not run uEncryptor2
 powershell -NoProfile -File .\tools\windows\Test-DocMindUEncryptorHostWorker.ps1
 ```
+
+### Initial and daily complete-source reconciliation
+
+`Start-DocMindUEncryptorHostWorker.ps1` runs one initial scan before its claim
+loop unless `initial_scan_on_startup` is explicitly false. A failed initial scan
+is reported and the claim worker continues, but the failed scan grants no
+deletion authority. Run a manual or scheduled scan independently with:
+
+```powershell
+powershell -NoProfile -File .\tools\windows\Invoke-DocMindSourceReconciliation.ps1 `
+  -ConfigPath C:\DocMindHost\host-worker.json -Reason manual
+```
+
+The scanner traverses only roots registered in the host-only configuration.
+For every source it creates a distinct `scan_id` and sends signed events to
+`POST /api/v1/cloud-sync/host-worker/scans/events` in this order:
+
+```text
+started:   protocol_version, worker_id, source_id, scan_id, event,
+           occurred_at, reason, root_access_confirmed=true;
+           scheduled only: schedule_fencing_token
+batch:     common fields, batch_index (zero-based),
+           documents[{relative_path,ciphertext_sha256,size,mtime_ns}]
+completed: common fields, complete=true, file_count, batch_count
+failed:    common fields, complete=false, safe error_code, partial counts,
+           root_access_confirmed; scheduled only: schedule_fencing_token
+```
+
+Physical roots and absolute paths never cross the API. Files and directories
+that are unreadable, unstable during hashing, or reparse points fail the entire
+source scan. Batches already received remain non-authoritative unless the
+matching `completed` event has continuous batch indexes and exact counts. The
+server may reconcile missing documents only from that complete snapshot; a
+`failed` event must never cause bulk deletion.
+
+Manual and startup scans generate random scan IDs. A scheduled run does not
+choose its own source or scan ID. It repeatedly sends the exact signed request
+`{protocol_version:1,worker_id,lease_seconds}` to
+`POST /api/v1/cloud-sync/host-worker/reconciliation/claim`, processes only the
+returned registered `source_id` and `midnight-YYYY-MM-DD` scan ID, then claims
+again until the signed response contains `scan:null`. The server-side
+Asia/Seoul schedule, lease and unique source/scan constraint are the duplicate
+execution authority; the Windows trigger merely wakes the scanner.
+
+For the PRD's daily trigger, the Windows host must use `Korea Standard Time`.
+The example configuration fixes the schedule at `00:00 Asia/Seoul`. Generate a
+non-mutating Task Scheduler plan with:
+
+```powershell
+.\tools\windows\Get-DocMindReconciliationTaskPlan.ps1 `
+  -ConfigPath C:\DocMindHost\host-worker.json | Format-List
+```
+
+The plan contains the executable, arguments, daily-midnight trigger and safe
+overlap policy, and always reports `registration_performed=false`. An
+administrator must create the Scheduled Task under the same dedicated service
+account used by the worker, choose **Run whether user is logged on or not**, set
+**Start the task as soon as possible after a missed start**, and prevent a new
+instance while the previous scan is running. Repeat the midnight trigger every
+15 minutes for 24 hours and configure failure restart every 15 minutes with at
+most eight attempts. A repeat normally receives `scan:null`; it exists so a
+scan left due after a short failure backoff is retried the same day. The host
+also rejects the same signed source/scan claim twice within one invocation to
+prevent a retry loop. This repository does not register or change an
+operating-system Scheduled Task.
+
+The signed immediate-deletion contract is
+`POST /api/v1/cloud-sync/host-worker/deletions` with exactly
+`protocol_version, worker_id, source_id, document_id, relative_path,
+observed_at, root_access_confirmed, absence_confirmed`. Both confirmation flags
+must be true, and the server must match the registered source/document/path
+before applying its retention tombstone.
