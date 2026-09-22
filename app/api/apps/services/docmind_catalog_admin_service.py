@@ -1,8 +1,8 @@
 """Database-primary Catalog validation and activation.
 
 This path deliberately validates the current search index and database
-provenance. It does not restore the removed semantic-routing/OpenViking
-generation pipeline.
+provenance. It does not restore the removed semantic-routing generation
+pipeline.
 """
 
 from __future__ import annotations

@@ -158,8 +158,13 @@ def test_task_identity_changes_with_parser_retry(runtime_module, monkeypatch):
     )
     monkeypatch.setattr(module.ProductionTemporaryParserInputRunner, "_verify_raw_artifact", lambda *_: None)
 
-    def get_task(task_id):
+    def get_task(task_id, **kwargs):
         record = records[task_id]
+        assert kwargs == {
+            "allow_protected_generationless_staging": True,
+            "expected_parse_run_id": record.parse_run_id,
+            "expected_chunk_set_id": record.chunk_set_id,
+        }
         return {
             "id": task_id,
             "parse_run_id": record.parse_run_id,
@@ -330,19 +335,28 @@ def test_zero_chunk_activation_is_verified_and_requests_atomic_raw_ref_clear(run
     assert requests[0].clear_raw_artifact_ref is True
 
 
-def test_safe_progress_never_persists_parser_message_or_path(runtime_module):
+def test_safe_progress_never_persists_parser_message_or_path(runtime_module, monkeypatch):
     calls = []
-    runtime_module._safe_progress(
+    monkeypatch.setattr(
+        runtime_module.TaskService,
+        "update_generationless_staging_progress",
         lambda *args, **kwargs: calls.append((args, kwargs)),
+        raising=False,
+    )
+    runtime_module._safe_progress(
         "task",
         prog=-1,
         msg=r"failed reading C:\private\job\input.pdf: secret content",
+        expected_parse_run_id="run-staging",
+        expected_chunk_set_id="set-staging",
     )
 
     serialized = repr(calls)
     assert "private" not in serialized
     assert "secret content" not in serialized
     assert "DOCMIND_INGESTION_PIPELINE_FAILED" in serialized
+    assert "run-staging" in serialized
+    assert "set-staging" in serialized
 
 
 def test_serialized_ephemeral_chunk_has_no_workspace_or_object_references(tmp_path: Path):

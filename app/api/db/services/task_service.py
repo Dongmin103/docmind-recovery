@@ -163,7 +163,15 @@ class TaskService(CommonService):
 
     @classmethod
     @DB.connection_context()
-    def get_task(cls, task_id, doc_ids=[]):
+    def get_task(
+        cls,
+        task_id,
+        doc_ids=[],
+        *,
+        allow_protected_generationless_staging: bool = False,
+        expected_parse_run_id: str | None = None,
+        expected_chunk_set_id: str | None = None,
+    ):
         """Retrieve detailed task information by task ID.
 
         This method fetches comprehensive task details including associated document,
@@ -221,11 +229,21 @@ class TaskService(CommonService):
             return None
         doc = docs[0]
         guard_doc_id = doc_ids[0] if doc["doc_id"] == CANVAS_DEBUG_DOC_ID and doc_ids else doc["doc_id"]
-        DocumentService.assert_docmind_evidence_mutable(
-            guard_doc_id,
-            "CLAIM_DOCUMENT_TASK",
-            actor_id=doc.get("tenant_id"),
-        )
+        if allow_protected_generationless_staging:
+            if (
+                doc_ids
+                or not expected_parse_run_id
+                or not expected_chunk_set_id
+                or doc.get("parse_run_id") != expected_parse_run_id
+                or doc.get("chunk_set_id") != expected_chunk_set_id
+            ):
+                raise ValueError("DOCMIND_GENERATIONLESS_TASK_IDENTITY_MISMATCH")
+        else:
+            DocumentService.assert_docmind_evidence_mutable(
+                guard_doc_id,
+                "CLAIM_DOCUMENT_TASK",
+                actor_id=doc.get("tenant_id"),
+            )
 
         msg = f"\n{datetime.now().strftime('%H:%M:%S')} Task has been received."
         prog = random.random() / 10.0
@@ -441,6 +459,49 @@ class TaskService(CommonService):
                 doc_info["progress_msg"] = trim_header_by_lines((task.progress_msg or "") + "\n" + info["progress_msg"], TASK_MAX_LOG_LENGTH)
             DocumentService.model.update(doc_info).where(
                 (DocumentService.model.id == task.doc_id) & ((DocumentService.model.run.is_null(True)) | (DocumentService.model.run != TaskStatus.CANCEL.value))
+            ).execute()
+
+    @classmethod
+    @DB.connection_context()
+    def update_generationless_staging_progress(
+        cls,
+        id,
+        info,
+        *,
+        expected_parse_run_id: str,
+        expected_chunk_set_id: str,
+    ):
+        """Update only an identity-bound ephemeral staging task.
+
+        The generationless activator owns the protected Document pointer CAS;
+        progress reporting must never mutate that published evidence row.
+        """
+        task = cls.model.get_or_none(cls.model.id == id)
+        if (
+            task is None
+            or not expected_parse_run_id
+            or not expected_chunk_set_id
+            or task.parse_run_id != expected_parse_run_id
+            or task.chunk_set_id != expected_chunk_set_id
+        ):
+            raise ValueError("DOCMIND_GENERATIONLESS_TASK_IDENTITY_MISMATCH")
+        updates = {}
+        if info.get("progress_msg"):
+            updates["progress_msg"] = trim_header_by_lines(
+                (task.progress_msg or "") + "\n" + str(info["progress_msg"]),
+                TASK_MAX_LOG_LENGTH,
+            )
+        if "progress" in info:
+            progress = float(info["progress"])
+            if progress >= 1 or (task.progress != -1 and (progress == -1 or progress > task.progress)):
+                updates["progress"] = progress
+        if task.begin_at is not None:
+            updates["process_duration"] = (datetime.now() - task.begin_at).total_seconds()
+        if updates:
+            cls.model.update(**updates).where(
+                (cls.model.id == id)
+                & (cls.model.parse_run_id == expected_parse_run_id)
+                & (cls.model.chunk_set_id == expected_chunk_set_id)
             ).execute()
 
     @classmethod

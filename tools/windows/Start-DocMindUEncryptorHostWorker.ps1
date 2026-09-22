@@ -174,7 +174,17 @@ function Invoke-SignedBytesRequest {
         try {
             $responseBytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
             Assert-SignedResponse -Response $response -Method $Method -Uri $uri -BodyBytes $responseBytes
-            if (-not $response.IsSuccessStatusCode) { throw ('API_HTTP_{0}' -f [int]$response.StatusCode) }
+            if (-not $response.IsSuccessStatusCode) {
+                $safeError = $null
+                try {
+                    $errorEnvelope = [Text.Encoding]::UTF8.GetString($responseBytes) | ConvertFrom-Json
+                    if ([string]$errorEnvelope.error -match '^[A-Z0-9_]{1,64}$') {
+                        $safeError = [string]$errorEnvelope.error
+                    }
+                } catch { $safeError = $null }
+                if ($safeError) { throw $safeError }
+                throw ('API_HTTP_{0}' -f [int]$response.StatusCode)
+            }
             return [pscustomobject]@{ StatusCode = [int]$response.StatusCode; Body = $responseBytes }
         } finally { $response.Dispose() }
     } finally {

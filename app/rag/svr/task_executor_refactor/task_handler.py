@@ -203,7 +203,14 @@ class TaskHandler:
             ctx.progress_cb(-1, msg="Task has been canceled.")
             return
 
-        if ctx.doc_id and ctx.doc_id not in {CANVAS_DEBUG_DOC_ID, GRAPH_RAPTOR_FAKE_DOC_ID}:
+        # Generationless ingestion stages a new chunk set beside the protected
+        # active set and performs its own expected-pointer CAS in the activator.
+        # The normal task path still rejects direct mutation of published evidence.
+        if (
+            ctx.doc_id
+            and ctx.doc_id not in {CANVAS_DEBUG_DOC_ID, GRAPH_RAPTOR_FAKE_DOC_ID}
+            and not getattr(ctx, "_docmind_defer_activation", False)
+        ):
             await thread_pool_exec(
                 DocumentService.assert_docmind_evidence_mutable,
                 ctx.doc_id,

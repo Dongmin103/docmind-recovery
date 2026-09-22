@@ -10,7 +10,7 @@ from api.apps.restful_apis import chunk_api, task_api
 from api.apps.services import dataset_api_service, document_api_service
 from api.apps.services import file_api_service
 from api.db import FileType
-from api.db.db_models import DocmindAuditEvent, DocmindCatalogVersion, DocmindFolderVersionDocument
+from api.db.db_models import DocmindAuditEvent, DocmindCatalogVersion, DocmindFolderVersionDocument, Task
 from api.db.joint_services import user_account_service
 from api.db.services.connector_service import ConnectorService, SyncLogsService
 from api.db.services.document_service import (
@@ -22,7 +22,7 @@ from api.db.services.file_service import FileService
 from api.db.services.task_service import TaskService
 
 
-MODELS = [DocmindCatalogVersion, DocmindFolderVersionDocument, DocmindAuditEvent]
+MODELS = [DocmindCatalogVersion, DocmindFolderVersionDocument, DocmindAuditEvent, Task]
 REPO = Path(__file__).resolve().parents[5]
 INVENTORY = REPO / "test/fixtures/docmind/docmind-protected-evidence-mutation-inventory-v1.yaml"
 
@@ -82,6 +82,69 @@ def test_guard_allows_unprotected_and_draft_only_documents_without_audit(guard_d
     )
 
     assert DocmindAuditEvent.select().count() == 0
+
+
+def test_generationless_staging_progress_updates_only_identity_bound_task(guard_db, monkeypatch):
+    _protect()
+    Task.create(
+        id="task-staging",
+        doc_id="doc-protected",
+        progress=0.1,
+        progress_msg="started",
+        parse_run_id="run-staging",
+        chunk_set_id="set-staging",
+    )
+    monkeypatch.setattr(
+        DocumentService,
+        "assert_docmind_evidence_mutable",
+        lambda *_args, **_kwargs: pytest.fail("protected Document guard was called"),
+    )
+
+    TaskService.update_generationless_staging_progress.__wrapped__(
+        TaskService,
+        "task-staging",
+        {"progress": 0.5, "progress_msg": "DOCMIND_INGESTION_CHUNKING"},
+        expected_parse_run_id="run-staging",
+        expected_chunk_set_id="set-staging",
+    )
+
+    task = Task.get_by_id("task-staging")
+    assert task.progress == 0.5
+    assert task.progress_msg.endswith("DOCMIND_INGESTION_CHUNKING")
+    assert DocmindCatalogVersion.get_by_id("version-doc-protected").lifecycle_state == "PUBLISHED"
+    assert DocmindFolderVersionDocument.select().count() == 1
+
+
+@pytest.mark.parametrize(
+    ("parse_run_id", "chunk_set_id"),
+    [("wrong-run", "set-staging"), ("run-staging", "wrong-set")],
+)
+def test_generationless_staging_progress_rejects_identity_mismatch(
+    guard_db,
+    parse_run_id,
+    chunk_set_id,
+):
+    Task.create(
+        id="task-staging",
+        doc_id="doc-protected",
+        progress=0.1,
+        progress_msg="started",
+        parse_run_id="run-staging",
+        chunk_set_id="set-staging",
+    )
+
+    with pytest.raises(ValueError, match="DOCMIND_GENERATIONLESS_TASK_IDENTITY_MISMATCH"):
+        TaskService.update_generationless_staging_progress.__wrapped__(
+            TaskService,
+            "task-staging",
+            {"progress": 0.5, "progress_msg": "DOCMIND_INGESTION_CHUNKING"},
+            expected_parse_run_id=parse_run_id,
+            expected_chunk_set_id=chunk_set_id,
+        )
+
+    task = Task.get_by_id("task-staging")
+    assert task.progress == 0.1
+    assert task.progress_msg == "started"
 
 
 def test_batch_guard_emits_one_audit_and_blocks_the_whole_set(guard_db):

@@ -55,7 +55,16 @@ def _index_name(tenant_id: str) -> str:
     return search.index_name(tenant_id)
 
 
-def _safe_progress(set_progress, task_id, from_page=0, to_page=-1, prog=None, msg="") -> None:
+def _safe_progress(
+    task_id,
+    from_page=0,
+    to_page=-1,
+    prog=None,
+    msg="",
+    *,
+    expected_parse_run_id: str,
+    expected_chunk_set_id: str,
+) -> None:
     """Persist only bounded phase labels, never parser text or workspace paths."""
 
     _ = msg
@@ -69,7 +78,15 @@ def _safe_progress(set_progress, task_id, from_page=0, to_page=-1, prog=None, ms
         safe_message = "DOCMIND_INGESTION_CHUNKING"
     else:
         safe_message = "DOCMIND_INGESTION_PARSING"
-    set_progress(task_id, from_page, to_page, prog=prog, msg=safe_message)
+    info = {"progress_msg": safe_message}
+    if prog is not None:
+        info["progress"] = prog
+    TaskService.update_generationless_staging_progress(
+        task_id,
+        info,
+        expected_parse_run_id=expected_parse_run_id,
+        expected_chunk_set_id=expected_chunk_set_id,
+    )
 
 
 class ProductionTemporaryParserInputRunner:
@@ -155,7 +172,12 @@ class ProductionTemporaryParserInputRunner:
             )
         elif task.parse_run_id != prepared.parse_run_id or task.chunk_set_id != prepared.chunk_set_id:
             raise DocmindIngestionError("DOCMIND_INGESTION_TASK_CONFLICT")
-        task_payload = TaskService.get_task(task_id)
+        task_payload = TaskService.get_task(
+            task_id,
+            allow_protected_generationless_staging=True,
+            expected_parse_run_id=prepared.parse_run_id,
+            expected_chunk_set_id=prepared.chunk_set_id,
+        )
         if task_payload is None:
             raise DocmindIngestionError("DOCMIND_INGESTION_TASK_UNAVAILABLE")
         context = self._task_context(task_payload, workspace, config)
@@ -272,7 +294,6 @@ class ProductionTemporaryParserInputRunner:
     def _task_context(task_payload: dict, workspace: TemporaryParserWorkspace, config: ParserPlatformConfig):
         from api.db.services.task_service import has_canceled
         from rag.graphrag.utils import chat_limiter
-        from rag.svr.task_executor import set_progress
         from rag.svr.task_executor_limiter import chunk_limiter, embed_limiter, kg_limiter, minio_limiter
         from rag.svr.task_executor_refactor.recording_context import _NULL_RECORDING_CONTEXT
         from rag.svr.task_executor_refactor.task_context import TaskCallbacks, TaskContext, TaskLimiters
@@ -287,7 +308,12 @@ class ProductionTemporaryParserInputRunner:
                 kg=kg_limiter,
             ),
             callbacks=TaskCallbacks(
-                progress=lambda *args, **kwargs: _safe_progress(set_progress, *args, **kwargs),
+                progress=lambda *args, **kwargs: _safe_progress(
+                    *args,
+                    expected_parse_run_id=task_payload["parse_run_id"],
+                    expected_chunk_set_id=task_payload["chunk_set_id"],
+                    **kwargs,
+                ),
                 has_canceled=has_canceled,
             ),
             recording_context=_NULL_RECORDING_CONTEXT,
