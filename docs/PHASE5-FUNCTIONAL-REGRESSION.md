@@ -43,3 +43,45 @@ only through the explicit phase 5 opt-in recovery/security validation, using a
 separate Docker project, separate volumes, loopback-only ports, and synthetic
 markers. A passing hermetic run is necessary but is not evidence that a restored
 service stack has booted or that a real uEncryptor2 pair has decrypted.
+
+## Generationless Windows E2E readiness
+
+DocMind C-search returns reranked chunks and does not call an answer-generation
+model. The normal `full` profile intentionally keeps its stronger model gate.
+For the narrower cloud-source ingestion and C-search validation, use the
+explicit overlay
+`app/docker/docker-compose-windows-dev-generationless-e2e.yml`. The overlay
+still requires a live Jina credential, blanks answer-model credentials, enables
+the parser platform, and adds the private read-only Docling Office sidecar.
+
+Run the non-mutating readiness check first. It reports only booleans, counts,
+container health, and stable blocker codes; it never prints credential values,
+host paths, source paths, document names, or hashes.
+
+```powershell
+./tools/windows/Test-DocMindGenerationlessE2EReadiness.ps1 `
+  -DockerCommand C:\Users\uplex\bin\docker.cmd
+```
+
+The live tier is not ready unless this check passes. A prior Jina smoke proves
+connectivity but does not make a credential available to the E2E process. Keep
+the key in the current process only when the operator runs the live tier; do not
+put it in Git, a command argument, a generated report, or committed Compose.
+The ACL-restricted host-worker config remains external to the repository.
+
+Validate the merged Compose without starting containers:
+
+```powershell
+C:\Users\uplex\bin\docker.cmd compose `
+  --env-file .local/docker/windows-dev.env `
+  -f app/docker/docker-compose-windows-dev.yml `
+  -f app/docker/docker-compose-windows-dev-generationless-e2e.yml `
+  --profile full config --quiet
+```
+
+This overlay removes only the answer-model startup dependency. It does not
+bypass signed worker authentication, executable/signature checks, BitLocker or
+backup-exclusion requirements, Jina authentication, source registration,
+parser health, indexing verification, or either plaintext cleanup ACK. If the
+Word sample selects Office image OCR, the separately provisioned Surya runtime
+is also required; do not silently drop required OCR to make the test pass.
