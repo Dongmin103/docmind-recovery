@@ -159,7 +159,7 @@ if ([string]::IsNullOrWhiteSpace($appImageId)) {
 } elseif ($appImageId -ne $expectedAppImageId) {
     Add-Blocker 'APP_IMAGE_DIGEST_UNAPPROVED'
 }
-$officeImageReady = -not [string]::IsNullOrWhiteSpace((Get-ImageId 'docmind-docling-office:2.115.0-amd64'))
+$officeImageReady = -not [string]::IsNullOrWhiteSpace((Get-ImageId 'docmind-docling-office:2.115.0-legacy-doc-amd64'))
 if (-not $officeImageReady) { Add-Blocker 'DOCLING_OFFICE_IMAGE_MISSING' }
 
 $infraHealth = [ordered]@{}

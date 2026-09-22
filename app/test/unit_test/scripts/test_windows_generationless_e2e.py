@@ -24,12 +24,15 @@ def test_generationless_overlay_requires_jina_and_blanks_answer_credentials() ->
     assert app["environment"]["DASHSCOPE_API_KEY"] == ""
     assert app["environment"]["API_PROXY_SCHEME"] == "python"
     assert app["environment"]["DOCMIND_E2E_BOOTSTRAP_ONLY"] == "${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}"
+    assert app["environment"]["DOCMIND_GENERATIONLESS_E2E_ENABLED"] == "1"
     assert app["environment"]["TEI_MODEL"] == "BAAI/bge-m3"
     assert "tei-cpu" in app["environment"]["COMPOSE_PROFILES"]
     assert app["environment"]["DOCMIND_SHARED_WORKSPACE_ENABLED"] == "1"
     assert app["environment"]["DOCMIND_CATALOG_DB_PRIMARY_ENABLED"] == "1"
     assert app["environment"]["PARSER_PLATFORM_ENABLED"] == "1"
     assert app["environment"]["PARSER_PLATFORM_INTEGRATION_READY"] == "1"
+    assert app["environment"]["PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS"] == "900"
+    assert app["environment"]["PARSER_PLATFORM_PDF_DEADLINE_SECONDS"] == "3"
     assert app["depends_on"]["docling-office-parser"]["condition"] == "service_healthy"
     assert any("docmind_generationless_e2e_seed.py" in volume for volume in app["volumes"])
 
@@ -42,7 +45,10 @@ def test_generationless_office_parser_is_private_and_read_only() -> None:
     assert parser["read_only"] is True
     assert parser["cap_drop"] == ["ALL"]
     assert "ports" not in parser
-    assert list(parser["networks"]) == ["docmind-dev"]
+    assert list(parser["networks"]) == ["docmind-parser-internal"]
+    assert overlay["networks"]["docmind-parser-internal"]["internal"] is True
+    assert "docmind-parser-internal" in overlay["services"]["ragflow-cpu"]["networks"]
+    assert "legacy-doc" in parser["image"]
     assert "service_healthy" in overlay["services"]["ragflow-cpu"]["depends_on"]["docling-office-parser"]["condition"]
 
 

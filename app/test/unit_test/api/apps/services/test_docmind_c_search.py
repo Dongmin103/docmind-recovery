@@ -255,3 +255,48 @@ def test_required_reranker_version_rejects_v3(monkeypatch):
     monkeypatch.setattr(service.KnowledgebaseService, "get_by_id", lambda _dataset_id: (True, SimpleNamespace(tenant_id="owner")))
     with pytest.raises(RuntimeError, match="jina-reranker-v3.5"):
         service._rerank_model(_catalog())
+
+
+def test_generationless_e2e_reranker_uses_process_only_jina_key(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("DOCMIND_GENERATIONLESS_E2E_ENABLED", "1")
+    monkeypatch.setenv("JINA_API_KEY", "test-only-jina-key")
+    monkeypatch.setattr(
+        service.KnowledgebaseService,
+        "get_by_id",
+        lambda _dataset_id: (True, SimpleNamespace(tenant_id="owner")),
+    )
+    monkeypatch.setattr(
+        service,
+        "get_model_config_from_provider_instance",
+        lambda *_args: pytest.fail("E2E key must not be persisted as a provider row"),
+    )
+    monkeypatch.setattr(
+        service,
+        "LLMBundle",
+        lambda tenant_id, config: captured.update(tenant_id=tenant_id, config=config) or "bundle",
+    )
+
+    assert service._rerank_model(_catalog()) == "bundle"
+    assert captured["tenant_id"] == "owner"
+    assert captured["config"] == {
+        "llm_factory": "Jina",
+        "api_key": "test-only-jina-key",
+        "llm_name": "jina-reranker-v3.5",
+        "api_base": "https://api.jina.ai/v1/rerank",
+        "model_type": "rerank",
+        "max_tokens": 8192,
+    }
+
+
+def test_generationless_e2e_reranker_fails_closed_without_key(monkeypatch):
+    monkeypatch.setenv("DOCMIND_GENERATIONLESS_E2E_ENABLED", "1")
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+    monkeypatch.setattr(
+        service.KnowledgebaseService,
+        "get_by_id",
+        lambda _dataset_id: (True, SimpleNamespace(tenant_id="owner")),
+    )
+
+    with pytest.raises(RuntimeError, match="DOCMIND_RERANK_CREDENTIAL_UNAVAILABLE"):
+        service._rerank_model(_catalog())

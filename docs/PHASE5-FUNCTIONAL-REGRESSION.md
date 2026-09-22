@@ -104,12 +104,20 @@ job plaintext remained on either side, and the encrypted source remained
 unchanged.
 
 The approved sample is a legacy `.doc` file. The production ingestion runtime
-supports `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.hwp`, and `.hwpx`, so artifact
-ingestion correctly failed closed with `DOCMIND_INGESTION_FORMAT_UNSUPPORTED`.
-No parser run, chunk set, index, or scoped C-search result was produced. Do not
-rename the file or treat it as OOXML; completing this live tier requires either
-an approved encrypted `.docx` sample or a separately designed and validated
-legacy Word conversion/parser boundary.
+validates its OLE signature, converts it inside the private rootless Office
+sidecar, verifies the converted WordprocessingML ZIP structure, and parses it
+through the existing Docling path while preserving the original `.doc` hash and
+format identity. The live run activated 105 chunks and 3,305 tokens. Its parser
+run reached `READY_WITH_WARNING` because supplemental media OCR was unavailable;
+required media OCR remains fail-closed. The job and both cleanup acknowledgements
+reached `COMPLETE`, with no host plaintext, parser input, or sidecar conversion
+artifact remaining. The credential was subsequently supplied only to the
+isolated application process. After activating a test-only schema-v2 initial
+Catalog for the completed chunk set, authenticated HTTP C-search succeeded in
+all, folder, and document modes. Every mode returned five results from the
+exact approved document, with 35 BM25 lane hits, 105 dense lane hits, eight fused candidates,
+and finite Jina v3.5 rerank scores. No tenant provider credential row was
+created.
 
 This functional test used an ACL-restricted external host-worker configuration
 with the BitLocker requirement disabled only for the isolated test server. It

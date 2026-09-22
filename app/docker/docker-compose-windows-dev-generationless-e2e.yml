@@ -29,6 +29,7 @@ services:
         condition: service_healthy
     environment:
       DOCMIND_E2E_BOOTSTRAP_ONLY: ${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}
+      DOCMIND_GENERATIONLESS_E2E_ENABLED: "1"
       API_PROXY_SCHEME: python
       COMPOSE_PROFILES: full,tei-cpu
       TEI_MODEL: BAAI/bge-m3
@@ -41,13 +42,21 @@ services:
       PARSER_PLATFORM_INTEGRATION_READY: "1"
       PARSER_PLATFORM_OFFICE_ENABLED: "1"
       PARSER_PLATFORM_DOCLING_OFFICE_URL: http://docling-office-parser:8092
+      PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS: "900"
+      # Surya is not provisioned in this generationless C-search overlay.
+      # Bound each optional media-OCR failure so multiple supplemental images
+      # cannot idle beyond the isolated MySQL connection lifetime. Required
+      # media still fails closed in the parser-platform policy.
+      PARSER_PLATFORM_PDF_DEADLINE_SECONDS: "3"
     volumes:
       - ../scripts/docmind_generationless_e2e_seed.py:/ragflow/scripts/docmind_generationless_e2e_seed.py:ro
+    networks:
+      docmind-parser-internal: {}
 
   docling-office-parser:
     profiles: [full]
     platform: linux/amd64
-    image: ${DOCLING_OFFICE_IMAGE:-docmind-docling-office:2.115.0-amd64}
+    image: ${DOCLING_OFFICE_IMAGE:-docmind-docling-office:2.115.0-legacy-doc-amd64}
     build:
       context: ..
       dockerfile: parser_services/docling_office/Containerfile
@@ -56,8 +65,9 @@ services:
         PYTHON_BASE_IMAGE: ${DOCLING_PYTHON_BASE_IMAGE:-python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64}
     environment:
       DOCLING_OFFICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS: ${DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS:-180}
     networks:
-      docmind-dev:
+      docmind-parser-internal:
         aliases: [docling-office-parser]
     read_only: true
     tmpfs:
@@ -74,3 +84,7 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 12
+
+networks:
+  docmind-parser-internal:
+    internal: true

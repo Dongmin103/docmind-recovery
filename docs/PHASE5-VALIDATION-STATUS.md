@@ -54,11 +54,24 @@ package does not contain or authenticate an application image.
   independent read-only reference by size and SHA-256, both host and container
   cleanup states reached `COMPLETE`, no job plaintext remained, and the
   encrypted source remained unchanged.
-- The approved sample is legacy `.doc`, which the production ingestion runtime
-  intentionally does not accept. Artifact ingestion failed closed with
-  `DOCMIND_INGESTION_FORMAT_UNSUPPORTED`; no parser run, chunk set, index, or
-  scoped C-search result was created. This proves the decrypt/stream/cleanup
-  boundary, not end-to-end indexing or search.
+- The approved sample is legacy `.doc`. The ingestion runtime now validates the
+  OLE container, converts it inside the private rootless Office sidecar, checks
+  that the result is a real WordprocessingML package, and passes that package
+  to the existing Docling/index activation path without changing the original
+  source identity. The live run activated 105 chunks and 3,305 tokens. The
+  parser run reached `READY_WITH_WARNING` because the unavailable supplemental
+  media OCR service produced explicit warnings; required OCR remains
+  fail-closed.
+- The job and both cleanup acknowledgements reached `COMPLETE`. The host
+  plaintext area, container parser input area, and sidecar conversion area were
+  all empty after completion. The encrypted source and the independent
+  read-only plaintext reference still matched their pre-approved identities.
+- The isolated E2E process received the Jina credential only through its
+  environment; no tenant provider row or repository file was created for it.
+  Authenticated HTTP C-search then succeeded for all, folder, and document
+  scopes. Each scope returned five reranked results from the exact active
+  document, with 35 BM25 lane hits, 105 dense lane hits, eight fused
+  candidates, and finite Jina v3.5 scores.
 - That isolated functional run disabled the BitLocker check only in its
   ACL-restricted external test host configuration. The production-security
   BitLocker requirement remains unsatisfied and unchanged.
@@ -79,9 +92,6 @@ customer document is approved for this profile.
 
 ## Still external or incomplete
 
-- Add a separately isolated and validated legacy Word conversion/parser path,
-  or obtain an approved encrypted `.docx` sample, then verify indexing and the
-  all/folder/document C-search scopes through the complete application path.
 - Configure and verify real TLS for browser/API and every required
   service-to-service path.
 - Verify host/Docker storage encryption, certificate rotation, external secret

@@ -449,7 +449,22 @@ def _rerank_model(catalog: Catalog) -> LLMBundle:
     rerank_id = os.environ.get("DOCMIND_RERANK_ID", _DEFAULT_RERANK_ID)
     if rerank_id.split("@", 1)[0] != "jina-reranker-v3.5":
         raise RuntimeError("DOCMIND_RERANK_MODEL_INVALID: jina-reranker-v3.5 is required")
-    model_config = get_model_config_from_provider_instance(knowledgebase.tenant_id, LLMType.RERANK, rerank_id)
+    if os.environ.get("DOCMIND_GENERATIONLESS_E2E_ENABLED") == "1":
+        api_key = os.environ.get("JINA_API_KEY", "")
+        if len(api_key) < 12 or any(marker in api_key for marker in ("CHANGE_ME", "PLACEHOLDER", "GENERATED_LOCALLY")):
+            raise RuntimeError("DOCMIND_RERANK_CREDENTIAL_UNAVAILABLE")
+        # The isolated generationless overlay keeps the credential process-only:
+        # do not require or create a tenant provider row just to run C-search.
+        model_config = {
+            "llm_factory": "Jina",
+            "api_key": api_key,
+            "llm_name": "jina-reranker-v3.5",
+            "api_base": "https://api.jina.ai/v1/rerank",
+            "model_type": LLMType.RERANK.value,
+            "max_tokens": 8192,
+        }
+    else:
+        model_config = get_model_config_from_provider_instance(knowledgebase.tenant_id, LLMType.RERANK, rerank_id)
     return LLMBundle(knowledgebase.tenant_id, model_config)
 
 
