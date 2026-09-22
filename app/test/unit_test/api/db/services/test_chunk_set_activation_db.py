@@ -254,6 +254,102 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
     database.close()
 
 
+def test_activation_preserves_caller_owned_outer_transaction(monkeypatch) -> None:
+    database = SqliteDatabase(":memory:")
+    TEST_DB.initialize(database)
+    database.create_tables([TinyDocument, TinyParserRun])
+    TinyDocument.create(id="doc", kb_id="kb")
+    TinyParserRun.create(
+        id="run",
+        doc_id="doc",
+        chunk_set_id="set",
+        lifecycle="ACTIVATING",
+        completed_task_count=1,
+        staged_chunk_count=1,
+        staged_token_count=2,
+    )
+    monkeypatch.setattr(chunk_set_activation_service, "DB", database)
+    monkeypatch.setattr(chunk_set_activation_service, "Document", TinyDocument)
+    monkeypatch.setattr(chunk_set_activation_service, "ParserRun", TinyParserRun)
+    store = chunk_set_activation_service.PeeweeAtomicChunkSetStore(artifact_cleaner=RecordingCleaner())
+    request = ChunkSetFinalizationRequest(
+        document_id="doc",
+        kb_id="kb",
+        parse_run_id="run",
+        chunk_set_id="set",
+        expected_current_chunk_set_id=None,
+        expected_task_count=1,
+        completed_task_count=1,
+        failed_task_count=0,
+        expected_chunk_count=1,
+        staged_chunk_count=1,
+        indexed_chunk_count=1,
+        staged_token_count=2,
+        raw_artifact_complete=True,
+        normalized_document_valid=True,
+        provenance_complete=True,
+        required_ocr_complete=True,
+        embedding_complete=True,
+        clear_raw_artifact_ref=True,
+    )
+
+    with database.atomic():
+        store.activate(request)
+        assert database.in_transaction()
+        assert not database.is_closed()
+        TinyDocument.update(progress_msg="outer-transaction-alive").where(TinyDocument.id == "doc").execute()
+
+    assert TinyDocument.get_by_id("doc").progress_msg == "outer-transaction-alive"
+    database.close()
+
+
+def test_activation_owns_standalone_closed_connection(monkeypatch, tmp_path) -> None:
+    database = SqliteDatabase(tmp_path / "activation.db")
+    TEST_DB.initialize(database)
+    database.create_tables([TinyDocument, TinyParserRun])
+    TinyDocument.create(id="doc", kb_id="kb")
+    TinyParserRun.create(
+        id="run",
+        doc_id="doc",
+        chunk_set_id="set",
+        lifecycle="ACTIVATING",
+        completed_task_count=1,
+        staged_chunk_count=1,
+        staged_token_count=2,
+    )
+    database.close()
+    monkeypatch.setattr(chunk_set_activation_service, "DB", database)
+    monkeypatch.setattr(chunk_set_activation_service, "Document", TinyDocument)
+    monkeypatch.setattr(chunk_set_activation_service, "ParserRun", TinyParserRun)
+    store = chunk_set_activation_service.PeeweeAtomicChunkSetStore(artifact_cleaner=RecordingCleaner())
+    request = ChunkSetFinalizationRequest(
+        document_id="doc",
+        kb_id="kb",
+        parse_run_id="run",
+        chunk_set_id="set",
+        expected_current_chunk_set_id=None,
+        expected_task_count=1,
+        completed_task_count=1,
+        failed_task_count=0,
+        expected_chunk_count=1,
+        staged_chunk_count=1,
+        indexed_chunk_count=1,
+        staged_token_count=2,
+        raw_artifact_complete=True,
+        normalized_document_valid=True,
+        provenance_complete=True,
+        required_ocr_complete=True,
+        embedding_complete=True,
+        clear_raw_artifact_ref=True,
+    )
+
+    store.activate(request)
+
+    assert database.is_closed()
+    with database.connection_context():
+        assert TinyParserRun.get_by_id("run").lifecycle == "READY"
+
+
 def test_parser_run_lifecycle_updates_are_validated_and_compare_and_swap(monkeypatch) -> None:
     database = SqliteDatabase(":memory:")
     TEST_DB.initialize(database)

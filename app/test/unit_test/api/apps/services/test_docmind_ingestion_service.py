@@ -473,6 +473,67 @@ def test_bounded_runner_consumes_token_activates_and_waits_for_host_cleanup(inge
     assert DocmindIngestionJob.get().lifecycle_state == "COMPLETE"
 
 
+def test_long_stage_connection_recycle_closes_and_reconnects_before_activation():
+    events = []
+
+    class Database:
+        database = "rag_flow_dev"
+
+        @staticmethod
+        def in_transaction():
+            return False
+
+        @staticmethod
+        def is_closed():
+            return False
+
+        @staticmethod
+        def close():
+            events.append("closed")
+
+        @staticmethod
+        def connect(*, reuse_if_open):
+            events.append(("connected", reuse_if_open))
+
+    service._recycle_database_connection_after_long_stage(Database())
+    assert events == ["closed", ("connected", True)]
+
+
+def test_long_stage_connection_recycle_discards_only_current_pooled_connection():
+    events = []
+
+    class PooledDatabase:
+        database = "rag_flow_dev"
+
+        @staticmethod
+        def in_transaction():
+            return False
+
+        @staticmethod
+        def manual_close():
+            events.append("discarded")
+
+        @staticmethod
+        def close():
+            pytest.fail("pooled close would return the stale socket to the pool")
+
+        @staticmethod
+        def connect(*, reuse_if_open):
+            events.append(("connected", reuse_if_open))
+
+    service._recycle_database_connection_after_long_stage(PooledDatabase())
+    assert events == ["discarded", ("connected", True)]
+
+
+def test_long_stage_connection_recycle_rejects_transaction_leak():
+    database = SimpleNamespace(
+        database="rag_flow_dev",
+        in_transaction=lambda: True,
+    )
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_DATABASE_TRANSACTION_LEAK"):
+        service._recycle_database_connection_after_long_stage(database)
+
+
 @pytest.mark.parametrize(
     ("error", "expected_code"),
     [

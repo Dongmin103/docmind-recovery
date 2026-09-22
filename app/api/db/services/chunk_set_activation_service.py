@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 from typing import Protocol
 
 from peewee import JOIN
@@ -49,6 +50,29 @@ class DocStoreChunkSetArtifactCleaner:
 
 def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _connection_context_if_needed(function):
+    """Open/close DB only when this call owns the connection lifecycle.
+
+    Peewee's ``connection_context`` always closes on exit, even when the
+    connection was already open.  Activation is also used inside DocMind's
+    larger atomic source-version switch, so the standard decorator would
+    close that outer transaction before its remaining writes can commit.
+    """
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        owns_connection = DB.is_closed()
+        if owns_connection:
+            DB.connect()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            if owns_connection and not DB.is_closed():
+                DB.close()
+
+    return wrapped
 
 
 class PeeweeDocumentScopeRepository:
@@ -119,7 +143,7 @@ class PeeweeAtomicChunkSetStore:
         self.retention_seconds = retention_seconds
         self.cleanup_batch_size = cleanup_batch_size
 
-    @DB.connection_context()
+    @_connection_context_if_needed
     def activate(self, request: ChunkSetFinalizationRequest) -> ActivationResult:
         now = _utcnow_naive()
         with DB.atomic():
