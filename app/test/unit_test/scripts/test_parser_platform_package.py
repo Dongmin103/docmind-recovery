@@ -22,6 +22,9 @@ def test_cpu_and_docling_profiles_are_single_concurrency_read_only_and_unpublish
     rhwp = compose["services"]["rhwp-parser"]
     assert cpu["profiles"] == ["parser-platform-cpu"]
     assert cpu["environment"]["SURYA_INFERENCE_PARALLEL"] == "1"
+    assert cpu["environment"]["SURYA_MODEL_REVISION"] == "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
+    assert len(cpu["environment"]["SURYA_GGUF_MODEL_SHA256"]) == 64
+    assert len(cpu["environment"]["SURYA_GGUF_MMPROJ_SHA256"]) == 64
     assert cpu["read_only"] is True and cpu["cap_drop"] == ["ALL"]
     assert cpu["mem_limit"].endswith(":-8g}") and cpu["cpus"].endswith(":-8}")
     assert "ports" not in cpu and list(cpu["networks"]) == ["parser_internal"]

@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
 from typing import Any
 
@@ -48,6 +48,22 @@ def _page_key(source_hash: str, page: int, parser_fingerprint: str) -> str:
 
 class SuryaEngine:
     def __init__(self):
+        self.model_path = os.environ.get("SURYA_GGUF_LOCAL_MODEL_PATH", "/models/surya-2.gguf")
+        self.mmproj_path = os.environ.get("SURYA_GGUF_LOCAL_MMPROJ_PATH", "/models/surya-2-mmproj.gguf")
+        self._verify_model_file(
+            self.model_path,
+            os.environ.get(
+                "SURYA_GGUF_MODEL_SHA256",
+                "1f18abe17b1ed8b4e47ee9b1ad0e274c93daf5efbb6b29a04ff1712e37051e05",
+            ),
+        )
+        self._verify_model_file(
+            self.mmproj_path,
+            os.environ.get(
+                "SURYA_GGUF_MMPROJ_SHA256",
+                "98c0563673b1657ff6d021d1e5f04af06cbf61bb40c63ac613e8bb71b42fb2c0",
+            ),
+        )
         self.manager = SuryaInferenceManager(method=settings.SURYA_INFERENCE_BACKEND or "llamacpp", lazy=True)
         self.predictor = RecognitionPredictor(self.manager)
         self.lock = threading.Lock()
@@ -64,8 +80,20 @@ class SuryaEngine:
         self.request_timeout_seconds = int(
             os.environ.get("SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS", "1800")
         )
-        if self.page_timeout_seconds <= 0 or self.request_timeout_seconds <= 0:
+        self.media_timeout_seconds = int(os.environ.get("SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS", "600"))
+        if self.page_timeout_seconds <= 0 or self.request_timeout_seconds <= 0 or self.media_timeout_seconds <= 0:
             raise ValueError("Surya service timeouts must be positive")
+
+    @staticmethod
+    def _verify_model_file(path: str, expected_sha256: str) -> None:
+        if len(expected_sha256) != 64 or any(character not in "0123456789abcdef" for character in expected_sha256):
+            raise ValueError("Surya model SHA-256 is invalid")
+        digest = hashlib.sha256()
+        with open(path, "rb") as model_file:
+            for chunk in iter(lambda: model_file.read(8 * 1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise ValueError("Surya model SHA-256 mismatch")
 
     def manifest(self) -> dict[str, Any]:
         return {
@@ -76,6 +104,7 @@ class SuryaEngine:
             "backend": self.backend,
             "task_kinds": ["pdf_document_parse", "office_media_parse"],
             "concurrency": 1,
+            "model_files_verified": True,
         }
 
     def parse(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -263,11 +292,15 @@ class SuryaEngine:
             raise ValueError("invalid or oversized Office media")
         if hashlib.sha256(media_bytes).hexdigest() != media_hash:
             raise ValueError("media hash mismatch")
-        with Image.open(BytesIO(media_bytes)) as image:
-            image.load()
-            safe_image = image.convert("RGB")
-        with self.lock:
-            result = self.predictor([safe_image], full_page=True)[0]
+        media_watchdog = self._watchdog(self.media_timeout_seconds, "media", parse_run_id, [])
+        try:
+            with Image.open(BytesIO(media_bytes)) as image:
+                image.load()
+                safe_image = image.convert("RGB")
+            with self.lock:
+                result = self.predictor([safe_image], full_page=True)[0]
+        finally:
+            media_watchdog.cancel()
         raw = result.model_dump()
         blocks = []
         for ordinal, block in enumerate(raw.get("blocks", [])):
@@ -390,7 +423,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("SURYA_SERVICE_HOST", "0.0.0.0")
     port = int(os.environ.get("SURYA_SERVICE_PORT", "8091"))
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    HTTPServer((host, port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

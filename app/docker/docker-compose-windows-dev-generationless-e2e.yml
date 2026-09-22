@@ -6,6 +6,7 @@ services:
   model-secret-gate:
     environment:
       JINA_API_KEY: ${JINA_API_KEY:-}
+      JINA_API_KEY_FILE: ${DOCMIND_E2E_JINA_API_KEY_FILE:-}
       DOCMIND_E2E_BOOTSTRAP_ONLY: ${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}
       DOCMIND_GENERATOR_MODEL: ""
       DASHSCOPE_API_KEY: ""
@@ -16,8 +17,14 @@ services:
         fail() { echo "Windows generationless E2E model gate failed: $$1" >&2; exit 1; }
         case "$$DOCMIND_E2E_BOOTSTRAP_ONLY" in 0|1) ;; *) fail "DOCMIND_E2E_BOOTSTRAP_ONLY must be 0 or 1" ;; esac
         if [ "$$DOCMIND_E2E_BOOTSTRAP_ONLY" = 0 ]; then
-          [ "$${#JINA_API_KEY}" -ge 12 ] || fail "JINA_API_KEY is missing"
-          case "$$JINA_API_KEY" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "JINA_API_KEY contains a placeholder" ;; esac
+          if [ -n "$$JINA_API_KEY_FILE" ]; then
+            [ -r "$$JINA_API_KEY_FILE" ] || fail "JINA_API_KEY_FILE is missing or unreadable"
+            jina_api_key="$$(cat "$$JINA_API_KEY_FILE")"
+          else
+            jina_api_key="$$JINA_API_KEY"
+          fi
+          [ "$${#jina_api_key}" -ge 12 ] || fail "Jina API credential is missing"
+          case "$$jina_api_key" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "Jina API credential contains a placeholder" ;; esac
         fi
         [ -z "$$DOCMIND_GENERATOR_MODEL" ] || fail "answer generation must remain disabled"
         [ -z "$$DASHSCOPE_API_KEY" ] || fail "answer credential must remain disabled"
@@ -28,6 +35,10 @@ services:
       docling-office-parser:
         condition: service_healthy
     environment:
+      # The isolated E2E path retains its process-environment fallback when
+      # DOCMIND_E2E_JINA_API_KEY_FILE is unset. Operational Windows wiring sets
+      # it to the read-only /run/secrets mount instead.
+      JINA_API_KEY_FILE: ${DOCMIND_E2E_JINA_API_KEY_FILE:-}
       DOCMIND_E2E_BOOTSTRAP_ONLY: ${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}
       DOCMIND_GENERATIONLESS_E2E_ENABLED: "1"
       API_PROXY_SCHEME: python
@@ -43,15 +54,63 @@ services:
       PARSER_PLATFORM_OFFICE_ENABLED: "1"
       PARSER_PLATFORM_DOCLING_OFFICE_URL: http://docling-office-parser:8092
       PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS: "900"
-      # Surya is not provisioned in this generationless C-search overlay.
-      # Bound each optional media-OCR failure so multiple supplemental images
-      # cannot idle beyond the isolated MySQL connection lifetime. Required
-      # media still fails closed in the parser-platform policy.
-      PARSER_PLATFORM_PDF_DEADLINE_SECONDS: "3"
+      PARSER_PLATFORM_SURYA_URL: http://surya-parser:8091
+      PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS: ${PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS:-600}
+      PARSER_PLATFORM_SURYA_PARSER_VERSION: "0.22.1"
+      PARSER_PLATFORM_SURYA_MODEL_REVISION: "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
+      PARSER_PLATFORM_SURYA_BACKEND: llamacpp
+      PARSER_PLATFORM_SVG_RENDERER: /usr/bin/rsvg-convert
     volumes:
       - ../scripts/docmind_generationless_e2e_seed.py:/ragflow/scripts/docmind_generationless_e2e_seed.py:ro
     networks:
       docmind-parser-internal: {}
+
+  surya-parser-cpu:
+    # OCR is an independently started parser capability.  Do not make the
+    # existing API/search process unavailable when the licensed model bundle
+    # has not been provisioned yet; required OCR still fails closed at the
+    # parser policy boundary and supplemental OCR records an explicit warning.
+    profiles: [full]
+    platform: linux/amd64
+    image: ${SURYA_CPU_IMAGE:-docmind-surya-parser:cpu-0.22.1-amd64}
+    build:
+      context: ..
+      dockerfile: parser_services/surya/Containerfile.cpu-amd64
+    environment:
+      SURYA_INFERENCE_BACKEND: llamacpp
+      SURYA_MODEL_REVISION: "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
+      SURYA_GGUF_MODEL_SHA256: "1f18abe17b1ed8b4e47ee9b1ad0e274c93daf5efbb6b29a04ff1712e37051e05"
+      SURYA_GGUF_MMPROJ_SHA256: "98c0563673b1657ff6d021d1e5f04af06cbf61bb40c63ac613e8bb71b42fb2c0"
+      SURYA_INFERENCE_PARALLEL: "1"
+      SURYA_INFERENCE_TIMEOUT_SECONDS: ${SURYA_INFERENCE_TIMEOUT_SECONDS:-570}
+      SURYA_SERVICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      SURYA_SERVICE_MAX_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      SURYA_SERVICE_MAX_MEDIA_BYTES: ${PARSER_PLATFORM_MAX_MEDIA_BYTES:-33554432}
+      SURYA_SERVICE_PAGE_TIMEOUT_SECONDS: ${SURYA_SERVICE_PAGE_TIMEOUT_SECONDS:-600}
+      SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS: ${SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS:-1800}
+      SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS: ${SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS:-600}
+    networks:
+      docmind-parser-internal:
+        aliases: [surya-parser]
+    volumes:
+      - ${SURYA_MODEL_DIR:-../models/surya}:/models:ro
+      - surya_cache:/home/parser/.cache
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g
+      - /opt/surya/runtime:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SURYA_CPU_MEMORY_LIMIT:-8g}
+    cpus: ${SURYA_CPU_CPUS:-8}
+    pids_limit: 128
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 20
 
   docling-office-parser:
     profiles: [full]
@@ -88,3 +147,6 @@ services:
 networks:
   docmind-parser-internal:
     internal: true
+
+volumes:
+  surya_cache:

@@ -413,9 +413,15 @@ class ParserPlatformStandardBridge:
             ),
             rhwp_client=RhwpClient(config.hwp_service_url, timeout_seconds=config.hwp_deadline_seconds),
             media_pipeline=OfficeMediaOcrPipeline(
-                client=surya_client,
+                client=SuryaClient(
+                    config.surya_service_url,
+                    timeout_seconds=config.surya_media_deadline_seconds,
+                ),
                 renderer=SafeOfficeMediaRenderer(svg_renderer=config.svg_renderer_path),
                 policy=OfficeMediaPolicy(),
+                expected_parser_version=config.surya_parser_version,
+                expected_model_version=config.surya_model_revision,
+                expected_backend=config.surya_backend,
             ),
             progress=progress,
         )

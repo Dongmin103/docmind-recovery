@@ -4,7 +4,6 @@ import base64
 import hashlib
 import io
 import math
-import os
 import re
 import resource
 import subprocess
@@ -640,10 +639,16 @@ class OfficeMediaOcrPipeline:
         client,
         renderer: SafeOfficeMediaRenderer,
         policy: OfficeMediaPolicy | None = None,
+        expected_parser_version: str = "0.22.1",
+        expected_model_version: str = "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470",
+        expected_backend: str = "llamacpp",
     ):
         self.client = client
         self.renderer = renderer
         self.policy = policy or OfficeMediaPolicy()
+        self.expected_parser_version = expected_parser_version
+        self.expected_model_version = expected_model_version
+        self.expected_backend = expected_backend
 
     def run(
         self,
@@ -691,12 +696,9 @@ class OfficeMediaOcrPipeline:
                         media_hash=rendered.rendered_hash,
                         source_locator=media_block.source_item_id,
                         expected_parser_name="surya",
-                        expected_parser_version=os.environ.get("SURYA_PARSER_VERSION", "0.22.1"),
-                        expected_model_version=os.environ.get(
-                            "SURYA_MODEL_REVISION",
-                            "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470",
-                        ),
-                        expected_backend=os.environ.get("SURYA_INFERENCE_BACKEND", "llamacpp"),
+                        expected_parser_version=self.expected_parser_version,
+                        expected_model_version=self.expected_model_version,
+                        expected_backend=self.expected_backend,
                         media_bytes=rendered.png_bytes,
                     )
                 )

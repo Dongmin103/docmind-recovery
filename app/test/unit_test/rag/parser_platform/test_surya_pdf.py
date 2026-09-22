@@ -61,6 +61,10 @@ def test_surya_chunk_min_tokens_is_validated_and_fingerprinted() -> None:
             "PARSER_PLATFORM_SURYA_CHUNK_MIN_TOKENS": "64",
             "PARSER_PLATFORM_SURYA_CHUNK_MAX_TOKENS": "512",
             "PARSER_PLATFORM_SURYA_REQUEST_BATCH_PAGES": "2",
+            "PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS": "17",
+            "PARSER_PLATFORM_SURYA_PARSER_VERSION": "0.22.1-test",
+            "PARSER_PLATFORM_SURYA_MODEL_REVISION": "revision-test",
+            "PARSER_PLATFORM_SURYA_BACKEND": "llamacpp-test",
         }
     )
     baseline = ParserPlatformConfig()
@@ -68,11 +72,21 @@ def test_surya_chunk_min_tokens_is_validated_and_fingerprinted() -> None:
     assert configured.surya_chunk_min_tokens == 64
     assert configured.fingerprint != baseline.fingerprint
     assert configured.surya_request_batch_pages == 2
+    assert configured.surya_media_deadline_seconds == 17
+    assert configured.surya_parser_version == "0.22.1-test"
+    assert configured.surya_model_revision == "revision-test"
+    assert configured.surya_backend == "llamacpp-test"
     with pytest.raises(ValueError, match="must not exceed"):
         ParserPlatformConfig(surya_chunk_min_tokens=513, surya_chunk_max_tokens=512)
 
     with pytest.raises(ValueError, match="must be positive"):
         ParserPlatformConfig.from_env({"PARSER_PLATFORM_SURYA_REQUEST_BATCH_PAGES": "0"})
+
+    with pytest.raises(ValueError, match="must be positive"):
+        ParserPlatformConfig.from_env({"PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS": "0"})
+
+    with pytest.raises(ValueError, match="runtime identity"):
+        ParserPlatformConfig.from_env({"PARSER_PLATFORM_SURYA_MODEL_REVISION": ""})
 
 def _block(order: int, raw_label: str, html: str, bbox=(10.0, 20.0, 200.0, 80.0)) -> SuryaRawBlock:
     return SuryaRawBlock(

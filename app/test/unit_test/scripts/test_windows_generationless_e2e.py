@@ -12,7 +12,9 @@ def test_generationless_overlay_requires_jina_and_blanks_answer_credentials() ->
     )
     gate = overlay["services"]["model-secret-gate"]
     command = "\n".join(gate["command"])
-    assert "JINA_API_KEY is missing" in command
+    assert "Jina API credential is missing" in command
+    assert 'cat "$$JINA_API_KEY_FILE"' in command
+    assert 'jina_api_key="$$JINA_API_KEY"' in command
     assert "DOCMIND_E2E_BOOTSTRAP_ONLY must be 0 or 1" in command
     assert '"$$DOCMIND_E2E_BOOTSTRAP_ONLY" = 0' in command
     assert "answer generation must remain disabled" in command
@@ -22,6 +24,7 @@ def test_generationless_overlay_requires_jina_and_blanks_answer_credentials() ->
     app = overlay["services"]["ragflow-cpu"]
     assert app["environment"]["DOCMIND_GENERATOR_MODEL"] == ""
     assert app["environment"]["DASHSCOPE_API_KEY"] == ""
+    assert app["environment"]["JINA_API_KEY_FILE"] == "${DOCMIND_E2E_JINA_API_KEY_FILE:-}"
     assert app["environment"]["API_PROXY_SCHEME"] == "python"
     assert app["environment"]["DOCMIND_E2E_BOOTSTRAP_ONLY"] == "${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}"
     assert app["environment"]["DOCMIND_GENERATIONLESS_E2E_ENABLED"] == "1"
@@ -32,8 +35,12 @@ def test_generationless_overlay_requires_jina_and_blanks_answer_credentials() ->
     assert app["environment"]["PARSER_PLATFORM_ENABLED"] == "1"
     assert app["environment"]["PARSER_PLATFORM_INTEGRATION_READY"] == "1"
     assert app["environment"]["PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS"] == "900"
-    assert app["environment"]["PARSER_PLATFORM_PDF_DEADLINE_SECONDS"] == "3"
+    assert app["environment"]["PARSER_PLATFORM_SURYA_URL"] == "http://surya-parser:8091"
+    assert app["environment"]["PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS"].endswith(":-600}")
+    assert app["environment"]["PARSER_PLATFORM_SURYA_PARSER_VERSION"] == "0.22.1"
+    assert app["environment"]["PARSER_PLATFORM_SURYA_BACKEND"] == "llamacpp"
     assert app["depends_on"]["docling-office-parser"]["condition"] == "service_healthy"
+    assert "surya-parser-cpu" not in app["depends_on"]
     assert any("docmind_generationless_e2e_seed.py" in volume for volume in app["volumes"])
 
 
@@ -50,6 +57,22 @@ def test_generationless_office_parser_is_private_and_read_only() -> None:
     assert "docmind-parser-internal" in overlay["services"]["ragflow-cpu"]["networks"]
     assert "legacy-doc" in parser["image"]
     assert "service_healthy" in overlay["services"]["ragflow-cpu"]["depends_on"]["docling-office-parser"]["condition"]
+
+
+def test_generationless_surya_parser_is_private_read_only_and_model_pinned() -> None:
+    overlay = yaml.safe_load(
+        (ROOT / "docker" / "docker-compose-windows-dev-generationless-e2e.yml").read_text(encoding="utf-8")
+    )
+    parser = overlay["services"]["surya-parser-cpu"]
+    assert parser["profiles"] == ["full"]
+    assert parser["read_only"] is True
+    assert parser["cap_drop"] == ["ALL"]
+    assert "ports" not in parser
+    assert list(parser["networks"]) == ["docmind-parser-internal"]
+    assert parser["environment"]["SURYA_MODEL_REVISION"] == "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
+    assert parser["environment"]["SURYA_INFERENCE_BACKEND"] == "llamacpp"
+    assert any("/models:ro" in volume for volume in parser["volumes"])
+    assert "surya_cache" in overlay["volumes"]
 
 
 def test_readiness_probe_never_accepts_a_credential_argument_or_prints_paths() -> None:

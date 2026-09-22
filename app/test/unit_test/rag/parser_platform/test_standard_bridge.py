@@ -29,14 +29,33 @@ from rag.parser_platform import (
     canonical_sha256,
 )
 from rag.parser_platform.docling_pdf_contract import DoclingPdfManifest
+from rag.parser_platform.errors import parser_error
 from rag.parser_platform.pdf_preflight import PdfPageSignals, PdfPreflightReport
 from rag.parser_platform.pdf_routing import PdfRoutingRuleEngine
-from rag.parser_platform.errors import parser_error
 from rag.parser_platform.standard_bridge import _pdfplumber_native_page_payloads
 
 ROOT = Path(__file__).resolve().parents[4]
 OFFICE = ROOT / "test" / "fixtures" / "parser_platform" / "office"
 EVIDENCE = ROOT / ".omx" / "evidence" / "surya-parser-platform"
+
+
+def test_from_config_uses_dedicated_surya_media_timeout_and_identity(tmp_path) -> None:
+    config = ParserPlatformConfig(
+        artifact_root=str(tmp_path),
+        pdf_deadline_seconds=301,
+        surya_media_deadline_seconds=19,
+        surya_parser_version="0.22.1-test",
+        surya_model_revision="revision-test",
+        surya_backend="llamacpp-test",
+    )
+
+    bridge = ParserPlatformStandardBridge.from_config(config)
+
+    assert bridge.surya_client.timeout_seconds == 301
+    assert bridge.media_pipeline.client.timeout_seconds == 19
+    assert bridge.media_pipeline.expected_parser_version == "0.22.1-test"
+    assert bridge.media_pipeline.expected_model_version == "revision-test"
+    assert bridge.media_pipeline.expected_backend == "llamacpp-test"
 
 
 def _prepared(source_format: SourceFormat, *, parse_run_id="a" * 32, chunk_set_id="b" * 32, parser_fingerprint="f" * 64):

@@ -66,12 +66,27 @@ package does not contain or authenticate an application image.
   plaintext area, container parser input area, and sidecar conversion area were
   all empty after completion. The encrypted source and the independent
   read-only plaintext reference still matched their pre-approved identities.
-- The isolated E2E process received the Jina credential only through its
-  environment; no tenant provider row or repository file was created for it.
-  Authenticated HTTP C-search then succeeded for all, folder, and document
-  scopes. Each scope returned five reranked results from the exact active
-  document, with 35 BM25 lane hits, 105 dense lane hits, eight fused
-  candidates, and finite Jina v3.5 scores.
+- The Jina credential now lives outside the repository in an ACL-restricted
+  Windows file. Compose mounts that file read-only, the application reads it
+  through `JINA_API_KEY_FILE`, and the application environment contains no
+  inline key. A forced container recreation and a subsequent Docker restart
+  both retained working Jina authentication. No tenant provider row or
+  repository secret file was created.
+- The normal administrative HTTP flow now reconciles a fully verified indexed
+  source, captures and validates a schema-v2 catalog draft, publishes it with
+  compare-and-swap protection, and loads that published catalog for search.
+  The live sequence `sync-indexed-sources -> draft -> validate -> publish ->
+  search` published catalog `cb8ddd5cb67211f19815b1bc60a18d60`, superseded
+  the previous test catalog, and returned the same five results in all,
+  folder, and document scope. Publish idempotency replay returned the same
+  result and left no started operation behind.
+- The Surya CPU sidecar is pinned to parser version `0.22.1` and model revision
+  `6a3a4c30e5e74446d4f8b6afd05b2f2da970f470`. It verifies both model SHA-256
+  values before becoming healthy, is private/read-only, and applies bounded
+  request and media watchdogs. The image built successfully. A start without
+  the licensed model bundle failed closed before health as designed. Real OCR
+  health and document reprocessing remain pending explicit operator acceptance
+  of the model license and model download.
 - That isolated functional run disabled the BitLocker check only in its
   ACL-restricted external test host configuration. The production-security
   BitLocker requirement remains unsatisfied and unchanged.
@@ -85,10 +100,11 @@ evidence, external secret-provider separation, live BitLocker coverage of the
 Docker/WSL storage location, and actual TLS-only service wiring.
 
 The current Windows development Compose intentionally remains
-`isolated-synthetic-only`. It uses plaintext loopback/bridge transport,
-unencrypted named volumes, and environment-delivered secrets. The production
-readiness check therefore fails closed. No operating, personal, decrypted, or
-customer document is approved for this profile.
+`isolated-synthetic-only`. It uses plaintext loopback/bridge transport and
+unencrypted named volumes. The Jina key is file-mounted, but other production
+secret-management, storage-encryption, and TLS requirements are not satisfied.
+The production readiness check therefore fails closed. No operating, personal,
+decrypted, or customer document is approved for this profile.
 
 ## Still external or incomplete
 
@@ -102,6 +118,10 @@ customer document is approved for this profile.
   and cleanup-failure cases.
 - Run representative Korean Jina v3.5 quality, concurrency, usage, and p50/p95
   evaluation through the complete DocMind C-search path.
+- After the responsible operator accepts the Surya model license, download the
+  pinned model bundle, verify sidecar health, and reprocess a representative
+  image-bearing document to prove both required-OCR failure and supplemental
+  warning policy with the real service.
 - Verify the official All-in-One write API/SDK before enabling source writes.
 - Perform a separately approved limited cutover. No production service, source
   root, database, index, object, or volume was changed by this validation.

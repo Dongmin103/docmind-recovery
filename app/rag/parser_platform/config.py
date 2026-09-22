@@ -57,6 +57,10 @@ class ParserPlatformConfig:
     docling_pdf_service_url: str = "http://docling-pdf-parser:8094"
     docling_pdf_deadline_seconds: int = 900
     surya_service_url: str = "http://surya-parser:8091"
+    surya_media_deadline_seconds: int = 600
+    surya_parser_version: str = "0.22.1"
+    surya_model_revision: str = "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
+    surya_backend: str = "llamacpp"
     surya_request_batch_pages: int = 1
     surya_chunker_version: str = "2.93.0"
     surya_chunk_min_tokens: int = 48
@@ -94,6 +98,8 @@ class ParserPlatformConfig:
             raise ValueError("PARSER_PLATFORM_PDF_ROUTING_MIN_TEXT_FIDELITY_PERCENT must be between 1 and 100")
         if self.surya_chunk_min_tokens > self.surya_chunk_max_tokens:
             raise ValueError("PARSER_PLATFORM_SURYA_CHUNK_MIN_TOKENS must not exceed the maximum")
+        if not self.surya_parser_version or not self.surya_model_revision or not self.surya_backend:
+            raise ValueError("Surya runtime identity must be configured")
         mode = self.hwp_registration_mode
         if mode not in HWP_REGISTRATION_MODES:
             raise ValueError("PARSER_PLATFORM_HWP_REGISTRATION_MODE must be off, canary, or global")
@@ -148,6 +154,15 @@ class ParserPlatformConfig:
             ).rstrip("/"),
             docling_pdf_deadline_seconds=_positive_int(source, "PARSER_PLATFORM_DOCLING_PDF_DEADLINE_SECONDS", 900),
             surya_service_url=source.get("PARSER_PLATFORM_SURYA_URL", "http://surya-parser:8091").rstrip("/"),
+            surya_media_deadline_seconds=_positive_int(
+                source, "PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS", 600
+            ),
+            surya_parser_version=source.get("PARSER_PLATFORM_SURYA_PARSER_VERSION", "0.22.1").strip(),
+            surya_model_revision=source.get(
+                "PARSER_PLATFORM_SURYA_MODEL_REVISION",
+                "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470",
+            ).strip(),
+            surya_backend=source.get("PARSER_PLATFORM_SURYA_BACKEND", "llamacpp").strip(),
             surya_request_batch_pages=_positive_int(
                 source, "PARSER_PLATFORM_SURYA_REQUEST_BATCH_PAGES", 1
             ),
@@ -215,6 +230,10 @@ class ParserPlatformConfig:
                 "docling_pdf_service_url": self.docling_pdf_service_url,
                 "docling_pdf_deadline_seconds": self.docling_pdf_deadline_seconds,
                 "surya_service_url": self.surya_service_url,
+                "surya_media_deadline_seconds": self.surya_media_deadline_seconds,
+                "surya_parser_version": self.surya_parser_version,
+                "surya_model_revision": self.surya_model_revision,
+                "surya_backend": self.surya_backend,
                 "surya_chunker_version": self.surya_chunker_version,
                 "surya_request_batch_pages": self.surya_request_batch_pages,
                 "surya_chunk_min_tokens": self.surya_chunk_min_tokens,

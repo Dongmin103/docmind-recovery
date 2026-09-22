@@ -64,10 +64,12 @@ host paths, source paths, document names, or hashes.
 ```
 
 The live tier is not ready unless this check passes. A prior Jina smoke proves
-connectivity but does not make a credential available to the E2E process. Keep
-the key in the current process only when the operator runs the live tier; do not
-put it in Git, a command argument, a generated report, or committed Compose.
-The ACL-restricted host-worker config remains external to the repository.
+connectivity but does not make a credential available to the E2E process. Run
+`tools/windows/Initialize-DocMindJinaSecret.ps1` once to create the
+ACL-restricted external key file, then keep only its mount path in the ignored
+local environment file. Do not put the key in Git, a command argument, a
+generated report, committed Compose, or the application environment. The
+ACL-restricted host-worker config also remains external to the repository.
 
 Before the one-time Jina credential is injected, the application may be
 started for database/API bootstrap and signed ingestion only by setting
@@ -92,6 +94,9 @@ backup-exclusion requirements, Jina authentication, source registration,
 parser health, indexing verification, or either plaintext cleanup ACK. If the
 Word sample selects Office image OCR, the separately provisioned Surya runtime
 is also required; do not silently drop required OCR to make the test pass.
+Surya is deliberately not an API startup dependency: a missing licensed model
+must not take down already indexed search. Required OCR still fails closed when
+selected, while supplemental media OCR records an explicit parser warning.
 
 ## 2026-09-22 live boundary result
 
@@ -111,13 +116,18 @@ format identity. The live run activated 105 chunks and 3,305 tokens. Its parser
 run reached `READY_WITH_WARNING` because supplemental media OCR was unavailable;
 required media OCR remains fail-closed. The job and both cleanup acknowledgements
 reached `COMPLETE`, with no host plaintext, parser input, or sidecar conversion
-artifact remaining. The credential was subsequently supplied only to the
-isolated application process. After activating a test-only schema-v2 initial
-Catalog for the completed chunk set, authenticated HTTP C-search succeeded in
-all, folder, and document modes. Every mode returned five results from the
-exact approved document, with 35 BM25 lane hits, 105 dense lane hits, eight fused candidates,
-and finite Jina v3.5 rerank scores. No tenant provider credential row was
-created.
+artifact remaining. The credential was subsequently moved to an ACL-restricted
+external file and mounted read-only; the application process environment
+contains no inline key. A forced recreation and a Docker restart both preserved
+authenticated C-search. The application HTTP administration flow then
+reconciled the completed indexed source, captured and validated a schema-v2
+draft, and published it atomically. All, folder, and document searches each
+returned five results from the exact approved document, with 35 BM25 lane hits,
+105 dense lane hits, eight fused candidates, and finite Jina v3.5 rerank scores.
+No tenant provider credential row was created. The Surya CPU image also built
+and rejected startup without the pinned, checksum-verified model bundle; actual
+OCR execution is pending explicit operator license acceptance and model
+provisioning.
 
 This functional test used an ACL-restricted external host-worker configuration
 with the BitLocker requirement disabled only for the isolated test server. It
