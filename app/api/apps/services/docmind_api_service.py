@@ -450,7 +450,7 @@ def _rerank_model(catalog: Catalog) -> LLMBundle:
     if rerank_id.split("@", 1)[0] != "jina-reranker-v3.5":
         raise RuntimeError("DOCMIND_RERANK_MODEL_INVALID: jina-reranker-v3.5 is required")
     if os.environ.get("DOCMIND_GENERATIONLESS_E2E_ENABLED") == "1":
-        api_key = os.environ.get("JINA_API_KEY", "")
+        api_key = _generationless_jina_api_key()
         if len(api_key) < 12 or any(marker in api_key for marker in ("CHANGE_ME", "PLACEHOLDER", "GENERATED_LOCALLY")):
             raise RuntimeError("DOCMIND_RERANK_CREDENTIAL_UNAVAILABLE")
         # The isolated generationless overlay keeps the credential process-only:
@@ -466,6 +466,28 @@ def _rerank_model(catalog: Catalog) -> LLMBundle:
     else:
         model_config = get_model_config_from_provider_instance(knowledgebase.tenant_id, LLMType.RERANK, rerank_id)
     return LLMBundle(knowledgebase.tenant_id, model_config)
+
+
+def _generationless_jina_api_key() -> str:
+    secret_file = os.environ.get("JINA_API_KEY_FILE", "").strip()
+    if not secret_file:
+        return os.environ.get("JINA_API_KEY", "")
+
+    try:
+        path = Path(secret_file)
+        if not path.is_absolute() or not path.is_file() or path.is_symlink():
+            raise OSError("invalid secret file")
+        encoded = path.read_bytes()
+        if not encoded or len(encoded) > 16 * 1024:
+            raise OSError("invalid secret file size")
+        value = encoded.decode("utf-8").strip()
+        if not value or "\x00" in value or "\n" in value or "\r" in value:
+            raise ValueError("invalid secret file content")
+        return value
+    except (OSError, UnicodeError, ValueError):
+        # A configured file is authoritative. Never fall back to an environment
+        # value when its mount is missing or malformed.
+        return ""
 
 
 def _empty_result(catalog: Catalog, resolved_scope: ResolvedScope, trace_id: str, started_at: float) -> dict[str, Any]:

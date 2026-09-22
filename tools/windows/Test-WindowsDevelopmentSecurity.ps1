@@ -56,6 +56,39 @@ function Require-Secret($Values, [string]$Name, [int]$MinimumLength) {
     }
 }
 
+function Convert-WslMountPathToWindows([string]$Value) {
+    if ($Value -notmatch '^/mnt/([a-zA-Z])(?:/(.*))?$') { return $null }
+    $drive = $Matches[1].ToUpperInvariant()
+    $tail = [string]$Matches[2]
+    if ([string]::IsNullOrWhiteSpace($tail)) { return "$drive`:\" }
+    return "$drive`:\$($tail.Replace('/', '\'))"
+}
+
+function Require-SecretFile($Values, [string]$Name, [int]$MinimumLength) {
+    if (-not $Values.ContainsKey($Name)) { throw "Required local secret file is missing: $Name" }
+    $windowsPath = Convert-WslMountPathToWindows ([string]$Values[$Name])
+    if (-not $windowsPath -or -not (Test-Path -LiteralPath $windowsPath -PathType Leaf)) {
+        throw "Required local secret file is unavailable: $Name"
+    }
+    $value = [IO.File]::ReadAllText($windowsPath, [Text.Encoding]::UTF8).Trim()
+    try {
+        if ($value.Length -lt $MinimumLength -or $value -match '(?i)GENERATED_LOCALLY|CHANGE_ME|PLACEHOLDER|EXAMPLE|PASSWORD') {
+            throw "Required local secret file is invalid: $Name"
+        }
+    } finally {
+        $value = $null
+    }
+    $acl = Get-Acl -LiteralPath $windowsPath
+    if (-not $acl.AreAccessRulesProtected) { throw "Required local secret file inherits broader permissions: $Name" }
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    foreach ($rule in $acl.Access) {
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $sid -notin @($currentSid, 'S-1-5-18')) {
+            throw "Unexpected principal can read required local secret file: $Name"
+        }
+    }
+}
+
 $values = Read-DotEnv $resolvedEnvironment
 Require-Exact $values 'DOCMIND_DEV_SECURITY_MODE' 'isolated-synthetic-only'
 Require-Exact $values 'DOCMIND_DEV_DATA_CLASS' 'synthetic-only'
@@ -74,7 +107,7 @@ if ($uniqueSecrets.Count -ne 4) {
 }
 
 if ($RequireModelCredentials) {
-    Require-Secret $values 'JINA_API_KEY' 12
+    Require-SecretFile $values 'DOCMIND_JINA_SECRET_FILE' 12
     Require-Secret $values 'DASHSCOPE_API_KEY' 12
     if (-not $values.ContainsKey('DOCMIND_GENERATOR_MODEL') -or [string]::IsNullOrWhiteSpace($values['DOCMIND_GENERATOR_MODEL'])) {
         throw 'DOCMIND_GENERATOR_MODEL is required for the full profile.'

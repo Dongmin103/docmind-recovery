@@ -68,18 +68,25 @@ services:
       security-gate:
         condition: service_completed_successfully
     environment:
-      JINA_API_KEY: ${JINA_API_KEY:-}
+      JINA_API_KEY_FILE: /run/secrets/jina-api-key
       DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+    volumes:
+      - type: bind
+        source: ${DOCMIND_JINA_SECRET_FILE:?Run Initialize-DocMindJinaSecret.ps1 first}
+        target: /run/secrets/jina-api-key
+        read_only: true
     command:
       - /bin/sh
       - -ec
       - |
         fail() { echo "Windows development model-secret gate failed: $$1" >&2; exit 1; }
-        [ "$${#JINA_API_KEY}" -ge 12 ] || fail "JINA_API_KEY is missing"
+        [ -r "$$JINA_API_KEY_FILE" ] || fail "JINA_API_KEY_FILE is missing or unreadable"
+        jina_api_key="$$(cat "$$JINA_API_KEY_FILE")"
+        [ "$${#jina_api_key}" -ge 12 ] || fail "JINA_API_KEY_FILE is empty or too short"
         [ -n "$$DOCMIND_GENERATOR_MODEL" ] || fail "DOCMIND_GENERATOR_MODEL is missing"
         [ "$${#DASHSCOPE_API_KEY}" -ge 12 ] || fail "DASHSCOPE_API_KEY is missing"
-        case "$$JINA_API_KEY$$DASHSCOPE_API_KEY" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "model credentials contain placeholders" ;; esac
+        case "$$jina_api_key$$DASHSCOPE_API_KEY" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "model credentials contain placeholders" ;; esac
         echo "External model credentials are present (values not logged)."
 
   mysql:
@@ -282,7 +289,7 @@ services:
       STORAGE_IMPL: ${STORAGE_IMPL:-MINIO}
       TEI_HOST: ${TEI_HOST:-bge-m3-cpu}
       DOCMIND_RERANK_ID: ${DOCMIND_RERANK_ID:-jina-reranker-v3.5@jina@Jina}
-      JINA_API_KEY: ${JINA_API_KEY:-}
+      JINA_API_KEY_FILE: /run/secrets/jina-api-key
       DOCMIND_GENERATOR_MODEL: ${DOCMIND_GENERATOR_MODEL:-}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DOCMIND_HOST_WORKER_KEY_ID: ${DOCMIND_HOST_WORKER_KEY_ID:-windows-host-1}
@@ -302,6 +309,10 @@ services:
       - type: bind
         source: ${DOCMIND_HOST_WORKER_SECRET_FILE:?Run Initialize-WindowsDevelopmentDocker.ps1 first}
         target: /run/secrets/docmind-host-worker-hmac
+        read_only: true
+      - type: bind
+        source: ${DOCMIND_JINA_SECRET_FILE:?Run Initialize-DocMindJinaSecret.ps1 first}
+        target: /run/secrets/jina-api-key
         read_only: true
     tmpfs:
       - /run/docmind-ephemeral-parser:rw,noexec,nosuid,nodev,mode=0700,size=536870912

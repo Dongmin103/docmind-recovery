@@ -47,6 +47,8 @@ DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK=1
 DOCMIND_DEV_EXTERNAL_API_POLICY=https-only
 DOCMIND_HOST_WORKER_KEY_ID=windows-host-1
 DOCMIND_HOST_WORKER_SECRET_FILE=../../.local/docker/host-worker-hmac.key
+DOCMIND_JINA_SECRET_FILE=/mnt/c/DocMindSecrets/jina-api.key
+DOCMIND_E2E_JINA_API_KEY_FILE=/run/secrets/jina-api-key
 DOCMIND_DEV_WEB_PORT=18080
 DOCMIND_DEV_API_PORT=19380
 DOCMIND_DEV_ADMIN_PORT=19381
@@ -94,4 +96,4 @@ BGE_M3_CPUS=4
 [IO.File]::WriteAllText($resolvedOutput, $content, [Text.UTF8Encoding]::new($false))
 & (Join-Path $PSScriptRoot 'Initialize-DocMindHostWorkerSecret.ps1') -EnvironmentPath $resolvedOutput -RotateSecret:$Force
 Write-Output "Created ignored development environment: $resolvedOutput"
-Write-Output 'No external API keys were added. Set JINA_API_KEY and the answer-model credentials locally when available.'
+Write-Output 'No external API keys were added. Run Initialize-DocMindJinaSecret.ps1 and configure answer-model credentials when available.'

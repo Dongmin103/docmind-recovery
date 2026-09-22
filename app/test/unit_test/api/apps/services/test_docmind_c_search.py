@@ -289,9 +289,35 @@ def test_generationless_e2e_reranker_uses_process_only_jina_key(monkeypatch):
     }
 
 
+def test_generationless_e2e_reranker_prefers_secret_file(monkeypatch, tmp_path):
+    secret_file = tmp_path / "jina-api-key"
+    secret_file.write_text("test-only-file-jina-key\n", encoding="utf-8")
+    captured = {}
+    monkeypatch.setenv("DOCMIND_GENERATIONLESS_E2E_ENABLED", "1")
+    monkeypatch.setenv("JINA_API_KEY_FILE", str(secret_file))
+    monkeypatch.setenv("JINA_API_KEY", "test-only-env-jina-key")
+    monkeypatch.setattr(service.KnowledgebaseService, "get_by_id", lambda _dataset_id: (True, SimpleNamespace(tenant_id="owner")))
+    monkeypatch.setattr(service, "get_model_config_from_provider_instance", lambda *_args: pytest.fail("file key must not create a provider row"))
+    monkeypatch.setattr(service, "LLMBundle", lambda tenant_id, config: captured.update(tenant_id=tenant_id, config=config) or "bundle")
+
+    assert service._rerank_model(_catalog()) == "bundle"
+    assert captured["config"]["api_key"] == "test-only-file-jina-key"
+
+
+def test_generationless_e2e_reranker_does_not_fallback_when_secret_file_is_invalid(monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCMIND_GENERATIONLESS_E2E_ENABLED", "1")
+    monkeypatch.setenv("JINA_API_KEY_FILE", str(tmp_path / "missing"))
+    monkeypatch.setenv("JINA_API_KEY", "test-only-env-jina-key")
+    monkeypatch.setattr(service.KnowledgebaseService, "get_by_id", lambda _dataset_id: (True, SimpleNamespace(tenant_id="owner")))
+
+    with pytest.raises(RuntimeError, match="DOCMIND_RERANK_CREDENTIAL_UNAVAILABLE"):
+        service._rerank_model(_catalog())
+
+
 def test_generationless_e2e_reranker_fails_closed_without_key(monkeypatch):
     monkeypatch.setenv("DOCMIND_GENERATIONLESS_E2E_ENABLED", "1")
     monkeypatch.delenv("JINA_API_KEY", raising=False)
+    monkeypatch.delenv("JINA_API_KEY_FILE", raising=False)
     monkeypatch.setattr(
         service.KnowledgebaseService,
         "get_by_id",

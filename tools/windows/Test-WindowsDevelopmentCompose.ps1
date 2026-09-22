@@ -74,6 +74,16 @@ $workerSecretMount = @($application.volumes | Where-Object { $_.target -eq '/run
 if ($workerSecretMount.Count -ne 1 -or -not $workerSecretMount[0].read_only -or $workerSecretMount[0].type -ne 'bind') {
     throw 'Host-worker HMAC secret must be a single read-only bind mount.'
 }
+$jinaSecretMount = @($application.volumes | Where-Object { $_.target -eq '/run/secrets/jina-api-key' })
+if ($application.environment.JINA_API_KEY_FILE -ne '/run/secrets/jina-api-key' -or
+    $jinaSecretMount.Count -ne 1 -or -not $jinaSecretMount[0].read_only -or $jinaSecretMount[0].type -ne 'bind') {
+    throw 'Jina API credential must use a single read-only secret-file bind mount.'
+}
+$modelGateJinaMount = @($config.services.'model-secret-gate'.volumes | Where-Object { $_.target -eq '/run/secrets/jina-api-key' })
+if ($config.services.'model-secret-gate'.environment.JINA_API_KEY_FILE -ne '/run/secrets/jina-api-key' -or
+    $modelGateJinaMount.Count -ne 1 -or -not $modelGateJinaMount[0].read_only -or $modelGateJinaMount[0].type -ne 'bind') {
+    throw 'Model credential gate must validate the same read-only Jina secret-file mount.'
+}
 $ephemeralTmpfs = @($application.tmpfs | Where-Object { [string]$_ -like '/run/docmind-ephemeral-parser:*' })
 if ($ephemeralTmpfs.Count -ne 1 -or [string]$ephemeralTmpfs[0] -notmatch 'noexec' -or [string]$ephemeralTmpfs[0] -notmatch 'nosuid' -or [string]$ephemeralTmpfs[0] -notmatch 'nodev') {
     throw 'Ephemeral parser root must be a hardened tmpfs mount.'

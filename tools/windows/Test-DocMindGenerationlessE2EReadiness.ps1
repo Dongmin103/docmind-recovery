@@ -39,6 +39,14 @@ function Test-UsableSecret([string]$Value) {
     return $Value -notmatch 'CHANGE_ME|PLACEHOLDER|GENERATED_LOCALLY'
 }
 
+function Convert-WslMountPathToWindows([string]$Value) {
+    if ($Value -notmatch '^/mnt/([a-zA-Z])(?:/(.*))?$') { return $null }
+    $drive = $Matches[1].ToUpperInvariant()
+    $tail = [string]$Matches[2]
+    if ([string]::IsNullOrWhiteSpace($tail)) { return "$drive`:\" }
+    return "$drive`:\$($tail.Replace('/', '\'))"
+}
+
 function Get-ImageId([string]$Image) {
     try {
         $raw = & $DockerCommand image inspect $Image 2>$null
@@ -64,9 +72,18 @@ function Get-ContainerHealth([string]$Name) {
 }
 
 $envValues = Read-EnvFile -LiteralPath $envPath
-$jinaKey = [Environment]::GetEnvironmentVariable('JINA_API_KEY')
-if ([string]::IsNullOrWhiteSpace($jinaKey) -and $envValues.ContainsKey('JINA_API_KEY')) {
-    $jinaKey = [string]$envValues['JINA_API_KEY']
+$jinaKey = ''
+if ($envValues.ContainsKey('DOCMIND_JINA_SECRET_FILE')) {
+    $jinaSecretPath = Convert-WslMountPathToWindows ([string]$envValues['DOCMIND_JINA_SECRET_FILE'])
+    if ($jinaSecretPath) {
+        try { $jinaKey = [IO.File]::ReadAllText($jinaSecretPath, [Text.Encoding]::UTF8).Trim() } catch { $jinaKey = '' }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($jinaKey)) {
+    $jinaKey = [Environment]::GetEnvironmentVariable('JINA_API_KEY')
+    if ([string]::IsNullOrWhiteSpace($jinaKey) -and $envValues.ContainsKey('JINA_API_KEY')) {
+        $jinaKey = [string]$envValues['JINA_API_KEY']
+    }
 }
 $jinaReady = Test-UsableSecret $jinaKey
 $jinaKey = $null
