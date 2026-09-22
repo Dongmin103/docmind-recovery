@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import unicodedata
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
@@ -28,12 +29,18 @@ from api.db.db_models import (
     DocmindFolderVersion,
     DocmindFolderVersionDocument,
     DocmindIdempotencyOperation,
+    DocmindIngestionJob,
     DocmindProject,
     DocmindRegistration,
     DocmindRegistrationCurrent,
+    DocmindSource,
+    DocmindSourceDocument,
+    DocmindSourceVersion,
     Document,
     File,
     File2Document,
+    ParserRun,
+    Task,
 )
 from api.db.services.document_service import (
     DOCMIND_PROTECTED_LIFECYCLES,
@@ -963,6 +970,347 @@ async def retry_import(
     )
 
 
+def _synchronize_indexed_sources(
+    tenant_id: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Materialize completed generationless sources in the review hierarchy.
+
+    Cloud ingestion owns the searchable Document and source-version records.
+    Catalog review owns File/File2Document and Registration records. Keeping
+    this explicit administrator boundary prevents an incomplete or uncleaned
+    ingestion job from becoming publishable merely because chunks exist.
+    """
+
+    context = _context(tenant_id)
+    root = _source_root(context)
+    candidates: list[
+        tuple[
+            DocmindSourceDocument,
+            DocmindSourceVersion,
+            DocmindIngestionJob,
+            ParserRun,
+            Document,
+            str,
+        ]
+    ] = []
+    for mapping in (
+        DocmindSourceDocument.select()
+        .where(
+            (DocmindSourceDocument.project_id == context.project.id)
+            & (DocmindSourceDocument.deleted_at.is_null(True))
+            & (DocmindSourceDocument.active_source_version_id.is_null(False))
+        )
+        .order_by(DocmindSourceDocument.source_id, DocmindSourceDocument.relative_path)
+    ):
+        version = DocmindSourceVersion.get_or_none(
+            (DocmindSourceVersion.id == mapping.active_source_version_id)
+            & (DocmindSourceVersion.source_document_id == mapping.id)
+            & (DocmindSourceVersion.document_id == mapping.document_id)
+            & (DocmindSourceVersion.lifecycle_state == "ACTIVE")
+        )
+        document = Document.get_or_none(
+            (Document.id == mapping.document_id)
+            & (Document.kb_id == context.project.dataset_id)
+        )
+        if version is None or document is None:
+            continue
+        job = DocmindIngestionJob.get_or_none(
+            (DocmindIngestionJob.version_id == version.id)
+            & (DocmindIngestionJob.document_id == document.id)
+            & (DocmindIngestionJob.lifecycle_state == "COMPLETE")
+            & (DocmindIngestionJob.cleanup_state == "COMPLETE")
+            & (DocmindIngestionJob.host_cleanup_state == "COMPLETE")
+        )
+        parser_run = (
+            ParserRun.get_or_none(
+                (ParserRun.id == version.parser_run_id)
+                & (ParserRun.doc_id == document.id)
+                & (ParserRun.chunk_set_id == version.chunk_set_id)
+                & (ParserRun.lifecycle.in_(("READY", "READY_WITH_WARNING")))
+                & (ParserRun.raw_artifact_ref.is_null(True))
+            )
+            if version.parser_run_id and version.chunk_set_id
+            else None
+        )
+        content_hash = (
+            version.content_sha256
+            or (parser_run.source_hash if parser_run is not None else None)
+        )
+        if (
+            job is None
+            or parser_run is None
+            or not content_hash
+            or (version.content_sha256 and version.content_sha256 != parser_run.source_hash)
+            or document.active_chunk_set_id != parser_run.chunk_set_id
+            or int(parser_run.staged_chunk_count or 0) <= 0
+            or not docmind_registration_service._retrievable_chunk_exists(
+                document,
+                context.project.tenant_id,
+            )
+        ):
+            continue
+        candidates.append((mapping, version, job, parser_run, document, content_hash))
+    if not candidates:
+        raise DocmindHierarchyError("DOCMIND_HIERARCHY_NO_INDEXED_SOURCES")
+
+    payload = {
+        "active_version_id": context.project.active_version_id,
+        "sources": [
+            {
+                "source_document_id": mapping.id,
+                "source_version_id": version.id,
+                "ingestion_job_id": job.id,
+                "parser_run_id": parser_run.id,
+                "document_id": document.id,
+                "relative_path": mapping.relative_path,
+                "content_hash": content_hash,
+            }
+            for mapping, version, job, parser_run, document, content_hash in candidates
+        ],
+    }
+    try:
+        operation, replay = docmind_hierarchy_draft_state.start_idempotent_operation(
+            context,
+            tenant_id,
+            "SYNC_INDEXED_SOURCES",
+            idempotency_key,
+            payload,
+        )
+    except docmind_hierarchy_draft_state.HierarchyDraftStateError as error:
+        raise DocmindHierarchyError(error.code) from error
+    if replay is not None:
+        return replay
+
+    created_files = 0
+    created_registrations = 0
+    database = DocmindProject._meta.database
+    with database.atomic():
+        for mapping, version, job, parser_run, document, content_hash in candidates:
+            fresh_mapping = DocmindSourceDocument.get_by_id(mapping.id)
+            if (
+                fresh_mapping.deleted_at is not None
+                or fresh_mapping.active_source_version_id != version.id
+            ):
+                raise DocmindHierarchyError("DOCMIND_SOURCE_VERSION_CHANGED")
+            if version.content_sha256 is None:
+                changed_version = (
+                    DocmindSourceVersion.update(
+                        content_sha256=content_hash,
+                        **_updates(),
+                    )
+                    .where(
+                        (DocmindSourceVersion.id == version.id)
+                        & (DocmindSourceVersion.lifecycle_state == "ACTIVE")
+                        & (DocmindSourceVersion.parser_run_id == parser_run.id)
+                        & (DocmindSourceVersion.chunk_set_id == parser_run.chunk_set_id)
+                        & (DocmindSourceVersion.content_sha256.is_null(True))
+                    )
+                    .execute()
+                )
+                if changed_version != 1:
+                    raise DocmindHierarchyError("DOCMIND_SOURCE_VERSION_CHANGED")
+            changed_task = (
+                Task.update(
+                    progress=1.0,
+                    progress_msg="Catalog reconciliation verified active parser run",
+                    **_updates(),
+                )
+                .where(
+                    (Task.doc_id == document.id)
+                    & (Task.parse_run_id == parser_run.id)
+                    & (Task.chunk_set_id == parser_run.chunk_set_id)
+                    & (Task.progress >= 0)
+                    & (Task.progress < 1)
+                )
+                .execute()
+            )
+            if changed_task not in {0, 1}:
+                raise DocmindHierarchyError("DOCMIND_TASK_RECONCILIATION_CONFLICT")
+            Task.update(
+                progress=-1.0,
+                progress_msg="Superseded by an activated parser run",
+                **_updates(),
+            ).where(
+                (Task.doc_id == document.id)
+                & (Task.chunk_set_id != parser_run.chunk_set_id)
+                & (Task.progress >= 0)
+                & (Task.progress < 1)
+            ).execute()
+            changed_document = (
+                Document.update(
+                    content_hash=content_hash[:32],
+                    run=TaskStatus.DONE.value,
+                    progress=1.0,
+                    chunk_num=parser_run.staged_chunk_count,
+                    token_num=parser_run.staged_token_count,
+                    **_updates(),
+                )
+                .where(
+                    (Document.id == document.id)
+                    & (Document.kb_id == context.project.dataset_id)
+                    & (Document.active_chunk_set_id == parser_run.chunk_set_id)
+                    & (
+                        Document.content_hash.is_null(True)
+                        | (Document.content_hash == "")
+                        | (Document.content_hash == content_hash[:32])
+                    )
+                )
+                .execute()
+            )
+            if changed_document != 1:
+                raise DocmindHierarchyError("DOCMIND_DOCUMENT_RECONCILIATION_CONFLICT")
+
+    for _mapping, _version, _job, _parser_run, document, content_hash in candidates:
+        document = Document.get_by_id(document.id)
+        blocker = docmind_registration_service.index_completion_blocker(
+            context,
+            document,
+            captured_content_hash=content_hash[:32],
+        )
+        if blocker:
+            raise DocmindHierarchyError(blocker)
+
+    # FileService and File2DocumentService own Peewee connection contexts.
+    # They cannot run inside a caller-owned transaction on pooled MySQL.
+    with nullcontext():
+        for mapping, version, job, parser_run, document, content_hash in candidates:
+            fresh_mapping = DocmindSourceDocument.get_by_id(mapping.id)
+            fresh_version = DocmindSourceVersion.get_by_id(version.id)
+            if (
+                fresh_mapping.deleted_at is not None
+                or fresh_mapping.active_source_version_id != version.id
+                or fresh_version.lifecycle_state != "ACTIVE"
+                or fresh_version.parser_run_id != parser_run.id
+                or fresh_version.chunk_set_id != parser_run.chunk_set_id
+                or fresh_version.content_sha256 != content_hash
+            ):
+                raise DocmindHierarchyError("DOCMIND_SOURCE_VERSION_CHANGED")
+            document = Document.get_by_id(document.id)
+            if (
+                document.active_chunk_set_id != parser_run.chunk_set_id
+                or document.content_hash != content_hash[:32]
+            ):
+                raise DocmindHierarchyError("DOCMIND_DOCUMENT_RECONCILIATION_CONFLICT")
+            source = DocmindSource.get_or_none(
+                (DocmindSource.id == mapping.source_id)
+                & (DocmindSource.project_id == context.project.id)
+                & (DocmindSource.enabled == True)
+            )
+            if source is None:
+                raise DocmindHierarchyError("DOCMIND_SOURCE_NOT_FOUND")
+            logical_path = normalize_relative_path(mapping.relative_path)
+            parts = tuple(PurePosixPath(logical_path).parts)
+            source_folder = _ensure_folder(root, source.display_name, tenant_id)
+            chain = _folder_chain(source_folder, parts[:-1], tenant_id)
+            parent = chain[-1]
+            matches = [
+                child
+                for child in _children(parent.id)
+                if _name_key(child.name) == _name_key(parts[-1])
+            ]
+            if matches:
+                if len(matches) != 1 or matches[0].type == FileType.FOLDER.value:
+                    raise DocmindHierarchyError("DOCMIND_IMPORT_PATH_CONFLICT")
+                file_row = matches[0]
+                links = File2DocumentService.get_by_file_id(file_row.id)
+                if len(links) != 1 or links[0].document_id != document.id:
+                    raise DocmindHierarchyError("DOCMIND_IMPORT_PATH_CONFLICT")
+            else:
+                file_row = FileService.insert(
+                    {
+                        "id": _stable_id("docmind-source-file", context.project.id, mapping.id),
+                        "parent_id": parent.id,
+                        "tenant_id": tenant_id,
+                        "created_by": tenant_id,
+                        "name": parts[-1],
+                        "location": "",
+                        "size": int(document.size or 0),
+                        "type": str(document.type or document.suffix or "file"),
+                        "source_type": SOURCE_TYPE,
+                    }
+                )
+                File2Document.create(
+                    id=_stable_id("docmind-source-link", context.project.id, mapping.id),
+                    file_id=file_row.id,
+                    document_id=document.id,
+                    **_timestamps(),
+                )
+                created_files += 1
+            semantic = _semantic_folder(context.project, parent, "", parent.name)
+            current = DocmindRegistrationCurrent.get_or_none(
+                (DocmindRegistrationCurrent.project_id == context.project.id)
+                & (DocmindRegistrationCurrent.document_id == document.id)
+            )
+            if current is None:
+                registration_id = _stable_id(
+                    "docmind-source-registration",
+                    context.project.id,
+                    mapping.id,
+                    version.id,
+                )
+                registration = DocmindRegistration.create(
+                    id=registration_id,
+                    project_id=context.project.id,
+                    folder_id=semantic.id,
+                    document_id=document.id,
+                    file_id=file_row.id,
+                    captured_content_hash=content_hash[:32],
+                    lifecycle_state="INDEXED",
+                    error_code=None,
+                    error_message=None,
+                    created_by=tenant_id,
+                    retry_of_id=None,
+                    **_timestamps(),
+                )
+                DocmindRegistrationCurrent.create(
+                    id=_stable_id("docmind-registration-current", context.project.id, document.id),
+                    project_id=context.project.id,
+                    document_id=document.id,
+                    registration_id=registration.id,
+                    lock_version=0,
+                    **_timestamps(),
+                )
+                created_registrations += 1
+            else:
+                registration = DocmindRegistration.get_by_id(current.registration_id)
+                if (
+                    registration.lifecycle_state != "INDEXED"
+                    or registration.file_id != file_row.id
+                    or registration.captured_content_hash != content_hash[:32]
+                ):
+                    raise DocmindHierarchyError("DOCMIND_REGISTRATION_CONFLICT")
+
+        result = {
+            "project_id": context.project.id,
+            "dataset_id": context.project.dataset_id,
+            "eligible_source_count": len(candidates),
+            "created_file_count": created_files,
+            "created_registration_count": created_registrations,
+            "source_tree_hash": current_source_tree_hash(tenant_id),
+        }
+        docmind_hierarchy_draft_state.complete_idempotent_operation(operation, result)
+    return result
+
+
+def synchronize_indexed_sources(
+    tenant_id: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    try:
+        return _synchronize_indexed_sources(tenant_id, idempotency_key)
+    except Exception:
+        context = _context(tenant_id)
+        DocmindIdempotencyOperation.delete().where(
+            (DocmindIdempotencyOperation.project_id == context.project.id)
+            & (DocmindIdempotencyOperation.actor_id == tenant_id)
+            & (DocmindIdempotencyOperation.operation == "SYNC_INDEXED_SOURCES")
+            & (DocmindIdempotencyOperation.idempotency_key == idempotency_key)
+            & (DocmindIdempotencyOperation.state == "STARTED")
+        ).execute()
+        raise
+
+
 def capture_hierarchy_draft(
     tenant_id: str,
     expected_active_version_id: str,
@@ -1059,7 +1407,7 @@ def capture_hierarchy_draft(
             docmind_registration_service.index_completion_blocker(
                 context,
                 document,
-                captured_content_hash=document.content_hash,
+                captured_content_hash=membership.captured_content_hash,
             )
             if document is not None
             else "DOCMIND_DOCUMENT_MISSING"

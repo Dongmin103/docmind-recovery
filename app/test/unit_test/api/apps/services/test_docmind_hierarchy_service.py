@@ -15,12 +15,18 @@ from api.db.db_models import (
     DocmindFolderVersion,
     DocmindFolderVersionDocument,
     DocmindIdempotencyOperation,
+    DocmindIngestionJob,
     DocmindProject,
     DocmindRegistration,
     DocmindRegistrationCurrent,
+    DocmindSource,
+    DocmindSourceDocument,
+    DocmindSourceVersion,
     Document,
     File,
     File2Document,
+    ParserRun,
+    Task,
 )
 
 MODELS = [
@@ -29,6 +35,10 @@ MODELS = [
     DocmindFolder,
     DocmindRegistration,
     DocmindRegistrationCurrent,
+    DocmindSource,
+    DocmindSourceDocument,
+    DocmindSourceVersion,
+    DocmindIngestionJob,
     DocmindCatalogVersion,
     DocmindFolderVersion,
     DocmindFolderVersionDocument,
@@ -39,6 +49,8 @@ MODELS = [
     Document,
     File,
     File2Document,
+    ParserRun,
+    Task,
 ]
 
 
@@ -429,6 +441,150 @@ def test_capture_includes_internal_direct_document_and_over_five_nodes(hierarchy
     snapshot = service.json.loads(version.snapshot_json)
     assert snapshot["schema_version"] == 2
     assert len(snapshot["nodes"]) == 6
+
+
+def test_sync_indexed_sources_materializes_review_hierarchy_idempotently(
+    hierarchy_env,
+    monkeypatch,
+):
+    source = DocmindSource.create(
+        id="source-dept-2",
+        project_id=hierarchy_env.project.id,
+        display_name="DEPT_2",
+        default_folder_id=None,
+        enabled=True,
+        **service._timestamps(),
+    )
+    Document.create(
+        id="source-document-1",
+        kb_id="dataset-1",
+        parser_id="naive",
+        parser_config={},
+        source_type=service.SOURCE_TYPE,
+        type="doc",
+        created_by="tenant-1",
+        name="manual.doc",
+        location="",
+        size=100,
+        suffix="doc",
+        content_hash="",
+        active_chunk_set_id="chunk-set-1",
+        run="3",
+        progress=1.0,
+        chunk_num=105,
+        status="1",
+        **service._timestamps(),
+    )
+    mapping = DocmindSourceDocument.create(
+        id="source-mapping-1",
+        project_id=hierarchy_env.project.id,
+        source_id=source.id,
+        document_id="source-document-1",
+        folder_id="logical-folder-1",
+        relative_path="Manuals/Install/manual.doc",
+        relative_path_hash="a" * 64,
+        active_source_version_id="source-version-1",
+        generation=1,
+        **service._timestamps(),
+    )
+    DocmindSourceVersion.create(
+        id="source-version-1",
+        source_document_id=mapping.id,
+        document_id="source-document-1",
+        ciphertext_sha256="b" * 64,
+        ciphertext_size=200,
+        source_mtime_ns=1,
+        content_sha256=None,
+        parser_run_id="parser-run-1",
+        chunk_set_id="chunk-set-1",
+        lifecycle_state="ACTIVE",
+        **service._timestamps(),
+    )
+    DocmindIngestionJob.create(
+        id="ingestion-job-1",
+        project_id=hierarchy_env.project.id,
+        source_id=source.id,
+        source_document_id=mapping.id,
+        document_id="source-document-1",
+        version_id="source-version-1",
+        idempotency_key="ingestion-idempotency-1",
+        lifecycle_state="COMPLETE",
+        parser_run_id="parser-run-1",
+        chunk_set_id="chunk-set-1",
+        host_cleanup_state="COMPLETE",
+        cleanup_state="COMPLETE",
+        **service._timestamps(),
+    )
+    ParserRun.create(
+        id="parser-run-1",
+        doc_id="source-document-1",
+        chunk_set_id="chunk-set-1",
+        idempotency_key="parser-idempotency-1",
+        source_hash="content-hash-1",
+        source_format="DOC",
+        source_fingerprint="source-fingerprint-1",
+        config_fingerprint="config-fingerprint-1",
+        parser_fingerprint="parser-fingerprint-1",
+        parser_name="docling-office",
+        parser_version="1",
+        backend="libreoffice-headless+native-office-backend",
+        schema_version="1",
+        lifecycle="READY_WITH_WARNING",
+        raw_artifact_ref=None,
+        staged_chunk_count=105,
+        staged_token_count=3305,
+        **service._timestamps(),
+    )
+    for task_id, parse_run_id, chunk_set_id in (
+        ("task-active", "parser-run-1", "chunk-set-1"),
+        ("task-stale", "parser-run-old", "chunk-set-old"),
+    ):
+        Task.create(
+            id=task_id,
+            doc_id="source-document-1",
+            from_page=0,
+            to_page=1,
+            task_type="",
+            progress=0.5,
+            parse_run_id=parse_run_id,
+            chunk_set_id=chunk_set_id,
+            **service._timestamps(),
+        )
+    monkeypatch.setattr(
+        service.docmind_registration_service,
+        "index_completion_blocker",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        service.docmind_registration_service,
+        "_retrievable_chunk_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    first = service.synchronize_indexed_sources("tenant-1", "sync-key")
+    replay = service.synchronize_indexed_sources("tenant-1", "sync-key")
+
+    assert replay == first
+    assert first["eligible_source_count"] == 1
+    assert first["created_file_count"] == 1
+    assert first["created_registration_count"] == 1
+    registration = DocmindRegistration.get(
+        DocmindRegistration.document_id == "source-document-1"
+    )
+    assert registration.lifecycle_state == "INDEXED"
+    file_row = File.get_by_id(registration.file_id)
+    assert file_row.name == "manual.doc"
+    assert File.get_by_id(file_row.parent_id).name == "Install"
+    assert File2Document.get(File2Document.file_id == file_row.id).document_id == "source-document-1"
+    document = Document.get_by_id("source-document-1")
+    assert document.content_hash == "content-hash-1"
+    assert document.run == "3"
+    assert document.progress == 1.0
+    assert document.chunk_num == 105
+    assert document.token_num == 3305
+    assert DocmindSourceVersion.get_by_id("source-version-1").content_sha256 == "content-hash-1"
+    assert Task.get_by_id("task-active").progress == 1.0
+    assert Task.get_by_id("task-stale").progress == -1.0
 
 
 def test_new_folder_can_move_and_rename_but_published_folder_is_protected(hierarchy_env):

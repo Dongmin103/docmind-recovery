@@ -8,6 +8,7 @@ from api.apps import login_required, login_user
 from api.apps.services import (
     docmind_api_service,
     docmind_bootstrap_service,
+    docmind_catalog_admin_service,
     docmind_hierarchy_service,
     docmind_ingestion_service,
     docmind_registration_service,
@@ -387,6 +388,113 @@ async def hierarchy(tenant_id: str):
     except Exception:
         logger.exception("DocMind hierarchy read failed")
         return get_error_data_result(message="DOCMIND_HIERARCHY_INTERNAL_ERROR")
+
+
+@manager.route("/docmind/admin/hierarchy/sync-indexed-sources", methods=["POST"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def sync_indexed_sources(tenant_id: str):
+    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    try:
+        return get_result(
+            data=docmind_hierarchy_service.synchronize_indexed_sources(
+                tenant_id,
+                idempotency_key,
+            )
+        )
+    except docmind_hierarchy_service.DocmindHierarchyError as error:
+        return get_error_data_result(message=error.code)
+    except Exception:
+        logger.exception("DocMind indexed source hierarchy sync failed")
+        return get_error_data_result(message="DOCMIND_HIERARCHY_INTERNAL_ERROR")
+
+
+@manager.route("/docmind/admin/catalog/drafts", methods=["POST"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def capture_catalog_draft(tenant_id: str):
+    req = await request.get_json(silent=True)
+    if not isinstance(req, dict) or set(req) != {"expected_active_version_id"}:
+        return get_error_argument_result("expected_active_version_id is required")
+    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    try:
+        return get_result(
+            data=docmind_hierarchy_service.capture_hierarchy_draft(
+                tenant_id,
+                str(req["expected_active_version_id"] or "").strip(),
+                idempotency_key,
+            )
+        )
+    except docmind_hierarchy_service.DocmindHierarchyError as error:
+        return get_error_data_result(message=error.code)
+    except Exception:
+        logger.exception("DocMind Catalog draft capture failed")
+        return get_error_data_result(message="DOCMIND_CATALOG_INTERNAL_ERROR")
+
+
+@manager.route("/docmind/admin/catalog/drafts/<version_id>/validate", methods=["POST"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def validate_catalog_draft(tenant_id: str, version_id: str):
+    req = await request.get_json(silent=True)
+    if not isinstance(req, dict) or set(req) != {"expected_snapshot_hash"}:
+        return get_error_argument_result("expected_snapshot_hash is required")
+    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    try:
+        return get_result(
+            data=docmind_catalog_admin_service.validate_draft(
+                tenant_id,
+                version_id,
+                str(req["expected_snapshot_hash"] or "").strip(),
+                idempotency_key,
+            )
+        )
+    except docmind_catalog_admin_service.DocmindCatalogAdminError as error:
+        return get_error_data_result(message=error.code)
+    except Exception:
+        logger.exception("DocMind Catalog draft validation failed")
+        return get_error_data_result(message="DOCMIND_CATALOG_INTERNAL_ERROR")
+
+
+@manager.route("/docmind/admin/catalog/versions/<version_id>/publish", methods=["POST"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def publish_catalog_version(tenant_id: str, version_id: str):
+    req = await request.get_json(silent=True)
+    expected = {"expected_active_version_id", "expected_validation_report_hash"}
+    if not isinstance(req, dict) or set(req) != expected:
+        return get_error_argument_result(
+            "expected_active_version_id and expected_validation_report_hash are required"
+        )
+    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    try:
+        return get_result(
+            data=docmind_catalog_admin_service.publish_version(
+                tenant_id,
+                version_id,
+                str(req["expected_active_version_id"] or "").strip(),
+                str(req["expected_validation_report_hash"] or "").strip(),
+                idempotency_key,
+            )
+        )
+    except docmind_catalog_admin_service.DocmindCatalogAdminError as error:
+        return get_error_data_result(message=error.code)
+    except Exception:
+        logger.exception("DocMind Catalog publish failed")
+        return get_error_data_result(message="DOCMIND_CATALOG_INTERNAL_ERROR")
+
+
+@manager.route("/docmind/admin/catalog/versions", methods=["GET"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def catalog_versions(tenant_id: str):
+    try:
+        return get_result(data=docmind_catalog_admin_service.list_versions(tenant_id))
+    except docmind_catalog_admin_service.DocmindCatalogAdminError as error:
+        return get_error_data_result(message=error.code)
+    except Exception:
+        logger.exception("DocMind Catalog version list failed")
+        return get_error_data_result(message="DOCMIND_CATALOG_INTERNAL_ERROR")
 
 
 @manager.route("/docmind/admin/hierarchy/imports", methods=["GET"])  # noqa: F821
