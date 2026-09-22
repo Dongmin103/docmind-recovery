@@ -36,8 +36,8 @@ COPY parser_services/surya/service.py /opt/surya/service.py
 
 RUN groupadd --gid 10001 parser && \
     useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser && \
-    mkdir -p /opt/surya/runtime && \
-    chown -R 10001:10001 /opt/surya/runtime
+    mkdir -p /opt/surya/runtime /home/parser/.cache/datalab/surya && \
+    chown -R 10001:10001 /opt/surya/runtime /home/parser
 
 ENV PATH="/opt/surya/.venv/bin:${PATH}" \
     LD_LIBRARY_PATH="/opt/llama" \

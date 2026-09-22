@@ -22,12 +22,25 @@ def test_cpu_and_docling_profiles_are_single_concurrency_read_only_and_unpublish
     rhwp = compose["services"]["rhwp-parser"]
     assert cpu["profiles"] == ["parser-platform-cpu"]
     assert cpu["environment"]["SURYA_INFERENCE_PARALLEL"] == "1"
+    assert cpu["environment"]["SURYA_INFERENCE_TIMEOUT_SECONDS"].endswith(":-600}")
+    assert cpu["environment"]["SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS"].endswith(":-1800}")
+    assert cpu["environment"]["SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS"].endswith(":-660}")
+    assert cpu["environment"]["SURYA_SERVICE_MEDIA_INFERENCE_TIMEOUT_SECONDS"].endswith(":-600}")
+    assert cpu["environment"]["SURYA_SERVICE_MEDIA_MAX_TOKENS"].endswith(":-1024}")
+    assert cpu["environment"]["XDG_CACHE_HOME"] == "/home/parser/.cache"
     assert cpu["environment"]["SURYA_MODEL_REVISION"] == "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
     assert len(cpu["environment"]["SURYA_GGUF_MODEL_SHA256"]) == 64
     assert len(cpu["environment"]["SURYA_GGUF_MMPROJ_SHA256"]) == 64
     assert cpu["read_only"] is True and cpu["cap_drop"] == ["ALL"]
     assert cpu["mem_limit"].endswith(":-8g}") and cpu["cpus"].endswith(":-8}")
     assert "ports" not in cpu and list(cpu["networks"]) == ["parser_internal"]
+    assert any(
+        entry.startswith("/home/parser/.cache:")
+        and "uid=10001" in entry
+        and "gid=10001" in entry
+        and "mode=0700" in entry
+        for entry in cpu["tmpfs"]
+    )
     assert cpu["platform"] == "linux/amd64"
     assert docling["profiles"] == ["parser-platform-office"]
     assert docling["platform"] == "linux/amd64"
@@ -95,8 +108,13 @@ def test_surya_download_requires_explicit_operator_license_acceptance() -> None:
     assert "Downloading or using the weights constitutes acceptance" in readme
 
 
-def test_parser_http_admission_is_strictly_serial() -> None:
-    for service in ("surya", "docling_office", "rhwp"):
+def test_parser_http_admission_is_bounded_while_surya_health_is_concurrent() -> None:
+    surya = (ROOT / "parser_services" / "surya" / "service.py").read_text(encoding="utf-8")
+    assert "ThreadingHTTPServer((host, port), Handler)" in surya
+    assert "threading.BoundedSemaphore(1)" in surya
+    assert "acquire(blocking=False)" in surya
+
+    for service in ("docling_office", "rhwp"):
         source = (ROOT / "parser_services" / service / "service.py").read_text(encoding="utf-8")
         assert "HTTPServer((host, port), Handler)" in source
         assert "ThreadingHTTPServer" not in source

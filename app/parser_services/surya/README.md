@@ -7,10 +7,20 @@ DocMind PDF canary.
 - The image downloads and verifies the official llama.cpp `b10718` x64 binary.
 - Surya GGUF model files are never copied into Git or the public image. They are
   mounted read-only at `/models` by Compose.
-- `service.py` serves health checks concurrently while the Surya engine lock keeps
-  full-page inference concurrency at one on the 31 GiB target.
+- `service.py` serves health checks concurrently while a non-blocking admission
+  gate keeps full-page inference concurrency at one. A second parse receives
+  `503 PARSER_SURYA_BUSY` instead of consuming an unbounded worker queue.
 - PDF parsing uses direct Surya full-page recognition. It does not invoke
   Docling, DeepDoc or PaddleOCR.
+- Office-media OCR caps the upstream full-page decoder at 1,024 tokens without
+  changing the 12,288-token PDF setting. Inside the engine lock, media calls
+  also temporarily use a 600-second inference timeout and restore the PDF
+  setting afterward. The Compose defaults layer the media service watchdog at
+  660 seconds and the caller deadline at 720 seconds, keeping the whole OCR
+  stage bounded below the host-worker lease.
+- Runtime cache and llama.cpp sentinel data use a private, non-persistent tmpfs
+  owned by UID/GID 10001 with mode `0700`; model weights remain on the separate
+  read-only model mount.
 
 Before starting the service, review the pinned
 [Surya model license](https://github.com/datalab-to/surya/blob/v0.22.1/MODEL_LICENSE).

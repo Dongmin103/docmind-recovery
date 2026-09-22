@@ -71,6 +71,7 @@ def test_surya_chunk_min_tokens_is_validated_and_fingerprinted() -> None:
 
     assert configured.surya_chunk_min_tokens == 64
     assert configured.fingerprint != baseline.fingerprint
+    assert baseline.surya_media_deadline_seconds == 720
     assert configured.surya_request_batch_pages == 2
     assert configured.surya_media_deadline_seconds == 17
     assert configured.surya_parser_version == "0.22.1-test"
@@ -87,6 +88,7 @@ def test_surya_chunk_min_tokens_is_validated_and_fingerprinted() -> None:
 
     with pytest.raises(ValueError, match="runtime identity"):
         ParserPlatformConfig.from_env({"PARSER_PLATFORM_SURYA_MODEL_REVISION": ""})
+
 
 def _block(order: int, raw_label: str, html: str, bbox=(10.0, 20.0, 200.0, 80.0)) -> SuryaRawBlock:
     return SuryaRawBlock(

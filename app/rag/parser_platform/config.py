@@ -57,7 +57,7 @@ class ParserPlatformConfig:
     docling_pdf_service_url: str = "http://docling-pdf-parser:8094"
     docling_pdf_deadline_seconds: int = 900
     surya_service_url: str = "http://surya-parser:8091"
-    surya_media_deadline_seconds: int = 600
+    surya_media_deadline_seconds: int = 720
     surya_parser_version: str = "0.22.1"
     surya_model_revision: str = "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
     surya_backend: str = "llamacpp"
@@ -155,7 +155,7 @@ class ParserPlatformConfig:
             docling_pdf_deadline_seconds=_positive_int(source, "PARSER_PLATFORM_DOCLING_PDF_DEADLINE_SECONDS", 900),
             surya_service_url=source.get("PARSER_PLATFORM_SURYA_URL", "http://surya-parser:8091").rstrip("/"),
             surya_media_deadline_seconds=_positive_int(
-                source, "PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS", 600
+                source, "PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS", 720
             ),
             surya_parser_version=source.get("PARSER_PLATFORM_SURYA_PARSER_VERSION", "0.22.1").strip(),
             surya_model_revision=source.get(

@@ -36,7 +36,7 @@ def test_generationless_overlay_requires_jina_and_blanks_answer_credentials() ->
     assert app["environment"]["PARSER_PLATFORM_INTEGRATION_READY"] == "1"
     assert app["environment"]["PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS"] == "900"
     assert app["environment"]["PARSER_PLATFORM_SURYA_URL"] == "http://surya-parser:8091"
-    assert app["environment"]["PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS"].endswith(":-600}")
+    assert app["environment"]["PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS"].endswith(":-720}")
     assert app["environment"]["PARSER_PLATFORM_SURYA_PARSER_VERSION"] == "0.22.1"
     assert app["environment"]["PARSER_PLATFORM_SURYA_BACKEND"] == "llamacpp"
     assert app["depends_on"]["docling-office-parser"]["condition"] == "service_healthy"
@@ -71,8 +71,21 @@ def test_generationless_surya_parser_is_private_read_only_and_model_pinned() -> 
     assert list(parser["networks"]) == ["docmind-parser-internal"]
     assert parser["environment"]["SURYA_MODEL_REVISION"] == "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
     assert parser["environment"]["SURYA_INFERENCE_BACKEND"] == "llamacpp"
+    assert parser["environment"]["SURYA_INFERENCE_TIMEOUT_SECONDS"].endswith(":-600}")
+    assert parser["environment"]["SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS"].endswith(":-1800}")
+    assert parser["environment"]["SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS"].endswith(":-660}")
+    assert parser["environment"]["SURYA_SERVICE_MEDIA_INFERENCE_TIMEOUT_SECONDS"].endswith(":-600}")
+    assert parser["environment"]["SURYA_SERVICE_MEDIA_MAX_TOKENS"].endswith(":-1024}")
+    assert parser["environment"]["XDG_CACHE_HOME"] == "/home/parser/.cache"
     assert any("/models:ro" in volume for volume in parser["volumes"])
-    assert "surya_cache" in overlay["volumes"]
+    assert any(
+        entry.startswith("/home/parser/.cache:")
+        and "uid=10001" in entry
+        and "gid=10001" in entry
+        and "mode=0700" in entry
+        for entry in parser["tmpfs"]
+    )
+    assert "surya_cache" not in overlay.get("volumes", {})
 
 
 def test_readiness_probe_never_accepts_a_credential_argument_or_prints_paths() -> None:

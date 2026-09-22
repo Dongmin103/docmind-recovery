@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from typing import Any
 
@@ -67,6 +67,7 @@ class SuryaEngine:
         self.manager = SuryaInferenceManager(method=settings.SURYA_INFERENCE_BACKEND or "llamacpp", lazy=True)
         self.predictor = RecognitionPredictor(self.manager)
         self.lock = threading.Lock()
+        self.request_admission = threading.BoundedSemaphore(1)
         self.parser_version = importlib.metadata.version("surya-ocr")
         self.model_version = os.environ.get("SURYA_MODEL_REVISION", "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470")
         self.backend = settings.SURYA_INFERENCE_BACKEND or "llamacpp"
@@ -80,9 +81,19 @@ class SuryaEngine:
         self.request_timeout_seconds = int(
             os.environ.get("SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS", "1800")
         )
-        self.media_timeout_seconds = int(os.environ.get("SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS", "600"))
-        if self.page_timeout_seconds <= 0 or self.request_timeout_seconds <= 0 or self.media_timeout_seconds <= 0:
-            raise ValueError("Surya service timeouts must be positive")
+        self.media_timeout_seconds = int(os.environ.get("SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS", "660"))
+        self.media_inference_timeout_seconds = int(
+            os.environ.get("SURYA_SERVICE_MEDIA_INFERENCE_TIMEOUT_SECONDS", "600")
+        )
+        self.media_max_tokens = int(os.environ.get("SURYA_SERVICE_MEDIA_MAX_TOKENS", "1024"))
+        if (
+            self.page_timeout_seconds <= 0
+            or self.request_timeout_seconds <= 0
+            or self.media_timeout_seconds <= 0
+            or self.media_inference_timeout_seconds <= 0
+            or self.media_max_tokens <= 0
+        ):
+            raise ValueError("Surya service timeouts and token limits must be positive")
 
     @staticmethod
     def _verify_model_file(path: str, expected_sha256: str) -> None:
@@ -298,7 +309,15 @@ class SuryaEngine:
                 image.load()
                 safe_image = image.convert("RGB")
             with self.lock:
-                result = self.predictor([safe_image], full_page=True)[0]
+                full_page_max_tokens = settings.SURYA_MAX_TOKENS_FULL_PAGE
+                inference_timeout_seconds = settings.SURYA_INFERENCE_TIMEOUT_SECONDS
+                settings.SURYA_MAX_TOKENS_FULL_PAGE = min(full_page_max_tokens, self.media_max_tokens)
+                settings.SURYA_INFERENCE_TIMEOUT_SECONDS = self.media_inference_timeout_seconds
+                try:
+                    result = self.predictor([safe_image], full_page=True)[0]
+                finally:
+                    settings.SURYA_MAX_TOKENS_FULL_PAGE = full_page_max_tokens
+                    settings.SURYA_INFERENCE_TIMEOUT_SECONDS = inference_timeout_seconds
         finally:
             media_watchdog.cancel()
         raw = result.model_dump()
@@ -388,6 +407,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in {"/v1/parse", "/v1/parse-media"}:
             self._write(HTTPStatus.NOT_FOUND, {"code": "NOT_FOUND"})
             return
+        if not ENGINE.request_admission.acquire(blocking=False):
+            self._write(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"code": "PARSER_SURYA_BUSY", "message": "Surya parser is already processing a request"},
+            )
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             max_payload_bytes = ENGINE.max_media_bytes * 2 if self.path == "/v1/parse-media" else ENGINE.max_source_bytes * 2
@@ -407,6 +432,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             LOGGER.exception("Surya parser request failed")
             self._write(HTTPStatus.INTERNAL_SERVER_ERROR, {"code": "PARSER_SURYA_INTERNAL", "message": "Surya parse failed"})
+        finally:
+            ENGINE.request_admission.release()
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -423,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("SURYA_SERVICE_HOST", "0.0.0.0")
     port = int(os.environ.get("SURYA_SERVICE_PORT", "8091"))
-    HTTPServer((host, port), Handler).serve_forever()
+    ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
