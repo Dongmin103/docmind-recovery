@@ -29,6 +29,26 @@ datastore startup, and synthetic marker recovery. It does not prove DocMind
 application startup or document search against the restored stores because the
 package does not contain or authenticate an application image.
 
+## Completed external smoke checks
+
+- The Windows development application image
+  `docmind-ragflow:windows-dev` was built successfully from the current tree.
+  Its OCI digest is
+  `sha256:7c14804c8325729a8f72a5310518d8b0b206cd106ff25c2a4bc15b635f29c9dc`,
+  and the retired-runtime verification passed again inside that image. This is
+  an image-build check; the application has not yet been started against the
+  restored stores.
+- The approved uEncryptor2 1.0.0.2 executable decrypted one known encrypted
+  sample three consecutive times in the current logged-in test session. Each
+  result exactly matched the independently hashed plaintext and every job
+  directory was removed.
+- An unencrypted control was rejected by the validation probe with a plaintext
+  hash mismatch, and its job directory was removed.
+- A live hosted `jina-reranker-v3.5` request succeeded with a structurally valid
+  three-result response, finite scores, usage reporting, and no credential or
+  prompt/document logging. This establishes connectivity and API compatibility,
+  not Korean retrieval quality or production performance.
+
 ## Production-security result
 
 The certificate preflight validates CA constraints, server EKU and DNS,
@@ -52,8 +72,11 @@ customer document is approved for this profile.
 - Verify host/Docker storage encryption, certificate rotation, external secret
   management, backup retention, RPO/RTO, and key-loss behavior with the
   responsible operator.
-- Run a known-valid non-sensitive uEncryptor2 encrypted/plaintext pair and real
-  Jina v3.5 calls.
+- Repeat uEncryptor2 validation under the intended worker/service account and
+  after logout/login and reboot; complete damaged-input, timeout, cancellation,
+  and cleanup-failure cases.
+- Run representative Korean Jina v3.5 quality, concurrency, usage, and p50/p95
+  evaluation through the complete DocMind C-search path.
 - Verify the official All-in-One write API/SDK before enabling source writes.
 - Perform a separately approved limited cutover. No production service, source
   root, database, index, object, or volume was changed by this validation.

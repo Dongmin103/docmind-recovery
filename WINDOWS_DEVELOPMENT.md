@@ -54,9 +54,9 @@ python tools/windows/initialize_auth_keys.py --check
 - 프런트: app/web에서 npm ci, npm run type-check, npm run build와 관련 테스트. Linux 개발 컨테이너 실행을 우선한다.
 - Go: 변경이 필요한 경우 app/AGENTS.md에 따라 build.sh --test를 사용한다.
 - 합성 fixture는 코드 테스트용으로 남아 있지만 PDF/Office 원본 파일을 읽는 기존 테스트 일부는 별도 fixture가 필요하다. 사용자 원문을 받아 이 부족분을 채우지 말고 합성 fixture를 생성한다.
-- Windows 개발 전용 MySQL·Elasticsearch·Valkey·MinIO 인프라는 이 서버에서 정상 기동을 확인했다. 전체 애플리케이션 기동은 실제 Jina/답변 모델 자격증명을 넣은 뒤 수행한다.
-- uEncryptor2·실제 사용자 문서·외부 모델 API·성능 검증은 후속 작업이다. 원본 루트에는 접근하거나 변경하지 않는다.
+- Windows 개발 전용 MySQL·Elasticsearch·Valkey·MinIO 인프라는 이 서버에서 정상 기동을 확인했다. 현재 소스에서 `docmind-ragflow:windows-dev` 이미지 빌드와 이미지 내부 retired-runtime 검사도 통과했다. 전체 애플리케이션 기동은 실제 Jina/답변 모델 자격증명을 넣은 뒤 수행한다.
+- 현재 로그인 세션에서 승인된 암호문/평문 한 쌍의 uEncryptor2 복호화를 3회 연속 검증했고 결과 해시 일치와 매회 임시 작업 폴더 정리를 확인했다. 실제 Jina v3.5 API의 연결·응답 구조도 확인했다. 서비스 계정·로그아웃/로그인·재부팅 조건, 대표 한국어 검색 품질과 성능 검증은 후속 작업이다. 원본 루트는 읽기 전용으로 유지한다.
 - 제품 경로 제거의 자동 검사와 개발/운영 전환 절차는 [docs/OPENVIKING-CUTOVER.md](docs/OPENVIKING-CUTOVER.md)를 따른다. 이 개발 작업은 운영 서비스 중지를 수행하지 않는다.
-- 5단계 개발 범위에서는 합성 데이터 전용 보안 경계, 암호화 backup/package 검증, 새 disconnected volume으로의 실제 restore, 정확한 backup-time image를 사용한 MySQL/Elasticsearch/MinIO 기동과 합성 marker 복구를 통과했다. 복구용 애플리케이션 이미지 기동·기준 문서 검색, BitLocker, 실제 uEncryptor2 실행, 실제 TLS/외부 secret provider는 아직 검증하지 않았다.
+- 5단계 개발 범위에서는 합성 데이터 전용 보안 경계, 암호화 backup/package 검증, 새 disconnected volume으로의 실제 restore, 정확한 backup-time image를 사용한 MySQL/Elasticsearch/MinIO 기동과 합성 marker 복구를 통과했다. 현재 사용자 세션의 실제 uEncryptor2 known-pair 및 Jina v3.5 smoke 검증도 통과했다. 복구용 애플리케이션 이미지 기동·기준 문서 검색, 서비스 계정/재부팅 복호화, BitLocker, 실제 TLS/외부 secret provider는 아직 검증하지 않았다.
 - 6단계 개발 범위에서는 제거된 제품 runtime의 재유입 방지 검사와 운영 전환/rollback runbook을 구현했다. 운영 이미지 배포·서비스 중지·운영 데이터 전환은 수행하지 않았다.
 - 검색 화면의 전체/폴더/문서 범위 선택은 유지한다. 폴더 선택은 하위 폴더를 재귀적으로 포함하며 같은 scope를 BM25와 dense 후보 생성 전에 적용한다.

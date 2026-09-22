@@ -80,7 +80,7 @@ BitLocker-protected and backup-excluded volume with an ACL limited to the
 worker account. File deletion does not claim cryptographic erasure. No result
 is persisted as a MinIO original or permanent preview fallback.
 
-### Read-only executable evidence and remaining block
+### Executable and known-pair evidence
 
 The Windows machine currently has one candidate executable. A read-only
 inspection found version `1.0.0.2`, SHA-256
@@ -90,12 +90,23 @@ physical path is intentionally not committed; it belongs in the host-only
 configuration. The worker requires both an approved executable hash and signer
 certificate thumbprint and checks them before and after every job.
 
-No known-valid encrypted/plaintext pair is available. The existing 77-byte
-synthetic file is not a valid encrypted sample. A deliberate negative probe
-returned exit code zero and produced output, but the known-plaintext hash check
-failed; cleanup succeeded. This confirms that exit code and output existence
-cannot establish decryption success. Successful unattended validation remains
-`VALIDATION_BLOCKED` until a non-sensitive known pair is supplied.
+On 2026-09-22, an operator-approved encrypted/plaintext pair on the isolated
+test server passed the probe three consecutive times in the same logged-in
+desktop session. Every run completed without timeout, returned exit code zero,
+produced 1,866,240 bytes whose SHA-256 exactly matched the independently hashed
+known plaintext, and removed the job directory. The first run took 167 ms.
+Neither the source path nor the document name is committed.
+
+An unencrypted control passed to the executable as though it were ciphertext
+was rejected by the probe as `PLAINTEXT_HASH_MISMATCH`; its job directory was
+also removed. This confirms again that exit code and output existence cannot
+establish decryption success.
+
+The known-pair block is resolved for this executable build and current user
+session. Unattended support is still conditional until the same matrix passes
+under the intended worker/service account and after logout/login and reboot.
+Damaged input, forced timeout/cancellation, and cleanup-failure behavior also
+remain explicit acceptance cases rather than being inferred from these runs.
 
 ### Host worker and localhost protocol
 
