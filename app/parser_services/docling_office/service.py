@@ -19,12 +19,14 @@ from docling.backend.mspowerpoint_backend import MsPowerpointDocumentBackend
 from docling.backend.msword_backend import MsWordDocumentBackend
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import InputDocument
+from legacy_doc_conversion import OLE_MAGIC, convert_legacy_doc
 
 OFFICE_FORMATS = {
     "docx": (InputFormat.DOCX, MsWordDocumentBackend),
     "xlsx": (InputFormat.XLSX, MsExcelDocumentBackend),
     "pptx": (InputFormat.PPTX, MsPowerpointDocumentBackend),
 }
+LEGACY_DOC_BACKEND = "libreoffice-headless+native-office-backend"
 
 
 def _canonical_json(value: Any) -> str:
@@ -39,6 +41,7 @@ class DoclingOfficeEngine:
     def __init__(self) -> None:
         self.parser_version = importlib.metadata.version("docling-slim")
         self.max_source_bytes = int(os.environ.get("DOCLING_OFFICE_MAX_SOURCE_BYTES", str(512 * 1024 * 1024)))
+        self.conversion_timeout_seconds = int(os.environ.get("DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS", "180"))
         self.lock = threading.Lock()
 
     def manifest(self) -> dict[str, Any]:
@@ -47,7 +50,7 @@ class DoclingOfficeEngine:
             "parser_name": "docling",
             "parser_version": self.parser_version,
             "backend": "native-office-backend",
-            "formats": sorted(OFFICE_FORMATS),
+            "formats": sorted((*OFFICE_FORMATS, "doc")),
             "ocr_enabled": False,
             "external_plugins_enabled": False,
             "concurrency": 1,
@@ -58,21 +61,33 @@ class DoclingOfficeEngine:
             raise ValueError("task_kind must be office_document_parse")
         parse_run_id = str(payload["parse_run_id"])
         source_format = str(payload["source_format"]).lower()
-        if source_format not in OFFICE_FORMATS:
-            raise ValueError("source_format must be docx, xlsx, or pptx")
+        if source_format not in {*OFFICE_FORMATS, "doc"}:
+            raise ValueError("source_format must be doc, docx, xlsx, or pptx")
         source_hash = str(payload["source_hash"]).lower()
         source_bytes = base64.b64decode(payload["source_base64"], validate=True)
-        if not source_bytes.startswith(b"PK") or len(source_bytes) > self.max_source_bytes:
-            raise ValueError("invalid or oversized OOXML source")
+        expected_magic = OLE_MAGIC if source_format == "doc" else b"PK"
+        if not source_bytes.startswith(expected_magic) or len(source_bytes) > self.max_source_bytes:
+            raise ValueError("invalid or oversized Office source")
         if hashlib.sha256(source_bytes).hexdigest() != source_hash:
             raise ValueError("source hash mismatch")
 
-        input_format, backend = OFFICE_FORMATS[source_format]
+        converted = source_format == "doc"
+        parse_bytes = (
+            convert_legacy_doc(
+                source_bytes,
+                max_source_bytes=self.max_source_bytes,
+                timeout_seconds=self.conversion_timeout_seconds,
+            )
+            if converted
+            else source_bytes
+        )
+        parse_format = "docx" if converted else source_format
+        input_format, backend = OFFICE_FORMATS[parse_format]
         input_document = InputDocument(
-            BytesIO(source_bytes),
+            BytesIO(parse_bytes),
             format=input_format,
             backend=backend,
-            filename=f"source.{source_format}",
+            filename=f"source.{parse_format}",
         )
         if not input_document.valid:
             raise ValueError("Docling rejected the Office source")
@@ -93,13 +108,12 @@ class DoclingOfficeEngine:
             "source_hash": source_hash,
             "parser_name": "docling",
             "parser_version": self.parser_version,
-            "backend": "native-office-backend",
+            "backend": LEGACY_DOC_BACKEND if converted else "native-office-backend",
             "ocr_enabled": False,
             "raw_artifact_hash": _sha256(document),
             "document": document,
-            "warnings": [],
+            "warnings": ["LEGACY_DOC_CONVERTED_TO_DOCX"] if converted else [],
         }
-
 
 ENGINE = DoclingOfficeEngine()
 

@@ -157,6 +157,34 @@ def test_docling_client_validates_identity_and_maps_timeout() -> None:
     assert captured.value.code == "PARSER_DOCLING_TIMEOUT"
 
 
+def test_legacy_doc_manifest_preserves_original_format_hash_and_converter_backend() -> None:
+    source_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-word"
+    document = json.loads((PROBES / "structured.docx.docling.json").read_text(encoding="utf-8"))
+    manifest = DoclingOfficeManifest(
+        task_kind="office_document_parse",
+        parse_run_id="run-doc",
+        source_format=SourceFormat.DOC,
+        source_hash=hashlib.sha256(source_bytes).hexdigest(),
+        parser_name="docling",
+        parser_version="2.115.0",
+        backend="libreoffice-headless+native-office-backend",
+        ocr_enabled=False,
+        raw_artifact_hash=canonical_sha256(document),
+        document=document,
+        warnings=("LEGACY_DOC_CONVERTED_TO_DOCX",),
+    )
+    normalized = DoclingOfficeAdapter().normalize(
+        manifest,
+        source_document_id="doc-legacy",
+        chunk_set_id="chunk-legacy",
+        raw_artifact_ref="artifact://doc-legacy/raw.json",
+    )
+    assert normalized.source_format == SourceFormat.DOC
+    assert normalized.source_hash == hashlib.sha256(source_bytes).hexdigest()
+    assert normalized.backend == "libreoffice-headless+native-office-backend"
+    assert "LEGACY_DOC_CONVERTED_TO_DOCX" in normalized.warnings
+
+
 def test_docling_service_dependency_and_source_exclude_ocr_and_pdf() -> None:
     project = (ROOT / "parser_services" / "docling_office" / "pyproject.toml").read_text(encoding="utf-8")
     service = (ROOT / "parser_services" / "docling_office" / "service.py").read_text(encoding="utf-8")
@@ -165,12 +193,21 @@ def test_docling_service_dependency_and_source_exclude_ocr_and_pdf() -> None:
     assert "ocr_enabled\": False" in service
     assert "InputFormat.PDF" not in service
     assert "InputFormat.DOCX" in service and "InputFormat.XLSX" in service and "InputFormat.PPTX" in service
+    assert "convert_legacy_doc" in service
+    containerfile = (ROOT / "parser_services" / "docling_office" / "Containerfile").read_text(encoding="utf-8")
+    assert "libreoffice-writer" in containerfile
+    assert "USER 10001:10001" in containerfile
 
 
 def test_manifest_rejects_pdf_ocr_and_mutated_raw_artifact() -> None:
     payload = _manifest(SourceFormat.DOCX).model_dump(mode="json")
     payload["source_format"] = "pdf"
-    with pytest.raises(ValueError, match="cannot contain PDF"):
+    with pytest.raises(ValueError, match="must contain DOC"):
+        DoclingOfficeManifest.model_validate(payload)
+
+    payload = _manifest(SourceFormat.DOCX).model_dump(mode="json")
+    payload["source_format"] = "hwp"
+    with pytest.raises(ValueError, match="must contain DOC"):
         DoclingOfficeManifest.model_validate(payload)
 
     payload = _manifest(SourceFormat.DOCX).model_dump(mode="json")

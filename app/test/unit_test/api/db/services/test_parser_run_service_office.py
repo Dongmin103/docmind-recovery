@@ -55,6 +55,27 @@ def test_prepare_office_run_persists_docling_identity_without_ocr_model(monkeypa
     assert created["expected_task_count"] == 1
 
 
+def test_prepare_legacy_doc_run_preserves_source_identity_and_conversion_backend(monkeypatch) -> None:
+    created = {}
+    monkeypatch.setattr(parser_run_service.ParserRun, "select", lambda: EmptyQuery())
+    monkeypatch.setattr(parser_run_service.ParserRun, "create", lambda **values: created.update(values))
+    source_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-word"
+
+    prepared = parser_run_service.ParserRunService.prepare_office_run.__wrapped__(
+        parser_run_service.ParserRunService,
+        document={"id": "doc-legacy", "name": "legacy.doc"},
+        source_bytes=source_bytes,
+        source_format=SourceFormat.DOC,
+        config=ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0"),
+    )
+
+    assert prepared.selection.source_format == SourceFormat.DOC
+    assert created["source_format"] == "doc"
+    assert created["source_hash"] == __import__("hashlib").sha256(source_bytes).hexdigest()
+    assert prepared.backend == "libreoffice-headless+native-office-backend"
+    assert created["backend"] == prepared.backend
+
+
 def test_explicit_reparse_does_not_reuse_ready_run(monkeypatch) -> None:
     existing = SimpleNamespace(
         id="old-run",

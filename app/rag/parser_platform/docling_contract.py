@@ -15,7 +15,11 @@ class DoclingOfficeManifest(FrozenModel):
     source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     parser_name: Literal["docling"]
     parser_version: str = Field(min_length=1)
-    backend: Literal["simple-pipeline", "native-office-backend"]
+    backend: Literal[
+        "simple-pipeline",
+        "native-office-backend",
+        "libreoffice-headless+native-office-backend",
+    ]
     ocr_enabled: Literal[False]
     raw_artifact_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     document: dict[str, Any]
@@ -24,8 +28,8 @@ class DoclingOfficeManifest(FrozenModel):
     @field_validator("source_format")
     @classmethod
     def require_office_format(cls, value: SourceFormat) -> SourceFormat:
-        if value == SourceFormat.PDF:
-            raise ValueError("Docling Office manifest cannot contain PDF")
+        if value not in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
+            raise ValueError("Docling Office manifest must contain DOC, DOCX, XLSX, or PPTX")
         return value
 
     @field_validator("warnings")

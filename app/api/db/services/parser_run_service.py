@@ -8,8 +8,8 @@ from api.db.db_models import DB, ParserRun
 from rag.parser_platform.config import ParserPlatformConfig
 from rag.parser_platform.coordinator import ParserCoordinator, ParserRunRequest, PreparedParserRun, validate_transition
 from rag.parser_platform.dispatch import SourceDescriptor
-from rag.parser_platform.pdf_source import normalize_pdf_source
 from rag.parser_platform.pdf_routing import PDF_ROUTING_POLICY_VERSION
+from rag.parser_platform.pdf_source import normalize_pdf_source
 from rag.parser_platform.schemas import ParserRunStatus, SourceFormat
 
 REUSABLE_LIFECYCLES = {
@@ -25,6 +25,7 @@ REUSABLE_LIFECYCLES = {
 }
 SOURCE_MIME_TYPES = {
     SourceFormat.PDF: "application/pdf",
+    SourceFormat.DOC: "application/msword",
     SourceFormat.DOCX: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     SourceFormat.XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     SourceFormat.PPTX: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -302,8 +303,8 @@ class ParserRunService:
         source_format: SourceFormat,
         config: ParserPlatformConfig | None = None,
     ) -> PreparedParserRun:
-        if source_format not in {SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
-            raise ValueError("prepare_office_run requires DOCX, XLSX, or PPTX")
+        if source_format not in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
+            raise ValueError("prepare_office_run requires DOC, DOCX, XLSX, or PPTX")
         runtime = config or ParserPlatformConfig.from_env()
         runtime.require_queue_ready()
         mime = SOURCE_MIME_TYPES[source_format]
@@ -320,7 +321,11 @@ class ParserRunService:
             ),
             parser_version="2.115.0",
             model_version=None,
-            backend="native-office-backend",
+            backend=(
+                "libreoffice-headless+native-office-backend"
+                if source_format == SourceFormat.DOC
+                else "native-office-backend"
+            ),
         )
         return cls._reuse_or_create_run(
             document=document,

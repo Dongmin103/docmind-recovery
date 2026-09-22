@@ -18,6 +18,7 @@ from rag.parser_platform import (
 )
 
 MIMES = {
+    "doc": "application/msword",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -51,7 +52,8 @@ def test_format_dispatch_is_deterministic_and_pdf_is_direct_surya() -> None:
     assert (pdf.engine, pdf.task_kind, pdf.selection_reason) == ("surya", "pdf_document_parse", "file_format_pdf")
 
     for source_format, mime in MIMES.items():
-        decision = dispatcher.select(SourceDescriptor(f"fixture.{source_format}", _ooxml(source_format), mime, mime))
+        content = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1fixture" if source_format == "doc" else _ooxml(source_format)
+        decision = dispatcher.select(SourceDescriptor(f"fixture.{source_format}", content, mime, mime))
         assert decision.engine == "docling"
         assert decision.task_kind == "office_document_parse"
         assert decision.selection_reason == f"file_format_{source_format}"

@@ -32,6 +32,7 @@ from rag.parser_platform.schemas import SourceFormat
 
 SUPPORTED_FORMATS = {
     ".pdf": SourceFormat.PDF,
+    ".doc": SourceFormat.DOC,
     ".docx": SourceFormat.DOCX,
     ".xlsx": SourceFormat.XLSX,
     ".pptx": SourceFormat.PPTX,
@@ -253,7 +254,7 @@ class ProductionTemporaryParserInputRunner:
                 expected_page_count=count_pdf_pages(normalized),
                 config=config,
             )
-        if source_format in {SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
+        if source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
             return ParserRunService.prepare_office_run(
                 document=document,
                 source_bytes=source_bytes,

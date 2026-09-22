@@ -121,7 +121,7 @@ services:
   docling-office-parser:
     profiles: [parser-platform-office]
     platform: linux/amd64
-    image: ${DOCLING_OFFICE_IMAGE:-docmind-docling-office:2.115.0-amd64}
+    image: ${DOCLING_OFFICE_IMAGE:-docmind-docling-office:2.115.0-legacy-doc-amd64}
     build:
       context: ..
       dockerfile: parser_services/docling_office/Containerfile
@@ -130,12 +130,13 @@ services:
         PYTHON_BASE_IMAGE: ${DOCLING_PYTHON_BASE_IMAGE:-python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64}
     environment:
       DOCLING_OFFICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
+      DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS: ${DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS:-180}
     networks:
       parser_internal:
         aliases: [docling-office-parser]
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=1g
+      - /tmp:rw,noexec,nosuid,nodev,size=1g
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: ${DOCLING_OFFICE_MEMORY_LIMIT:-2g}

@@ -66,6 +66,7 @@ def runtime_module(monkeypatch):
 
     class SourceFormat(Enum):
         PDF = "pdf"
+        DOC = "doc"
         DOCX = "docx"
         XLSX = "xlsx"
         PPTX = "pptx"

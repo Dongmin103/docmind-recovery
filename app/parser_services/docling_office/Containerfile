@@ -9,17 +9,21 @@ WORKDIR /opt/docling-office
 COPY --from=uv /uv /uvx /bin/
 COPY parser_services/docling_office/pyproject.toml parser_services/docling_office/uv.lock ./
 
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y libreoffice-writer && \
+    rm -rf /var/lib/apt/lists/* && \
     uv sync --frozen --no-dev --no-install-project && \
     groupadd --gid 10001 parser && \
     useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser
 
 COPY parser_services/docling_office/service.py /opt/docling-office/service.py
+COPY parser_services/docling_office/legacy_doc_conversion.py /opt/docling-office/legacy_doc_conversion.py
 
 ENV PATH="/opt/docling-office/.venv/bin:${PATH}" \
     DOCLING_OFFICE_SERVICE_HOST=0.0.0.0 \
     DOCLING_OFFICE_SERVICE_PORT=8092 \
     DOCLING_OFFICE_MAX_SOURCE_BYTES=536870912 \
+    DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS=180 \
     DOCLING_ALLOW_EXTERNAL_PLUGINS=0 \
     HF_HUB_OFFLINE=1 \
     HF_HUB_DISABLE_TELEMETRY=1 \
@@ -36,6 +40,7 @@ ENTRYPOINT ["python", "/opt/docling-office/service.py"]
 
 LABEL io.docmind.service="docling-office-parser" \
       io.docmind.docling-version="2.115.0" \
+      io.docmind.legacy-doc-converter="libreoffice-headless" \
       io.docmind.ocr-enabled="false" \
       io.docmind.concurrency="1" \
       io.docmind.runtime-network-downloads="forbidden"

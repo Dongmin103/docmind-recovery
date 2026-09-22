@@ -244,7 +244,7 @@ class ParserPlatformConfig:
     def format_enabled(self, source_format: str) -> bool:
         if source_format == "pdf":
             return self.pdf_enabled
-        if source_format in {"docx", "xlsx", "pptx"}:
+        if source_format in {"doc", "docx", "xlsx", "pptx"}:
             return self.office_enabled
         return False
 

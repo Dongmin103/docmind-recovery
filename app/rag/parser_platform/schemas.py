@@ -14,6 +14,7 @@ class FrozenModel(BaseModel):
 
 class SourceFormat(StrEnum):
     PDF = "pdf"
+    DOC = "doc"
     DOCX = "docx"
     XLSX = "xlsx"
     PPTX = "pptx"

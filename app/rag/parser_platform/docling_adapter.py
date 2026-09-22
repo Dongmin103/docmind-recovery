@@ -199,7 +199,7 @@ class DoclingOfficeAdapter:
             )
 
         warnings = list(manifest.warnings)
-        if manifest.source_format == SourceFormat.DOCX:
+        if manifest.source_format in {SourceFormat.DOC, SourceFormat.DOCX}:
             warnings.append("DOCX_GEOMETRY_UNAVAILABLE")
         return ParsedDocument(
             schema_version="parser-platform-v1",
@@ -269,7 +269,7 @@ class DoclingOfficeAdapter:
         source_ref: str,
         items: dict[str, dict[str, Any]],
     ) -> tuple[Provenance, ...]:
-        if source_format == SourceFormat.DOCX:
+        if source_format in {SourceFormat.DOC, SourceFormat.DOCX}:
             return (DocxProvenance(heading_path=self._heading_path(source_ref, items), item_locator=source_ref),)
         if source_format == SourceFormat.XLSX:
             sheet = self._container_name(source_ref, items, prefix="Sheet") or f"Sheet-{_page(item) or 1}"

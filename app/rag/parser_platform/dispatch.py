@@ -10,6 +10,7 @@ from rag.parser_platform.errors import parser_error
 from rag.parser_platform.schemas import SourceFormat
 
 PDF_MIMES = {"application/pdf"}
+DOC_MIMES = {"application/msword", "application/vnd.ms-word"}
 OOXML_MIMES = {
     SourceFormat.DOCX: {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
     SourceFormat.XLSX: {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
@@ -116,6 +117,15 @@ class FormatDispatcher:
                 raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
             self._validate_hwpx(source.content)
             return ParserSelection(source_format, "rhwp", "hangul_document_parse", "file_format_hwpx")
+
+        if source_format == SourceFormat.DOC:
+            if (
+                declared not in DOC_MIMES | {GENERIC_BINARY_MIME}
+                or sniffed not in DOC_MIMES | {GENERIC_BINARY_MIME}
+                or not source.content.startswith(OLE_MAGIC)
+            ):
+                raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
+            return ParserSelection(source_format, "docling", "office_document_parse", "file_format_doc")
 
         expected_mimes = OOXML_MIMES[source_format]
         if declared not in expected_mimes or sniffed not in expected_mimes or not source.content.startswith(b"PK"):
