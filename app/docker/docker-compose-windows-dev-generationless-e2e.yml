@@ -6,6 +6,7 @@ services:
   model-secret-gate:
     environment:
       JINA_API_KEY: ${JINA_API_KEY:-}
+      DOCMIND_E2E_BOOTSTRAP_ONLY: ${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}
       DOCMIND_GENERATOR_MODEL: ""
       DASHSCOPE_API_KEY: ""
     command:
@@ -13,23 +14,35 @@ services:
       - -ec
       - |
         fail() { echo "Windows generationless E2E model gate failed: $$1" >&2; exit 1; }
-        [ "$${#JINA_API_KEY}" -ge 12 ] || fail "JINA_API_KEY is missing"
-        case "$$JINA_API_KEY" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "JINA_API_KEY contains a placeholder" ;; esac
+        case "$$DOCMIND_E2E_BOOTSTRAP_ONLY" in 0|1) ;; *) fail "DOCMIND_E2E_BOOTSTRAP_ONLY must be 0 or 1" ;; esac
+        if [ "$$DOCMIND_E2E_BOOTSTRAP_ONLY" = 0 ]; then
+          [ "$${#JINA_API_KEY}" -ge 12 ] || fail "JINA_API_KEY is missing"
+          case "$$JINA_API_KEY" in *CHANGE_ME*|*PLACEHOLDER*|*GENERATED_LOCALLY*) fail "JINA_API_KEY contains a placeholder" ;; esac
+        fi
         [ -z "$$DOCMIND_GENERATOR_MODEL" ] || fail "answer generation must remain disabled"
         [ -z "$$DASHSCOPE_API_KEY" ] || fail "answer credential must remain disabled"
-        echo "Generationless E2E model boundary validated (no secrets logged)."
+        echo "Generationless E2E boundary validated (bootstrap_only=$$DOCMIND_E2E_BOOTSTRAP_ONLY; no secrets logged)."
 
   ragflow-cpu:
     depends_on:
       docling-office-parser:
         condition: service_healthy
     environment:
+      DOCMIND_E2E_BOOTSTRAP_ONLY: ${DOCMIND_E2E_BOOTSTRAP_ONLY:-0}
+      API_PROXY_SCHEME: python
+      COMPOSE_PROFILES: full,tei-cpu
+      TEI_MODEL: BAAI/bge-m3
       DOCMIND_GENERATOR_MODEL: ""
       DASHSCOPE_API_KEY: ""
+      DOCMIND_SHARED_WORKSPACE_ENABLED: "1"
+      DOCMIND_SHARED_USER_EMAIL: docmind-e2e@internal.invalid
+      DOCMIND_CATALOG_DB_PRIMARY_ENABLED: "1"
       PARSER_PLATFORM_ENABLED: "1"
       PARSER_PLATFORM_INTEGRATION_READY: "1"
       PARSER_PLATFORM_OFFICE_ENABLED: "1"
       PARSER_PLATFORM_DOCLING_OFFICE_URL: http://docling-office-parser:8092
+    volumes:
+      - ../scripts/docmind_generationless_e2e_seed.py:/ragflow/scripts/docmind_generationless_e2e_seed.py:ro
 
   docling-office-parser:
     profiles: [full]

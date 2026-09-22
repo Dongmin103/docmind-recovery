@@ -200,9 +200,9 @@ if ($Reason -eq 'scheduled') {
         Assert-DocMindIdentifier -Value $claimedScanId -Name 'scan_id'
         if ($claimedScanId -notmatch '^midnight-\d{4}-\d{2}-\d{2}$') { throw 'SIGNED_SCHEDULED_SCAN_ID_INVALID' }
         $claimedFence = 0L
-        $claimedExpiry = [DateTimeOffset]::MinValue
         if (-not [Int64]::TryParse([string]$claim.scan.fencing_token, [ref]$claimedFence) -or $claimedFence -lt 1) { throw 'SIGNED_SCHEDULED_FENCE_INVALID' }
-        if (-not [DateTimeOffset]::TryParse([string]$claim.scan.lease_expires_at, [ref]$claimedExpiry) -or $claimedExpiry -le [DateTimeOffset]::UtcNow.AddSeconds(5)) { throw 'SIGNED_SCHEDULED_LEASE_INVALID' }
+        try { $claimedExpiry = ConvertTo-DocMindDateTimeOffset -Value $claim.scan.lease_expires_at -Name 'lease_expires_at' } catch { throw 'SIGNED_SCHEDULED_LEASE_INVALID' }
+        if ($claimedExpiry -le [DateTimeOffset]::UtcNow.AddSeconds(5)) { throw 'SIGNED_SCHEDULED_LEASE_INVALID' }
         if (-not $configuredSources.ContainsKey($claimedSourceId)) { throw 'SIGNED_SCHEDULED_SOURCE_UNREGISTERED' }
         $scheduledKey = '{0}/{1}' -f $claimedSourceId, $claimedScanId
         if ($attemptedScheduledScans.ContainsKey($scheduledKey)) { throw 'SIGNED_SCHEDULED_SCAN_REPLAYED' }

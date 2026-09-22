@@ -69,6 +69,13 @@ the key in the current process only when the operator runs the live tier; do not
 put it in Git, a command argument, a generated report, or committed Compose.
 The ACL-restricted host-worker config remains external to the repository.
 
+Before the one-time Jina credential is injected, the application may be
+started for database/API bootstrap and signed ingestion only by setting
+`DOCMIND_E2E_BOOTSTRAP_ONLY=1` in the current process. This switch exists only
+in the explicit E2E overlay. It does not provide a reranker fallback, so
+C-search remains unavailable until the process is restarted with the real Jina
+credential and bootstrap-only mode removed.
+
 Validate the merged Compose without starting containers:
 
 ```powershell
@@ -85,3 +92,25 @@ backup-exclusion requirements, Jina authentication, source registration,
 parser health, indexing verification, or either plaintext cleanup ACK. If the
 Word sample selects Office image OCR, the separately provisioned Surya runtime
 is also required; do not silently drop required OCR to make the test pass.
+
+## 2026-09-22 live boundary result
+
+The isolated Windows harness started the application and its backing services,
+created the logical source mapping without exposing a physical source root, and
+completed a signed host-worker claim. The approved uEncryptor2 executable
+produced plaintext whose size and SHA-256 matched the independent read-only
+reference. The host and container cleanup acknowledgements both completed, no
+job plaintext remained on either side, and the encrypted source remained
+unchanged.
+
+The approved sample is a legacy `.doc` file. The production ingestion runtime
+supports `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.hwp`, and `.hwpx`, so artifact
+ingestion correctly failed closed with `DOCMIND_INGESTION_FORMAT_UNSUPPORTED`.
+No parser run, chunk set, index, or scoped C-search result was produced. Do not
+rename the file or treat it as OOXML; completing this live tier requires either
+an approved encrypted `.docx` sample or a separately designed and validated
+legacy Word conversion/parser boundary.
+
+This functional test used an ACL-restricted external host-worker configuration
+with the BitLocker requirement disabled only for the isolated test server. It
+does not change or satisfy the production-security BitLocker gate.

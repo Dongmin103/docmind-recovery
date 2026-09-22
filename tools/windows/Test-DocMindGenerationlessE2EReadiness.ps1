@@ -94,12 +94,15 @@ if ([string]::IsNullOrWhiteSpace($HostWorkerConfigPath)) {
         $config = Get-Content -LiteralPath $hostConfigFile -Raw -ErrorAction Stop | ConvertFrom-Json
         $required = @(
             'worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'executable_path',
-            'executable_sha256', 'executable_signer_thumbprint', 'work_root', 'sources'
+            'executable_sha256', 'executable_signer_thumbprint', 'work_root'
         )
         foreach ($name in $required) {
             if ($config.PSObject.Properties.Name -notcontains $name -or [string]::IsNullOrWhiteSpace([string]$config.$name)) {
                 throw 'invalid host config'
             }
+        }
+        if ($config.PSObject.Properties.Name -notcontains 'sources' -or @($config.sources).Count -eq 0) {
+            throw 'invalid host config'
         }
         $apiBase = [Uri]::new([string]$config.api_base_uri)
         if (-not $apiBase.IsAbsoluteUri -or -not $apiBase.IsLoopback -or $apiBase.UserInfo) { throw 'invalid host config' }

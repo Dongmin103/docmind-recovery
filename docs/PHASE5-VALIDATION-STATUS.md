@@ -48,6 +48,20 @@ package does not contain or authenticate an application image.
   three-result response, finite scores, usage reporting, and no credential or
   prompt/document logging. This establishes connectivity and API compatibility,
   not Korean retrieval quality or production performance.
+- The isolated application stack, Office parser, local BGE-M3 service, and API
+  started successfully. A signed Windows host-worker claim then ran the
+  approved uEncryptor2 executable. The produced plaintext matched the
+  independent read-only reference by size and SHA-256, both host and container
+  cleanup states reached `COMPLETE`, no job plaintext remained, and the
+  encrypted source remained unchanged.
+- The approved sample is legacy `.doc`, which the production ingestion runtime
+  intentionally does not accept. Artifact ingestion failed closed with
+  `DOCMIND_INGESTION_FORMAT_UNSUPPORTED`; no parser run, chunk set, index, or
+  scoped C-search result was created. This proves the decrypt/stream/cleanup
+  boundary, not end-to-end indexing or search.
+- That isolated functional run disabled the BitLocker check only in its
+  ACL-restricted external test host configuration. The production-security
+  BitLocker requirement remains unsatisfied and unchanged.
 
 ## Production-security result
 
@@ -65,8 +79,9 @@ customer document is approved for this profile.
 
 ## Still external or incomplete
 
-- Boot the DocMind application image against the recovered stores and verify a
-  reference document plus search result.
+- Add a separately isolated and validated legacy Word conversion/parser path,
+  or obtain an approved encrypted `.docx` sample, then verify indexing and the
+  all/folder/document C-search scopes through the complete application path.
 - Configure and verify real TLS for browser/API and every required
   service-to-service path.
 - Verify host/Docker storage encryption, certificate rotation, external secret

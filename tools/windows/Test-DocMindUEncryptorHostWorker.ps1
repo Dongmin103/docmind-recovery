@@ -99,6 +99,9 @@ try {
     }
     $expiry = Assert-DocMindLeasePayload -Payload $lease
     Assert-True ($expiry -gt [DateTimeOffset]::UtcNow) 'Valid lease was rejected.'
+    $jsonLease = ($lease | ConvertTo-Json -Compress) | ConvertFrom-Json
+    $jsonExpiry = Assert-DocMindLeasePayload -Payload $jsonLease
+    Assert-True ($jsonExpiry -gt [DateTimeOffset]::UtcNow) 'ConvertFrom-Json changed the signed lease timezone.'
     $lease.relative_path = 'D:\secret.enc'
     Assert-Throws { Assert-DocMindLeasePayload -Payload $lease } 'Physical source path in lease was accepted.'
 

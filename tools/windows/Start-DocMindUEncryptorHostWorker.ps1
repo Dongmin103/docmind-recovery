@@ -14,9 +14,12 @@ $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
 $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
 
-$requiredConfig = @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'executable_path', 'executable_sha256', 'executable_signer_thumbprint', 'work_root', 'sources')
+$requiredConfig = @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'executable_path', 'executable_sha256', 'executable_signer_thumbprint', 'work_root')
 foreach ($name in $requiredConfig) {
     if ($config.PSObject.Properties.Name -notcontains $name -or $null -eq $config.$name -or [string]::IsNullOrWhiteSpace([string]$config.$name)) { throw "Host worker config is missing $name." }
+}
+if ($config.PSObject.Properties.Name -notcontains 'sources' -or $null -eq $config.sources -or @($config.sources).Count -eq 0) {
+    throw 'Host worker config is missing sources.'
 }
 Assert-DocMindIdentifier -Value ([string]$config.worker_id) -Name 'worker_id'
 Assert-DocMindIdentifier -Value ([string]$config.key_id) -Name 'key_id'
@@ -228,7 +231,7 @@ function Write-JobState {
         job_id = [string]$Lease.job_id
         version_id = [string]$Lease.version_id
         fencing_token = [string]$Lease.fencing_token
-        lease_expires_at = [string]$Lease.lease_expires_at
+        lease_expires_at = (ConvertTo-DocMindDateTimeOffset -Value $Lease.lease_expires_at -Name 'lease_expires_at').ToString('o')
         state = $State
         updated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
     }

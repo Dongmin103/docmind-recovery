@@ -201,11 +201,23 @@ function Assert-DocMindLeasePayload {
     $fencingToken = 0L
     if (-not [Int64]::TryParse([string]$Payload.fencing_token, [ref]$fencingToken) -or $fencingToken -lt 1) { throw 'fencing_token is invalid.' }
     if ([string]$Payload.ciphertext_sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'ciphertext_sha256 is invalid.' }
-    $expires = [DateTimeOffset]::MinValue
-    if (-not [DateTimeOffset]::TryParse([string]$Payload.lease_expires_at, [ref]$expires)) { throw 'lease_expires_at is invalid.' }
+    $expires = ConvertTo-DocMindDateTimeOffset -Value $Payload.lease_expires_at -Name 'lease_expires_at'
     if ($expires -le [DateTimeOffset]::UtcNow.AddSeconds($MinimumRemainingSeconds)) { throw 'Signed lease is expired or too close to expiry.' }
     if ([IO.Path]::IsPathRooted([string]$Payload.relative_path) -or ([string]$Payload.relative_path).Contains(':')) { throw 'Signed lease contains a physical path.' }
     return $expires.ToUniversalTime()
+}
+
+function ConvertTo-DocMindDateTimeOffset {
+    param([Parameter(Mandatory = $true)]$Value, [string]$Name = 'timestamp')
+    if ($Value -is [DateTimeOffset]) { return ([DateTimeOffset]$Value).ToUniversalTime() }
+    if ($Value -is [DateTime]) {
+        $dateTime = [DateTime]$Value
+        if ($dateTime.Kind -eq [DateTimeKind]::Unspecified) { throw "$Name is invalid." }
+        return ([DateTimeOffset]$dateTime).ToUniversalTime()
+    }
+    $parsed = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse([string]$Value, [ref]$parsed)) { throw "$Name is invalid." }
+    return $parsed.ToUniversalTime()
 }
 
 function Test-DocMindSignedMessage {
@@ -406,7 +418,7 @@ function Remove-DocMindExpiredJobDirectories {
         if (Test-Path -LiteralPath $statePath -PathType Leaf) {
             try {
                 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-                $leaseExpiry = [DateTimeOffset]::Parse([string]$state.lease_expires_at)
+                $leaseExpiry = ConvertTo-DocMindDateTimeOffset -Value $state.lease_expires_at -Name 'lease_expires_at'
                 $leaseExpired = $leaseExpiry -lt [DateTimeOffset]::UtcNow
             } catch { $leaseExpired = $false }
         }
