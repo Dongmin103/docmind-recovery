@@ -37,6 +37,10 @@ if ($SelfTest) {
             backupId = [Guid]::NewGuid().ToString('N')
             createdUtc = [DateTime]::UtcNow.ToString('o')
             composeProject = $script:RecoveryProject
+            syntheticMarker = [ordered]@{
+                markerId = '0123456789abcdef0123456789abcdef'
+                sha256 = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+            }
             payloads = $payloads
         }
         [IO.File]::WriteAllText((Join-Path $fixture 'manifest.json'), ($manifest | ConvertTo-Json -Depth 5))
@@ -74,8 +78,12 @@ if ($SelfTest) {
         Assert-ArchiveEntriesSafe $decrypted
         & tar -xzf $decrypted -C $unpacked
         if ($LASTEXITCODE -ne 0) { throw 'Synthetic recovery extraction failed.' }
-        [void](Read-RecoveryManifest $unpacked)
-        Write-Output 'Recovery self-test passed: encryption round trip, HMAC tamper rejection, safe archive paths, and payload checksums.'
+        $verifiedManifest = Read-RecoveryManifest $unpacked
+        if ([string]$verifiedManifest.syntheticMarker.markerId -ne [string]$manifest.syntheticMarker.markerId -or
+            [string]$verifiedManifest.syntheticMarker.sha256 -ne [string]$manifest.syntheticMarker.sha256) {
+            throw 'Authenticated synthetic recovery marker changed during the encrypted round trip.'
+        }
+        Write-Output 'Recovery self-test passed: encryption round trip, HMAC tamper rejection, safe archive paths, payload checksums, and authenticated marker binding.'
     } finally {
         if ($null -ne $key) { [Array]::Clear($key, 0, $key.Length) }
         Remove-RecoveryWorkingDirectory -Path $work

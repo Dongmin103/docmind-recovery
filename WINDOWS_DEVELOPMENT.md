@@ -57,6 +57,6 @@ python tools/windows/initialize_auth_keys.py --check
 - Windows 개발 전용 MySQL·Elasticsearch·Valkey·MinIO 인프라는 이 서버에서 정상 기동을 확인했다. 전체 애플리케이션 기동은 실제 Jina/답변 모델 자격증명을 넣은 뒤 수행한다.
 - uEncryptor2·실제 사용자 문서·외부 모델 API·성능 검증은 후속 작업이다. 원본 루트에는 접근하거나 변경하지 않는다.
 - 제품 경로 제거의 자동 검사와 개발/운영 전환 절차는 [docs/OPENVIKING-CUTOVER.md](docs/OPENVIKING-CUTOVER.md)를 따른다. 이 개발 작업은 운영 서비스 중지를 수행하지 않는다.
-- 5단계 개발 범위에서는 합성 데이터 전용 보안 경계와 암호화 backup/package 검증, 새 disconnected volume으로의 실제 restore를 통과했다. BitLocker와 실제 uEncryptor2 실행은 검증하지 않았으며 복구 volume을 서비스에 연결하지 않았다.
+- 5단계 개발 범위에서는 합성 데이터 전용 보안 경계, 암호화 backup/package 검증, 새 disconnected volume으로의 실제 restore, 정확한 backup-time image를 사용한 MySQL/Elasticsearch/MinIO 기동과 합성 marker 복구를 통과했다. 복구용 애플리케이션 이미지 기동·기준 문서 검색, BitLocker, 실제 uEncryptor2 실행, 실제 TLS/외부 secret provider는 아직 검증하지 않았다.
 - 6단계 개발 범위에서는 제거된 제품 runtime의 재유입 방지 검사와 운영 전환/rollback runbook을 구현했다. 운영 이미지 배포·서비스 중지·운영 데이터 전환은 수행하지 않았다.
 - 검색 화면의 전체/폴더/문서 범위 선택은 유지한다. 폴더 선택은 하위 폴더를 재귀적으로 포함하며 같은 scope를 BM25와 dense 후보 생성 전에 적용한다.

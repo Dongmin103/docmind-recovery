@@ -1,0 +1,96 @@
+name: ${RECOVERY_COMPOSE_PROJECT:?Set an isolated recovery project}
+
+x-recovery-service: &recovery-service
+  restart: "no"
+  networks: [recovery_net]
+  security_opt: [no-new-privileges:true]
+  labels:
+    com.docmind.recovery-boot: "true"
+    com.docmind.backup-id: ${RECOVERY_BACKUP_ID:?Verified backup ID required}
+
+services:
+  mysql:
+    <<: *recovery-service
+    image: ${RECOVERY_MYSQL_IMAGE:?Verified local MySQL image ID required}
+    pull_policy: never
+    command:
+      - --max_connections=1000
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --tls_version=TLSv1.2,TLSv1.3
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?Recovery credential required}
+      TZ: ${TZ:-Asia/Seoul}
+    ports:
+      - 127.0.0.1:${RECOVERY_MYSQL_PORT:-23306}:3306
+    volumes:
+      - mysql_recovery:/var/lib/mysql
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, -uroot, "-p${MYSQL_PASSWORD}"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+
+  elasticsearch:
+    <<: *recovery-service
+    image: ${RECOVERY_ELASTICSEARCH_IMAGE:?Verified local Elasticsearch image ID required}
+    pull_policy: never
+    environment:
+      node.name: es01
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Recovery credential required}
+      bootstrap.memory_lock: "false"
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      TZ: ${TZ:-Asia/Seoul}
+    ports:
+      - 127.0.0.1:${RECOVERY_ES_PORT:-29200}:9200
+    volumes:
+      - es_recovery:/usr/share/elasticsearch/data
+    tmpfs:
+      - /tmp:mode=1777,size=512m
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS -u elastic:$${ELASTIC_PASSWORD} http://127.0.0.1:9200/_cluster/health >/dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+
+  minio:
+    <<: *recovery-service
+    image: ${RECOVERY_MINIO_IMAGE:?Verified local MinIO image ID required}
+    pull_policy: never
+    command: [server, --console-address, ":9001", /data]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:?Recovery credential required}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?Recovery credential required}
+      TZ: ${TZ:-Asia/Seoul}
+    ports:
+      - 127.0.0.1:${RECOVERY_MINIO_PORT:-29000}:9000
+      - 127.0.0.1:${RECOVERY_MINIO_CONSOLE_PORT:-29001}:9001
+    volumes:
+      - minio_recovery:/data
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:9000/minio/health/live]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+
+networks:
+  recovery_net:
+    internal: true
+    labels:
+      com.docmind.recovery-boot: "true"
+      com.docmind.backup-id: ${RECOVERY_BACKUP_ID:?Verified backup ID required}
+
+volumes:
+  mysql_recovery:
+    external: true
+    name: ${RECOVERY_MYSQL_VOLUME:?Verified restored MySQL volume required}
+  es_recovery:
+    external: true
+    name: ${RECOVERY_ES_VOLUME:?Verified restored Elasticsearch volume required}
+  minio_recovery:
+    external: true
+    name: ${RECOVERY_MINIO_VOLUME:?Verified restored MinIO volume required}

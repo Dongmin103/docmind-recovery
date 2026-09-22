@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)] [string]$OutputPath,
     [Parameter(Mandatory)] [string]$RecoveryKeyPath,
     [string]$EnvironmentPath,
+    [string]$MarkerPath,
     [string]$DockerCommand = 'docker',
     [ValidateSet('Native', 'Wsl')] [string]$DockerHostPathStyle = 'Native',
     [switch]$DryRun
@@ -23,6 +24,24 @@ if (-not (Test-Path -LiteralPath $resolvedEnvironment -PathType Leaf)) {
 }
 $resolvedOutput = Assert-RecoveryPath -Path $OutputPath -Purpose 'Encrypted recovery output'
 $resolvedKey = Assert-RecoveryPath -Path $RecoveryKeyPath -Purpose 'Recovery key' -MustExist
+$syntheticMarker = $null
+if ($MarkerPath) {
+    $resolvedMarker = Assert-RecoveryPath -Path $MarkerPath -Purpose 'Synthetic recovery marker receipt' -MustExist
+    if (-not $resolvedMarker.StartsWith($localRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Synthetic recovery marker receipt must stay below the ignored .local directory.'
+    }
+    $marker = Get-Content -LiteralPath $resolvedMarker -Raw | ConvertFrom-Json
+    if ($marker.format -ne 'docmind-recovery-marker/v1' -or
+        $marker.composeProject -ne $script:RecoveryProject -or
+        [string]$marker.markerId -notmatch '^[0-9a-f]{32}$' -or
+        [string]$marker.sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw 'Synthetic recovery marker receipt is invalid or belongs to another Compose project.'
+    }
+    $syntheticMarker = [ordered]@{
+        markerId = [string]$marker.markerId
+        sha256 = [string]$marker.sha256
+    }
+}
 $sidecarPath = "$resolvedOutput.manifest.json"
 if ((Test-Path -LiteralPath $resolvedOutput) -or (Test-Path -LiteralPath $sidecarPath)) {
     throw 'Refusing to overwrite an existing recovery package or sidecar manifest.'
@@ -33,6 +52,7 @@ $plan = @(
     'Source volumes: mysql_data, es_data, minio_data',
     'Published interfaces: validated loopback-only by Test-WindowsDevelopmentCompose.ps1',
     'Excluded: redis_data (cache, leases, locks, and queues must be rebuilt)',
+    "Synthetic marker bound into authenticated manifest: $($null -ne $syntheticMarker)",
     "Encrypted output: $resolvedOutput",
     'Original source roots and uEncryptor2: never accessed'
 )
@@ -145,6 +165,9 @@ try {
                 reason = 'Ephemeral cache, leases, locks, and queues are rebuilt to prevent stale work replay.'
             }
         )
+    }
+    if ($null -ne $syntheticMarker) {
+        $manifest['syntheticMarker'] = $syntheticMarker
     }
     [IO.File]::WriteAllText(
         (Join-Path $payloadRoot 'manifest.json'),

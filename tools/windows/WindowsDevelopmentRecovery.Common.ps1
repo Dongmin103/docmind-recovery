@@ -329,6 +329,12 @@ function Read-RecoveryManifest {
             throw "Recovery payload size mismatch: $($payload.file)"
         }
     }
+    if ($manifest.PSObject.Properties.Name -contains 'syntheticMarker') {
+        if ([string]$manifest.syntheticMarker.markerId -notmatch '^[0-9a-f]{32}$' -or
+            [string]$manifest.syntheticMarker.sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw 'Recovery manifest contains an invalid synthetic marker.'
+        }
+    }
     return $manifest
 }
 
@@ -346,6 +352,69 @@ function Invoke-RecoveryDocker {
     }
     & $DockerCommand @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Docker command failed. Review Docker Desktop logs; recovery scripts did not print data or credentials.' }
+}
+
+function New-RecoveryDockerScriptInvocation {
+    param(
+        [Parameter(Mandatory)] [string]$ContainerId,
+        [Parameter(Mandatory)] [Collections.IDictionary]$Environment,
+        [Parameter(Mandatory)] [string]$Script
+    )
+    if ($ContainerId -notmatch '^[A-Za-z0-9_.-]{6,128}$') {
+        throw 'Docker script container identity contains unsafe bridge characters.'
+    }
+    $arguments = [Collections.Generic.List[string]]::new()
+    $arguments.Add('exec')
+    foreach ($entry in $Environment.GetEnumerator()) {
+        $name = [string]$entry.Key
+        $value = [string]$entry.Value
+        if ($name -notmatch '^[A-Z][A-Z0-9_]*$' -or
+            $value -notmatch '^[A-Za-z0-9_.:/=@+-]+$') {
+            throw "Docker script environment contains unsafe bridge characters: $name"
+        }
+        $arguments.Add('-e')
+        $arguments.Add("$name=$value")
+    }
+    foreach ($argument in @($ContainerId, 'sh', '-c')) { $arguments.Add($argument) }
+    foreach ($argument in $arguments) {
+        if ($argument -notmatch '^[A-Za-z0-9_.:/=@+-]+$') {
+            throw 'Docker script invocation contains shell-sensitive outer arguments.'
+        }
+    }
+    $normalizedScript = $Script.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = [Text.Encoding]::UTF8.GetBytes($normalizedScript)
+    try {
+        $payloadBase64 = [Convert]::ToBase64String($bytes)
+        $decoderCommand = "printf %s $payloadBase64 | base64 -d | sh -eu"
+        if ($decoderCommand -notmatch '^printf %s [A-Za-z0-9+/]+={0,2} \| base64 -d \| sh -eu$') {
+            throw 'Docker script decoder command escaped the fixed base64 wrapper.'
+        }
+        $arguments.Add($decoderCommand)
+        return [pscustomobject]@{
+            Arguments = $arguments.ToArray()
+            PayloadBase64 = $payloadBase64
+        }
+    } finally {
+        [Array]::Clear($bytes, 0, $bytes.Length)
+        $normalizedScript = $null
+    }
+}
+
+function Invoke-RecoveryDockerScript {
+    param(
+        [Parameter(Mandatory)] [string]$DockerCommand,
+        [Parameter(Mandatory)] [string]$ContainerId,
+        [Parameter(Mandatory)] [Collections.IDictionary]$Environment,
+        [Parameter(Mandatory)] [string]$Script
+    )
+    $invocation = New-RecoveryDockerScriptInvocation `
+        -ContainerId $ContainerId `
+        -Environment $Environment `
+        -Script $Script
+    & $DockerCommand @($invocation.Arguments)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Docker recovery verification script failed.'
+    }
 }
 
 function Convert-RecoveryDockerBindPath {

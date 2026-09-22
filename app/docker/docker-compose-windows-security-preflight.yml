@@ -1,0 +1,58 @@
+# Certificate prerequisite validation only.
+#
+# This override does not add TLS to any DocMind service and must never be used
+# as evidence that the Windows stack is production-capable. It validates local,
+# ignored certificate material before a separate TLS-enabled runtime profile is
+# designed and reviewed.
+
+services:
+  production-security-preflight:
+    profiles: [security-preflight]
+    image: alpine/openssl:3.5.4@sha256:42c7389ef077aed0eb4e96d0abbd094083d701bbaff1313073b061c0c9cd8278
+    network_mode: none
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    labels:
+      com.docmind.security-preflight-only: "true"
+      com.docmind.production-tls-enabled: "false"
+    environment:
+      DOCMIND_SECURITY_PREFLIGHT_MODE: ${DOCMIND_SECURITY_PREFLIGHT_MODE:?Use windows-security-preflight.env.example as documentation}
+      DOCMIND_TLS_EXPECTED_DNS_NAME: ${DOCMIND_TLS_EXPECTED_DNS_NAME:?Set the expected internal DNS name}
+      DOCMIND_TLS_MIN_VALID_DAYS: ${DOCMIND_TLS_MIN_VALID_DAYS:-30}
+    volumes:
+      - type: bind
+        source: ${DOCMIND_TLS_CA_CERT_FILE:?Set an ignored local CA certificate path}
+        target: /security/ca.pem
+        read_only: true
+      - type: bind
+        source: ${DOCMIND_TLS_SERVER_CERT_FILE:?Set an ignored local server certificate path}
+        target: /security/server.pem
+        read_only: true
+      - type: bind
+        source: ${DOCMIND_TLS_SERVER_KEY_FILE:?Set an ignored local private-key path}
+        target: /security/server.key
+        read_only: true
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        fail() { echo "Certificate prerequisite failed: $$1" >&2; exit 1; }
+        [ "$$DOCMIND_SECURITY_PREFLIGHT_MODE" = "certificate-prerequisite-only" ] || fail "preflight mode must not claim production readiness"
+        case "$$DOCMIND_TLS_MIN_VALID_DAYS" in ''|*[!0-9]*) fail "minimum validity days must be an integer" ;; esac
+        [ "$$DOCMIND_TLS_MIN_VALID_DAYS" -ge 1 ] || fail "minimum validity days must be positive"
+        [ -n "$$DOCMIND_TLS_EXPECTED_DNS_NAME" ] || fail "expected DNS name is missing"
+        openssl x509 -in /security/ca.pem -noout >/dev/null 2>&1 || fail "CA certificate is invalid"
+        openssl x509 -in /security/server.pem -noout >/dev/null 2>&1 || fail "server certificate is invalid"
+        openssl pkey -in /security/server.key -noout -check >/dev/null 2>&1 || fail "server private key is invalid or requires an unavailable passphrase"
+        openssl x509 -in /security/ca.pem -noout -text | grep -q 'CA:TRUE' || fail "trust anchor is not a CA certificate"
+        openssl verify -purpose sslserver -verify_hostname "$$DOCMIND_TLS_EXPECTED_DNS_NAME" -CAfile /security/ca.pem /security/server.pem >/dev/null 2>&1 || fail "certificate trust, EKU, or DNS verification failed"
+        seconds="$$((DOCMIND_TLS_MIN_VALID_DAYS * 86400))"
+        openssl x509 -in /security/server.pem -noout -checkend "$$seconds" >/dev/null 2>&1 || fail "server certificate expires before the required safety window"
+        cert_public="$$(openssl x509 -in /security/server.pem -pubkey -noout | openssl dgst -sha256)"
+        key_public="$$(openssl pkey -in /security/server.key -pubout | openssl dgst -sha256)"
+        [ "$$cert_public" = "$$key_public" ] || fail "server certificate and private key do not match"
+        ca_fingerprint="$$(openssl x509 -in /security/ca.pem -fingerprint -sha256 -noout)"
+        cert_fingerprint="$$(openssl x509 -in /security/server.pem -fingerprint -sha256 -noout)"
+        [ "$$ca_fingerprint" != "$$cert_fingerprint" ] || fail "a self-signed leaf certificate is not accepted"
+        echo 'Certificate prerequisite passed; runtime TLS, storage encryption, rotation, and secret-provider readiness are not asserted.'

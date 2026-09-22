@@ -95,7 +95,7 @@ powershell -NoProfile -File tools/windows/Test-WindowsDevelopmentRecovery.ps1 `
   -ReceiptPath .local/recovery/receipts/dev-20260921.json
 ```
 
-이 검사는 cryptographic integrity와 볼륨 materialization을 증명한다. 실제 서비스 기동 검증은 manifest에 기록된 정확한 MySQL/Elasticsearch/MinIO 이미지로 별도 loopback-only recovery compose를 만들고, 원래 개발 stack과 다른 port에서 수행해야 한다. 복구 볼륨을 운영 또는 원래 개발 compose에 바로 연결하지 않는다. 서비스별 health와 합성 fixture의 DB row, ES document, MinIO object를 대조한 뒤에만 복구 가능 판정을 남긴다.
+이 검사는 cryptographic integrity와 볼륨 materialization을 증명한다. 실제 서비스 기동과 합성 marker 대조는 [Windows recovery boot verification](WINDOWS-RECOVERY-BOOT-VERIFICATION.md)의 별도 recovery Compose 절차로 수행한다. 이 절차는 manifest의 정확한 MySQL/Elasticsearch/MinIO image ID, 별도 내부 network, 다른 loopback port, 인증된 marker를 강제한다. 복구 볼륨을 운영 또는 원래 개발 compose에 바로 연결하지 않는다. 애플리케이션 이미지와 기준 문서 검색은 recovery package에 포함되지 않으므로 별도 E2E 검증으로 남는다.
 
 ## 안전 및 한계
 

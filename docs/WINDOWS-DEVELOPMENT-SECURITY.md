@@ -4,6 +4,16 @@ This document describes the protections and deliberate limitations of
 `docker-compose-windows-dev.yml`. It is a development control, not a production
 security profile or an assertion that application data is encrypted at rest.
 
+The repository now contains two deliberately different checks:
+
+| Check | What it proves | What it does not prove |
+|---|---|---|
+| Windows development security gate | Synthetic-only policy, loopback binding, local ACLs, non-placeholder development secrets | TLS or encrypted named volumes |
+| Production security preflight | Certificate trust/hostname/EKU/key match/expiry and, when supplied, lifecycle evidence consistency | That DocMind services actually use TLS, that BitLocker is active, or that secrets have moved out of container environment variables |
+
+The second check is a prerequisite validator. Its Compose label explicitly says
+`com.docmind.production-tls-enabled=false`. It is not a production profile.
+
 ## Enforced boundary
 
 The Windows development stack accepts only these policy values:
@@ -112,3 +122,101 @@ credentials and stop accepting connections. Stop the isolated stack and use a
 documented development-volume recovery or replacement procedure before rotating;
 do not delete volumes as a routine security fix. This repository intentionally
 does not automate destructive volume removal.
+
+## Production-security prerequisite contract
+
+Use the tracked
+`app/docker/docker-compose-windows-security-preflight.yml` only to validate
+certificate material. The override starts one network-disabled, read-only
+OpenSSL container and does not change MySQL, Elasticsearch, Valkey, MinIO, or
+RAGFlow transport settings.
+
+Create an ignored preflight configuration after identifying the actual
+Docker/WSL data location:
+
+```powershell
+powershell -NoProfile -File .\tools\windows\Initialize-WindowsProductionSecurityPreflight.ps1 `
+  -ExpectedDnsName docmind.internal.example `
+  -DockerStoragePath 'C:\actual\Docker-or-WSL-data\ext4.vhdx'
+```
+
+The initializer creates no CA, certificate, private key, evidence, trust-store
+entry, or encryption approval. Supply these ignored files below
+`.local/security`:
+
+- `ca.pem`: the separate trust anchor;
+- `server.pem`: a server-auth certificate containing the expected DNS SAN;
+- `server.key`: its matching private key, ACL-limited to the service operator;
+- `tls-rotation-evidence.json`: reviewed rotation/trust/rollback evidence;
+- `secret-provider-evidence.json`: reviewed external secret-provider evidence.
+
+Certificate-only validation is safe to run before service TLS is implemented:
+
+```powershell
+powershell -NoProfile -File .\tools\windows\Test-WindowsProductionSecurityReadiness.ps1 `
+  -DockerCommand C:\Users\uplex\bin\docker.cmd `
+  -CertificatePreflightOnly
+```
+
+It verifies the CA constraint, server-auth purpose, DNS SAN, chain trust,
+certificate/private-key match, distinct CA and leaf certificates, and the
+minimum remaining validity period. A pass says only that the certificate
+prerequisite is usable.
+
+`tls-rotation-evidence.json` uses this schema. The fingerprint is lowercase
+SHA-256 of the certificate DER bytes, timestamps must be UTC, test timestamps
+must be recent, and the next rotation date must precede certificate expiry:
+
+```json
+{
+  "schema_version": 1,
+  "certificate_sha256": "64 lowercase hex characters",
+  "rotated_at_utc": "2026-09-01T00:00:00Z",
+  "trust_tested_at_utc": "2026-09-01T00:00:00Z",
+  "rollback_tested_at_utc": "2026-09-01T00:00:00Z",
+  "next_rotation_due_utc": "2026-10-01T00:00:00Z",
+  "owner": "reviewed owner identifier",
+  "runbook_reference": "reviewed runbook identifier"
+}
+```
+
+`secret-provider-evidence.json` uses this schema. This is evidence metadata, not
+a location for credentials or secret values:
+
+```json
+{
+  "schema_version": 1,
+  "provider": "external provider identifier",
+  "attested_at_utc": "2026-09-01T00:00:00Z",
+  "rotation_tested_at_utc": "2026-09-01T00:00:00Z",
+  "application_identity": "workload identity identifier",
+  "separates_database_credentials": true,
+  "separates_model_api_credentials": true,
+  "secrets_not_in_environment": true,
+  "break_glass_runbook": "reviewed runbook identifier"
+}
+```
+
+Evidence parsing alone can be tested with `-LifecycleEvidencePreflightOnly`.
+That mode still prints that runtime TLS and live storage encryption were not
+asserted.
+
+Run the command without a preflight-only switch for the comprehensive readiness
+gate. It additionally requires all of the following:
+
+- an actual TLS-enabled runtime service/profile with a positive Compose label;
+- no direct plaintext RAGFlow port publication;
+- Elasticsearch HTTP and transport TLS;
+- MySQL `require_secure_transport`;
+- Valkey TLS-only transport;
+- MinIO certificate mounts;
+- database/storage/model secrets removed from application environment variables
+  and supplied by an externally attested provider whose Compose integration is
+  explicitly labeled `com.docmind.external-secret-provider=true`;
+- fresh rotation, trust, rollback, and secret-rotation evidence;
+- live BitLocker verification for both private material and the actual
+  Docker/WSL data location, from an elevated PowerShell session.
+
+The current Windows development Compose intentionally fails this comprehensive
+gate. That failure is the correct result: the repository has certificate and
+policy preflight checks, but no production-capable TLS/storage/secret profile.
