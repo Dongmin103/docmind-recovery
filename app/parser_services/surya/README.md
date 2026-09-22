@@ -12,10 +12,15 @@ DocMind PDF canary.
 - PDF parsing uses direct Surya full-page recognition. It does not invoke
   Docling, DeepDoc or PaddleOCR.
 
-Before starting the service, review the Surya model license and run:
+Before starting the service, review the pinned
+[Surya model license](https://github.com/datalab-to/surya/blob/v0.22.1/MODEL_LICENSE).
+Downloading or using the weights constitutes acceptance. The operator must be
+authorized to accept for the applicable person or organization and must check
+the license's use, attribution, share-alike, and commercial restrictions. Only
+after that review, explicitly record acceptance for the download command:
 
 ```bash
-./scripts/download_surya_models.sh ./models/surya
+SURYA_MODEL_LICENSE_ACCEPTED=1 ./scripts/download_surya_models.sh ./models/surya
 ```
 
 The script pins the upstream model revision and verifies both SHA-256 values.

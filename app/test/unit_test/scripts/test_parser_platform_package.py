@@ -86,6 +86,15 @@ def test_public_images_do_not_copy_private_evidence_or_model_weights() -> None:
     assert "docmind-goldset-dev.jsonl" not in combined
 
 
+def test_surya_download_requires_explicit_operator_license_acceptance() -> None:
+    downloader = (ROOT / "scripts" / "download_surya_models.sh").read_text(encoding="utf-8")
+    readme = (ROOT / "parser_services" / "surya" / "README.md").read_text(encoding="utf-8")
+
+    assert "SURYA_MODEL_LICENSE_ACCEPTED:-0" in downloader
+    assert "SURYA_MODEL_LICENSE_ACCEPTED=1 ./scripts/download_surya_models.sh" in readme
+    assert "Downloading or using the weights constitutes acceptance" in readme
+
+
 def test_parser_http_admission_is_strictly_serial() -> None:
     for service in ("surya", "docling_office", "rhwp"):
         source = (ROOT / "parser_services" / service / "service.py").read_text(encoding="utf-8")
