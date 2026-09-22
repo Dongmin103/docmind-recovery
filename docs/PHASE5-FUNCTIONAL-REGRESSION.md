@@ -112,22 +112,60 @@ The approved sample is a legacy `.doc` file. The production ingestion runtime
 validates its OLE signature, converts it inside the private rootless Office
 sidecar, verifies the converted WordprocessingML ZIP structure, and parses it
 through the existing Docling path while preserving the original `.doc` hash and
-format identity. The live run activated 105 chunks and 3,305 tokens. Its parser
-run reached `READY_WITH_WARNING` because supplemental media OCR was unavailable;
-required media OCR remains fail-closed. The job and both cleanup acknowledgements
-reached `COMPLETE`, with no host plaintext, parser input, or sidecar conversion
-artifact remaining. The credential was subsequently moved to an ACL-restricted
+format identity. A later strict-CAS reprocess used the licensed Surya sidecar:
+47 media requests returned HTTP 200 with no timeout or internal error, and the
+active set changed atomically from 105 chunks/3,305 tokens to 146 chunks/7,480
+tokens. The former `PARSER_SURYA_UNAVAILABLE` warning was removed. The remaining
+`LEGACY_DOC_CONVERTED_TO_DOCX`, `DOCX_GEOMETRY_UNAVAILABLE`, and
+`SURYA_MEDIA_EMPTY` codes describe the verified legacy conversion, the Word
+geometry limitation, and an empty supplemental OCR attachment respectively.
+An empty required attachment would have made the run `FAILED_RETRYABLE` and
+blocked activation, so the observed `READY_WITH_WARNING` activation proves the
+remaining empty result was supplemental. The job and both cleanup
+acknowledgements reached `COMPLETE`, with no host plaintext, parser input, or
+sidecar conversion artifact remaining. The encrypted source remained unchanged
+at SHA-256
+`a4074478c8807c91daf847bdaa6bfffce36a0fc8720dfe7f17868243db09cce8`.
+The credential was subsequently moved to an ACL-restricted
 external file and mounted read-only; the application process environment
 contains no inline key. A forced recreation and a Docker restart both preserved
-authenticated C-search. The application HTTP administration flow then
-reconciled the completed indexed source, captured and validated a schema-v2
-draft, and published it atomically. All, folder, and document searches each
-returned five results from the exact approved document, with 35 BM25 lane hits,
-105 dense lane hits, eight fused candidates, and finite Jina v3.5 rerank scores.
+authenticated C-search. After the Surya reprocess, the application HTTP
+administration flow reconciled the completed indexed source, captured and
+validated a schema-v2 draft, and published catalog
+`e182b6d4b69311f18e8a1fff63e6846c` as `PUBLISHED`/`VALID`, snapshot
+`90aedd3a4a5e05af42fe40ee6dfa6dc90257b22cbbc93e7a2ad7e8c00c946480`.
+All, folder, and document searches each returned five results from the exact
+approved document and eight fused candidates against that catalog.
 No tenant provider credential row was created. The Surya CPU image also built
-and rejected startup without the pinned, checksum-verified model bundle; actual
-OCR execution is pending explicit operator license acceptance and model
-provisioning.
+and rejected startup without the pinned, checksum-verified model bundle. After
+explicit operator license acceptance, the pinned models downloaded and passed
+their SHA-256 checks. A real synthetic Office screenshot produced three
+non-empty OCR blocks in 75.934 seconds with the expected validation tokens,
+matching runtime/media identity, and no warnings. A policy-level real replay
+completed in 44.679 seconds: both required and supplemental success became
+`READY` with searchable attachments and zero warnings; injected failure became
+`FAILED_RETRYABLE`/failed activation for required OCR and
+`READY_WITH_WARNING` for supplemental OCR.
+
+The initial real request intentionally exposed the former defaults instead of
+being hidden by a mocked test: 12,288 possible full-page tokens exceeded the
+570-second llama.cpp timeout, the single-threaded HTTP server starved its health
+probe, and the 600-second watchdog restarted the process. Office-media requests
+now cap generation at 1,024 tokens without changing PDF behavior, temporarily
+apply a 600-second inference limit inside the engine lock, restore the PDF
+setting afterward, and use layered 600/660/720-second
+inference/service/caller limits. This remains below the 1,800-second host-worker
+lease with time for conversion, chunking, indexing, and cleanup, and admits only one parse
+while serving health concurrently. A concurrent second parse returned
+`503 PARSER_SURYA_BUSY`. Runtime cache state is held in a private mode-0700
+tmpfs, model files remain ignored and read-only, and no temporary validation
+document or container artifact remained.
+
+The final targeted regression ran 81 task/protected-evidence/runtime tests and
+24 Surya/configuration/Windows-overlay tests successfully. The generationless
+staging progress coverage proves a normal identity-bound Task update, rejection
+of mismatched parse-run or chunk-set identities, and no mutation of the
+protected Document row.
 
 This functional test used an ACL-restricted external host-worker configuration
 with the BitLocker requirement disabled only for the isolated test server. It

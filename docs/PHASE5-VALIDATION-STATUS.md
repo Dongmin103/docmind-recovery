@@ -58,9 +58,19 @@ package does not contain or authenticate an application image.
   OLE container, converts it inside the private rootless Office sidecar, checks
   that the result is a real WordprocessingML package, and passes that package
   to the existing Docling/index activation path without changing the original
-  source identity. The live run activated 105 chunks and 3,305 tokens. The
-  parser run reached `READY_WITH_WARNING` because the unavailable supplemental
-  media OCR service produced explicit warnings; required OCR remains
+  source identity. A strict-CAS reprocess with the licensed Surya sidecar
+  completed 47 Office-media OCR calls with HTTP 200, no timeout, and no internal
+  error. It atomically replaced the prior 105-chunk/3,305-token active set with
+  146 chunks and 7,480 tokens. The parser run is `READY_WITH_WARNING`; the old
+  `PARSER_SURYA_UNAVAILABLE` warning is gone.
+- The three remaining warnings are source-specific and policy-consistent.
+  `LEGACY_DOC_CONVERTED_TO_DOCX` records the required, verified conversion;
+  `DOCX_GEOMETRY_UNAVAILABLE` is emitted for Word inputs because the Docling
+  bridge does not claim page geometry; and `SURYA_MEDIA_EMPTY` records at least
+  one selected media item whose OCR result had no searchable text. The last
+  warning is supplemental for this run: the Office-media policy would make an
+  empty required item `FAILED_RETRYABLE` and prevent activation, while this run
+  activated and remained `READY_WITH_WARNING`. Required OCR therefore remains
   fail-closed.
 - The job and both cleanup acknowledgements reached `COMPLETE`. The host
   plaintext area, container parser input area, and sidecar conversion area were
@@ -72,21 +82,59 @@ package does not contain or authenticate an application image.
   inline key. A forced container recreation and a subsequent Docker restart
   both retained working Jina authentication. No tenant provider row or
   repository secret file was created.
-- The normal administrative HTTP flow now reconciles a fully verified indexed
-  source, captures and validates a schema-v2 catalog draft, publishes it with
-  compare-and-swap protection, and loads that published catalog for search.
-  The live sequence `sync-indexed-sources -> draft -> validate -> publish ->
-  search` published catalog `cb8ddd5cb67211f19815b1bc60a18d60`, superseded
-  the previous test catalog, and returned the same five results in all,
-  folder, and document scope. Publish idempotency replay returned the same
-  result and left no started operation behind.
+- After the reprocess, the normal administrative HTTP sequence
+  `sync-indexed-sources -> draft -> validate -> publish -> search` published
+  catalog `e182b6d4b69311f18e8a1fff63e6846c` as `PUBLISHED`/`VALID`, with snapshot
+  hash `90aedd3a4a5e05af42fe40ee6dfa6dc90257b22cbbc93e7a2ad7e8c00c946480`.
+  The previous published catalog was superseded only by the normal publish CAS.
+  All, folder, and document scope each returned five ranked chunks from the
+  expected document, eight fused candidates, and the new catalog ID.
 - The Surya CPU sidecar is pinned to parser version `0.22.1` and model revision
   `6a3a4c30e5e74446d4f8b6afd05b2f2da970f470`. It verifies both model SHA-256
-  values before becoming healthy, is private/read-only, and applies bounded
-  request and media watchdogs. The image built successfully. A start without
-  the licensed model bundle failed closed before health as designed. Real OCR
-  health and document reprocessing remain pending explicit operator acceptance
-  of the model license and model download.
+  values before becoming healthy: `surya-2.gguf` is
+  `1f18abe17b1ed8b4e47ee9b1ad0e274c93daf5efbb6b29a04ff1712e37051e05`
+  and `surya-2-mmproj.gguf` is
+  `98c0563673b1657ff6d021d1e5f04af06cbf61bb40c63ac613e8bb71b42fb2c0`.
+  After explicit operator license acceptance, the official pinned download
+  completed and both checks passed. The model directory remains Git-ignored
+  and is mounted read-only; weights are not copied into the image.
+- The first real CPU Office-media request exposed two limits that a health-only
+  smoke could not show. The upstream 12,288-token full-page default exceeded
+  the 570-second backend limit, and the single-threaded HTTP server could not
+  answer health checks during inference. The 600-second media watchdog then
+  terminated the process as designed. Office-media OCR now uses a separate
+  1,024-token ceiling while PDF keeps the upstream default. Office media also
+  temporarily applies a 600-second inference limit inside the engine lock and
+  restores the PDF setting afterward. Its bounded layers are 600 seconds for
+  inference, 660 seconds for the service watchdog, and 720 seconds for the
+  caller, leaving the 1,800-second host-worker lease enough time for conversion,
+  chunking, indexing, and cleanup.
+- Health handling now runs concurrently with a non-blocking, one-request parse
+  admission gate. During real inference `/health` remained `ready`, and a
+  second parse returned `503 PARSER_SURYA_BUSY`. The private writable cache is
+  a non-persistent UID/GID 10001 tmpfs with mode `0700`; the rest of the
+  container remains read-only.
+- Real OCR of the synthetic 640x320 Office screenshot completed in 75.934
+  seconds with three non-empty blocks, exact runtime/media identity, the
+  expected validation tokens, and no warnings. The application policy replay
+  completed another real call in 44.679 seconds. Successful required and
+  supplemental paths both reached `READY` with searchable OCR attachments and
+  zero warnings. An injected service failure made required OCR
+  `FAILED_RETRYABLE` with failed activation, while supplemental OCR became
+  `READY_WITH_WARNING`. The validation containers were removed automatically,
+  no validation plaintext or temporary document remained, and the sidecar
+  `/tmp` contained no DocMind validation artifact.
+- The final live legacy-DOC job reached `COMPLETE`; host cleanup and container
+  cleanup both reached `COMPLETE`. The encrypted source remained byte-for-byte
+  unchanged at SHA-256
+  `a4074478c8807c91daf847bdaa6bfffce36a0fc8720dfe7f17868243db09cce8`.
+  Host work files, cleanup receipts, parser workspace files, application `/tmp`
+  artifacts, and Surya `/tmp` artifacts were all zero after completion.
+- Targeted regression results were 81 passing task/protected-evidence/runtime
+  tests and 24 passing Surya/configuration/Windows-overlay tests. The staging
+  progress tests cover a normal identity-bound Task update, parse-run and
+  chunk-set identity mismatch rejection, and the invariant that no protected
+  Document mutation guard is called.
 - That isolated functional run disabled the BitLocker check only in its
   ACL-restricted external test host configuration. The production-security
   BitLocker requirement remains unsatisfied and unchanged.
@@ -118,10 +166,10 @@ decrypted, or customer document is approved for this profile.
   and cleanup-failure cases.
 - Run representative Korean Jina v3.5 quality, concurrency, usage, and p50/p95
   evaluation through the complete DocMind C-search path.
-- After the responsible operator accepts the Surya model license, download the
-  pinned model bundle, verify sidecar health, and reprocess a representative
-  image-bearing document to prove both required-OCR failure and supplemental
-  warning policy with the real service.
+- Before production cutover, repeat the now-validated Surya path with the
+  approved representative corpus and record capacity/latency percentiles for
+  the target hardware. The synthetic live proof does not establish production
+  throughput.
 - Verify the official All-in-One write API/SDK before enabling source writes.
 - Perform a separately approved limited cutover. No production service, source
   root, database, index, object, or volume was changed by this validation.
