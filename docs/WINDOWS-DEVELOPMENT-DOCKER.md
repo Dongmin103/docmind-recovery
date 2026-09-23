@@ -115,6 +115,39 @@ configuration `C:\Users\uplex\.wslconfig` now sets `memory=12GB` and `swap=4GB`;
 file is outside the repository and must not be copied as a production sizing
 decision.
 
+## Keep WSL running during a development session
+
+When Docker Engine runs inside Ubuntu WSL, Docker's `unless-stopped` policy does
+not keep Ubuntu running. [Microsoft's WSL systemd documentation](https://learn.microsoft.com/en-us/windows/wsl/systemd)
+states that systemd services do not keep a WSL instance alive. If all WSL
+clients exit, Ubuntu shuts down and Docker stops every container together;
+the next `docker.cmd` call boots them all again. Browser requests during that
+cold start can receive an empty reply.
+
+Register the current Windows user's logon task once:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\Install-DocMindWindowsDevKeepAlive.ps1
+```
+
+The task runs `wsl.exe -d Ubuntu --exec /bin/sleep infinity` without a visible
+window. It keeps Ubuntu running while this Windows user is logged on, has no
+three-day execution limit, and starts at each logon. It does not run Compose,
+alter containers, or touch volumes. Confirm with:
+
+```powershell
+Get-ScheduledTask -TaskName 'DocMind Windows Dev WSL KeepAlive' |
+  Select-Object TaskName,State
+wsl.exe -d Ubuntu -- uptime -s
+```
+
+The task can be stopped with
+`Stop-ScheduledTask -TaskName 'DocMind Windows Dev WSL KeepAlive'`; Ubuntu may
+then shut down when no other WSL clients remain.
+Logging out also ends this interactive-user task. A service-account/unattended
+boot arrangement needs separate validation before relying on it for continuous
+source monitoring.
+
 ## Inspect and stop
 
 ```powershell
