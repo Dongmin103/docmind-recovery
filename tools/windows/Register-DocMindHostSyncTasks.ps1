@@ -9,6 +9,14 @@ Set-StrictMode -Version Latest
 
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
+$acl = Get-Acl -LiteralPath $configFile
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
+$allow = [Security.AccessControl.AccessControlType]::Allow
+foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+    [void]$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, $allow))
+}
+Set-Acl -LiteralPath $configFile -AclObject $acl
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($config.PSObject.Properties.Name -notcontains 'sources' -or @($config.sources).Count -eq 0) { throw 'No configured sources are available.' }
 if (-not $AllowFullScan -and ($config.PSObject.Properties.Name -notcontains 'initial_scan_on_startup' -or [bool]$config.initial_scan_on_startup)) {
@@ -55,7 +63,7 @@ function Register-DocMindTask {
     param([string]$Name, [string]$Script, [string]$Arguments, [int]$RepeatMinutes, [switch]$AtLogon, [switch]$Disabled)
     $scriptPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Script))
     if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw 'Task script is unavailable.' }
-    $taskArguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "{0}" -ConfigPath "{1}" {2}' -f $scriptPath, $configFile, $Arguments
+    $taskArguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy RemoteSigned -File "{0}" -ConfigPath "{1}" {2}' -f $scriptPath, $configFile, $Arguments
     $action = New-ScheduledTaskAction -Execute $shell -Argument $taskArguments -WorkingDirectory $PSScriptRoot
     $triggers = @(New-DocMindRepeatedTrigger -Minutes $RepeatMinutes)
     if ($AtLogon) { $triggers += New-ScheduledTaskTrigger -AtLogOn -User $identity }

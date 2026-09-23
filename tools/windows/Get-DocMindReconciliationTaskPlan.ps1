@@ -18,7 +18,7 @@ if ([TimeZoneInfo]::Local.Id -ne 'Korea Standard Time') { throw 'Windows must us
 $scanner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1'))
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) { throw 'Windows PowerShell executable is unavailable.' }
-$arguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "{0}" -ConfigPath "{1}" -Reason scheduled' -f $scanner, $configFile
+$arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy RemoteSigned -File "{0}" -ConfigPath "{1}" -Reason scheduled' -f $scanner, $configFile
 [pscustomobject][ordered]@{
     task_name = $TaskName
     execute = $powershell
