@@ -36,10 +36,10 @@ product or production rollout complete.
 ## Actual runtime
 
 The app image built and deployed for this bundle is
-`sha256:f736b88384a16c329316bc892a1bbdec06e00e4b1fed029d994ff7b41ffb7b96`.
+`sha256:311ef17817885ac50db3d7ae5510f832759658456dae6ec77dc6d231f5c00c1a`.
 The earlier bundle checkpoint used
 `sha256:33b94b2af39bbfd40e350d1cbcd587abd08e90f926e2a645868f05395416abb9`;
-the final app build additionally includes restart session recovery.
+the final app build additionally includes restart session and loader recovery.
 The preceding image is retained as
 `docmind-ragflow:rollback-20260923-pre-first-bundle`.
 
@@ -156,8 +156,15 @@ view with bounded automatic revalidation (12 attempts, five seconds apart), a
 manual reconnect control, and cleanup when the view unmounts. Other rendering
 errors and explicit authentication denials are not automatically retried.
 Network failure during initial workspace loading is classified into the same
-recoverable path. Live verification of this final loader change is pending at
-this checkpoint.
+recoverable path. The startup agent deployed the final image and verified
+HTML/shared-session readiness. In the Terra agent's repeat 35-second MySQL-only
+outage test, the fresh browser tab returned to the library after database
+recovery without another manual reload; there was no Sign in redirect or
+remaining error boundary. During the stopped interval the observed root was
+empty rather than the Korean retry view, so this proves eventual automatic
+return but does not directly prove the retry view/timer branch was displayed.
+Those branches have focused component tests. An older verification tab also
+showed an empty root with a healthy backend; a fresh tab rendered normally.
 
 ## Remaining boundaries
 
