@@ -24,6 +24,14 @@ assert SPEC and SPEC.loader
 projection = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = projection
 SPEC.loader.exec_module(projection)
+INGESTION_SPEC = importlib.util.spec_from_file_location(
+    "docmind_source_projection_ingestion_under_test",
+    SERVICE_PATH.with_name("docmind_ingestion_service.py"),
+)
+assert INGESTION_SPEC and INGESTION_SPEC.loader
+ingestion = importlib.util.module_from_spec(INGESTION_SPEC)
+sys.modules[INGESTION_SPEC.name] = ingestion
+INGESTION_SPEC.loader.exec_module(ingestion)
 
 
 MODELS = [
@@ -313,6 +321,149 @@ def test_integrated_search_scopes_use_active_sources_and_c128(source_db, monkeyp
     assert result["chunks"][0]["document_relative_path"] == r"[home]:\Manuals\Install\guide.doc"
     with pytest.raises(ValueError, match="DOCMIND_INVALID_DOCUMENT"):
         asyncio.run(api.search("tenant-1", "question", scope={"mode": "documents", "document_ids": ["doc-pending"]}))
+
+
+def test_ingestion_activation_and_both_cleanup_acks_publish_to_search_without_catalog(source_db, monkeypatch):
+    import asyncio
+
+    mapping = _mapping("home", "doc-new", "Manuals/new.doc", complete=False)
+    _document("doc-new", None)
+    DocmindSourceDocument.update(
+        observed_ciphertext_sha256="a" * 64,
+        observed_size=42,
+        observed_mtime_ns=1,
+    ).where(DocmindSourceDocument.id == mapping.id).execute()
+    DocmindSourceVersion.create(
+        id="version-new",
+        source_document_id=mapping.id,
+        document_id="doc-new",
+        ciphertext_sha256="a" * 64,
+        ciphertext_size=42,
+        source_mtime_ns=1,
+        lifecycle_state="DISCOVERED",
+    )
+    DocmindIngestionJob.create(
+        id="job-new",
+        project_id="project-1",
+        source_id="home",
+        source_document_id=mapping.id,
+        document_id="doc-new",
+        version_id="version-new",
+        idempotency_key="key-new",
+        lifecycle_state="PARSING",
+        fencing_token=1,
+        lease_owner="worker-1",
+    )
+    ParserRun.create(
+        id="run-new",
+        doc_id="doc-new",
+        chunk_set_id="chunk-new",
+        idempotency_key="parser-key-new",
+        source_hash="b" * 64,
+        source_format="DOC",
+        source_fingerprint="c" * 64,
+        config_fingerprint="d" * 64,
+        parser_fingerprint="e" * 64,
+        parser_name="synthetic",
+        parser_version="1",
+        backend="synthetic",
+        schema_version="1",
+        lifecycle="READY",
+        staged_chunk_count=1,
+    )
+
+    api, dataset_service = _isolated_api(monkeypatch)
+    monkeypatch.setattr(api, "_load_catalog", lambda: pytest.fail("published Catalog was read"))
+    assert api.list_folders("tenant-1")["documents"] == []
+    assert asyncio.run(api.search("tenant-1", "question", scope={"mode": "all"}))["chunks"] == []
+
+    class Activator:
+        def activate(self, *, document_id, parser_run_id, chunk_set_id, expected_active_chunk_set_id):
+            assert (document_id, parser_run_id, chunk_set_id, expected_active_chunk_set_id) == (
+                "doc-new", "run-new", "chunk-new", None
+            )
+            changed = Document.update(active_chunk_set_id=chunk_set_id).where(
+                (Document.id == document_id) & (Document.active_chunk_set_id.is_null(True))
+            ).execute()
+            assert changed == 1
+
+    ingestion.activate_indexed_version(
+        "job-new",
+        fencing_token=1,
+        result=ingestion.IndexReadyResult("run-new", "chunk-new"),
+        expected_active_chunk_set_id=None,
+        activator=Activator(),
+    )
+    assert DocmindSourceDocument.get_by_id(mapping.id).active_source_version_id == "version-new"
+    assert api.list_folders("tenant-1")["documents"] == []
+
+    ingestion.record_worker_status(
+        "job-new",
+        worker_id="worker-1",
+        version_id="version-new",
+        fencing_token=1,
+        status="CLEANED",
+    )
+    assert api.list_folders("tenant-1")["documents"] == []
+    ingestion.record_parser_cleanup("job-new", succeeded=True)
+    assert DocmindIngestionJob.get_by_id("job-new").lifecycle_state == "COMPLETE"
+    listing = api.list_folders("tenant-1")
+    assert [row["id"] for row in listing["documents"]] == ["doc-new"]
+    assert DocmindProject.get_by_id("project-1").active_version_id == "stale-published-catalog"
+
+    calls = []
+
+    async def recall(_tenant_id, request, *, candidate_mode):
+        calls.append((candidate_mode, request["doc_ids"]))
+        return True, {"chunks": [{
+            "chunk_id": "chunk-1", "doc_id": "doc-new", "kb_id": "dataset-1",
+            "parse_run_id": "run-new", "chunk_set_id": "chunk-new", "content": "new indexed text",
+        }]}
+
+    class Reranker:
+        def similarity(self, _question, _texts):
+            return [0.9], 1
+
+    monkeypatch.setattr(dataset_service, "search_datasets", recall, raising=False)
+    monkeypatch.setattr(api, "_rerank_model", lambda _catalog: Reranker())
+    found = asyncio.run(api.search("tenant-1", "question", scope={"mode": "all"}))
+    assert [row["doc_id"] for row in found["chunks"]] == ["doc-new"]
+    assert calls == [("bm25", ["doc-new"]), ("dense", ["doc-new"])]
+
+    DocmindSourceDocument.update(deleted_at="2026-09-23 00:00:00").where(DocmindSourceDocument.id == mapping.id).execute()
+    assert api.list_folders("tenant-1")["documents"] == []
+    assert asyncio.run(api.search("tenant-1", "question", scope={"mode": "all"}))["chunks"] == []
+    assert DocmindProject.get_by_id("project-1").active_version_id == "stale-published-catalog"
+
+    DocmindSourceVersion.create(
+        id="version-late",
+        source_document_id=mapping.id,
+        document_id="doc-new",
+        ciphertext_sha256="f" * 64,
+        ciphertext_size=43,
+        source_mtime_ns=2,
+        lifecycle_state="DISCOVERED",
+    )
+    DocmindIngestionJob.create(
+        id="job-late",
+        project_id="project-1",
+        source_id="home",
+        source_document_id=mapping.id,
+        document_id="doc-new",
+        version_id="version-late",
+        idempotency_key="key-late",
+        lifecycle_state="PARSING",
+        fencing_token=2,
+    )
+    with pytest.raises(ingestion.DocmindIngestionError, match="DOCMIND_INGESTION_SOURCE_CHANGED"):
+        ingestion.activate_indexed_version(
+            "job-late",
+            fencing_token=2,
+            result=ingestion.IndexReadyResult("run-new", "chunk-new"),
+            expected_active_chunk_set_id="chunk-new",
+            activator=types.SimpleNamespace(activate=lambda **_kwargs: pytest.fail("deleted source activated")),
+        )
+    assert api.list_folders("tenant-1")["documents"] == []
 
 
 def test_integrated_search_rechecks_tombstone_after_rerank(source_db, monkeypatch):

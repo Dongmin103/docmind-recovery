@@ -287,6 +287,7 @@ def _load_search_service(monkeypatch: pytest.MonkeyPatch, environment):
     services = types.ModuleType("api.apps.services")
     services.__path__ = []
     services.dataset_api_service = dataset_api_service
+    services.docmind_source_projection_service = SimpleNamespace()
     db_services = types.ModuleType("api.db.services")
     db_services.__path__ = []
     db_services.docmind_catalog_service = SimpleNamespace()
@@ -300,6 +301,7 @@ def _load_search_service(monkeypatch: pytest.MonkeyPatch, environment):
         "api.apps": apps,
         "api.apps.services": services,
         dataset_api_service.__name__: dataset_api_service,
+        "api.apps.services.docmind_source_projection_service": services.docmind_source_projection_service,
         "api.db.services": db_services,
         "api.db.services.docmind_document_path_service": SimpleNamespace(document_relative_paths=lambda *_args: {}),
         "api.db.services.document_service": SimpleNamespace(DocumentService=object),
@@ -309,6 +311,7 @@ def _load_search_service(monkeypatch: pytest.MonkeyPatch, environment):
     }
     for name, module in stubs.items():
         monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delenv("DOCMIND_CATALOG_DB_PRIMARY_ENABLED", raising=False)
 
     search_service = _load_module(
         f"docmind_phase5_search_under_test_{uuid4().hex}",
