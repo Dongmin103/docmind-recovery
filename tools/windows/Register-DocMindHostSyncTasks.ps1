@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$ConfigPath,
-    [switch]$EnableDiscovery
+    [switch]$AllowFullScan
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,6 +11,9 @@ $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($config.PSObject.Properties.Name -notcontains 'sources' -or @($config.sources).Count -eq 0) { throw 'No configured sources are available.' }
+if (-not $AllowFullScan -and ($config.PSObject.Properties.Name -notcontains 'initial_scan_on_startup' -or [bool]$config.initial_scan_on_startup)) {
+    throw 'initial_scan_on_startup must be false before registering observation-only tasks.'
+}
 $sourceIds = @{}
 foreach ($source in @($config.sources)) {
     if ([string]::IsNullOrWhiteSpace([string]$source.source_id) -or [string]::IsNullOrWhiteSpace([string]$source.root)) { throw 'Every configured source needs an ID and root.' }
@@ -25,7 +28,21 @@ if ($configFile.Contains('"') -or $PSScriptRoot.Contains('"')) { throw 'Task pat
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -RestartInterval (New-TimeSpan -Minutes 15) -RestartCount 8 -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+function New-DocMindTaskSettings {
+    param([switch]$Disabled)
+    $options = @{
+        StartWhenAvailable = $true
+        MultipleInstances = 'IgnoreNew'
+        RestartInterval = (New-TimeSpan -Minutes 15)
+        RestartCount = 8
+        ExecutionTimeLimit = [TimeSpan]::Zero
+        AllowStartIfOnBatteries = $true
+        DontStopIfGoingOnBatteries = $true
+    }
+    if ($Disabled) { $options.Disable = $true }
+    return New-ScheduledTaskSettingsSet @options
+}
 
 function New-DocMindRepeatedTrigger {
     param([int]$Minutes)
@@ -35,20 +52,22 @@ function New-DocMindRepeatedTrigger {
 }
 
 function Register-DocMindTask {
-    param([string]$Name, [string]$Script, [string]$Arguments, [int]$RepeatMinutes)
+    param([string]$Name, [string]$Script, [string]$Arguments, [int]$RepeatMinutes, [switch]$AtLogon, [switch]$Disabled)
     $scriptPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Script))
     if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) { throw 'Task script is unavailable.' }
     $taskArguments = '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "{0}" -ConfigPath "{1}" {2}' -f $scriptPath, $configFile, $Arguments
     $action = New-ScheduledTaskAction -Execute $shell -Argument $taskArguments -WorkingDirectory $PSScriptRoot
-    $trigger = New-DocMindRepeatedTrigger -Minutes $RepeatMinutes
-    [void](Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force)
-    [pscustomobject]@{ task_name = $Name; principal = $identity; logon_type = 'Interactive'; repeat_minutes = $RepeatMinutes; source_count = $sourceIds.Count }
+    $triggers = @(New-DocMindRepeatedTrigger -Minutes $RepeatMinutes)
+    if ($AtLogon) { $triggers += New-ScheduledTaskTrigger -AtLogOn -User $identity }
+    $settings = New-DocMindTaskSettings -Disabled:$Disabled
+    [void](Register-ScheduledTask -TaskName $Name -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Force)
+    [pscustomobject]@{ task_name = $Name; principal = $identity; logon_type = 'Interactive'; repeat_minutes = $RepeatMinutes; at_logon = [bool]$AtLogon; enabled = -not [bool]$Disabled; source_count = $sourceIds.Count }
 }
 
-$worker = Register-DocMindTask -Name 'DocMind Host Worker' -Script 'Start-DocMindUEncryptorHostWorker.ps1' -Arguments '' -RepeatMinutes 15
-$watchArguments = if ($EnableDiscovery) { '-EnableDiscovery' } else { '' }
-$watcher = Register-DocMindTask -Name 'DocMind Source Watcher' -Script 'Watch-DocMindEncryptedSources.ps1' -Arguments $watchArguments -RepeatMinutes 15
-$reconciliation = Register-DocMindTask -Name ([string]$plan.task_name) -Script 'Invoke-DocMindSourceReconciliation.ps1' -Arguments '-Reason scheduled' -RepeatMinutes ([int]$plan.repeat_every_minutes)
+$worker = Register-DocMindTask -Name 'DocMind Host Worker' -Script 'Start-DocMindUEncryptorHostWorker.ps1' -Arguments '' -RepeatMinutes 15 -AtLogon
+$watchArguments = if ($AllowFullScan) { '-EnableDiscovery' } else { '' }
+$watcher = Register-DocMindTask -Name 'DocMind Source Watcher' -Script 'Watch-DocMindEncryptedSources.ps1' -Arguments $watchArguments -RepeatMinutes 15 -AtLogon
+$reconciliation = Register-DocMindTask -Name ([string]$plan.task_name) -Script 'Invoke-DocMindSourceReconciliation.ps1' -Arguments '-Reason scheduled' -RepeatMinutes ([int]$plan.repeat_every_minutes) -Disabled:(-not $AllowFullScan)
 $worker
 $watcher
 $reconciliation
