@@ -130,10 +130,12 @@ Register the current Windows user's logon task once:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\Install-DocMindWindowsDevKeepAlive.ps1
 ```
 
-The task runs `wsl.exe -d Ubuntu --exec /bin/sleep infinity` without a visible
-window. It keeps Ubuntu running while this Windows user is logged on, has no
-three-day execution limit, and starts at each logon. It does not run Compose,
-alter containers, or touch volumes. Confirm with:
+The task runs a hidden PowerShell watchdog that holds
+`wsl.exe -d Ubuntu --exec /bin/sleep infinity` open. It restarts the WSL client
+after an unexpected exit, and Task Scheduler restarts the watchdog if it fails.
+It keeps Ubuntu running while this Windows user is logged on, has no three-day
+execution limit, and starts at each logon. It does not run Compose, alter
+containers, or touch volumes. Confirm with:
 
 ```powershell
 Get-ScheduledTask -TaskName 'DocMind Windows Dev WSL KeepAlive' |
