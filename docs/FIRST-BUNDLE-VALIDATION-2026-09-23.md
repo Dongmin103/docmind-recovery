@@ -36,7 +36,10 @@ product or production rollout complete.
 ## Actual runtime
 
 The app image built and deployed for this bundle is
-`sha256:33b94b2af39bbfd40e350d1cbcd587abd08e90f926e2a645868f05395416abb9`.
+`sha256:f736b88384a16c329316bc892a1bbdec06e00e4b1fed029d994ff7b41ffb7b96`.
+The earlier bundle checkpoint used
+`sha256:33b94b2af39bbfd40e350d1cbcd587abd08e90f926e2a645868f05395416abb9`;
+the final app build additionally includes restart session recovery.
 The preceding image is retained as
 `docmind-ragflow:rollback-20260923-pre-first-bundle`.
 
@@ -136,8 +139,11 @@ the page and exposes the failed request to the UI; normal query retries/polling
 can recover. Explicit authentication rejection or disabled shared mode restores
 the normal login behavior. Failed API requests are not automatically replayed,
 including document mutations. The new production build passed in 1m27s;
-deployment and a controlled live browser recovery check are pending at this
-checkpoint.
+the startup agent deployed it and verified HTML 200 and shared-session code 0 /
+ready true. Before the app-only recreation, the host had zero plaintext job
+directories and no uEncryptor process. Worker/watcher tasks were paused then
+restored to Running; midnight reconciliation stayed disabled. A controlled live
+browser recovery check is pending at this checkpoint.
 
 ## Remaining boundaries
 
