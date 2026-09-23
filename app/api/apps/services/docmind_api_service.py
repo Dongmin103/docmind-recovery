@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from api.apps.services import dataset_api_service
+from api.apps.services import dataset_api_service, docmind_source_projection_service
 from api.db.joint_services.tenant_model_service import get_model_config_from_provider_instance
 from api.db.services import docmind_catalog_service
 from api.db.services.docmind_document_path_service import document_relative_paths
@@ -47,6 +47,11 @@ class Catalog:
     source: str = "static"
     version_id: str | None = None
     folder_tree: tuple[dict[str, Any], ...] = ()
+    document_paths: dict[str, str] | None = None
+    document_names: dict[str, str] | None = None
+    document_version_ids: dict[str, str] | None = None
+    document_parser_run_ids: dict[str, str] | None = None
+    document_chunk_set_ids: dict[str, str] | None = None
 
 
 class DocmindCatalogNotInitializedError(RuntimeError):
@@ -138,6 +143,30 @@ def _load_catalog() -> Catalog:
     )
 
 
+def _load_serving_catalog(tenant_id: str) -> Catalog:
+    if (
+        os.environ.get("DOCMIND_CATALOG_DB_PRIMARY_ENABLED") == "1"
+        and os.environ.get("DOCMIND_EMERGENCY_STATIC_FALLBACK") != "1"
+    ):
+        projection = docmind_source_projection_service.load(tenant_id)
+        if projection is None:
+            raise DocmindCatalogNotInitializedError(DocmindCatalogNotInitializedError.code)
+        return Catalog(
+            dataset_id=projection.dataset_id,
+            root_uri=f"docmind://sources/{projection.project_id}/",
+            folders=projection.folders,
+            source="sources",
+            version_id=projection.version_id,
+            folder_tree=projection.folder_tree,
+            document_paths=projection.document_paths,
+            document_names=projection.document_names,
+            document_version_ids=projection.document_version_ids,
+            document_parser_run_ids=projection.document_parser_run_ids,
+            document_chunk_set_ids=projection.document_chunk_set_ids,
+        )
+    return _load_catalog()
+
+
 def _catalog_version_id(catalog: Catalog) -> str:
     if catalog.version_id:
         return catalog.version_id
@@ -203,6 +232,19 @@ def _document_options(catalog: Catalog) -> list[dict[str, str]]:
     if not document_ids:
         return []
 
+    if catalog.source == "sources":
+        paths = catalog.document_paths or {}
+        names = catalog.document_names or {}
+        return [
+            {
+                "id": document_id,
+                "name": names[document_id],
+                "folder_id": folder_by_document[document_id],
+                "relative_path": paths[document_id],
+            }
+            for document_id in document_ids
+        ]
+
     rows = {str(row.id): row for row in DocumentService.get_by_ids(document_ids)}
     relative_paths = document_relative_paths(catalog.dataset_id, set(document_ids))
     options: list[dict[str, str]] = []
@@ -222,7 +264,7 @@ def _document_options(catalog: Catalog) -> list[dict[str, str]]:
 
 
 def list_folders(tenant_id: str) -> dict[str, Any]:
-    catalog = _load_catalog()
+    catalog = _load_serving_catalog(tenant_id)
     if not KnowledgebaseService.accessible(catalog.dataset_id, tenant_id):
         raise PermissionError("DocMind catalog dataset is not accessible")
     if catalog.folder_tree:
@@ -231,6 +273,8 @@ def list_folders(tenant_id: str) -> dict[str, Any]:
             "catalog_source": catalog.source,
             "catalog_version_id": _catalog_version_id(catalog),
             "hierarchical": True,
+            "source_sync": catalog.source == "sources",
+            "can_upload": catalog.source != "sources",
             "documents": _document_options(catalog),
             "folders": [
                 {**row, "document_count": len(catalog.folders.get(str(row["id"]), ()))}
@@ -242,6 +286,8 @@ def list_folders(tenant_id: str) -> dict[str, Any]:
         "catalog_source": catalog.source,
         "catalog_version_id": _catalog_version_id(catalog),
         "hierarchical": False,
+        "source_sync": False,
+        "can_upload": True,
         "documents": _document_options(catalog),
         "folders": [
             {"id": folder_id, "name": _folder_display_name(folder_id), "document_count": len(doc_ids)}
@@ -342,6 +388,27 @@ def _folder_by_document(catalog: Catalog) -> dict[str, str]:
     return {doc_id: folder_id for folder_id, doc_ids in catalog.folders.items() for doc_id in doc_ids}
 
 
+def _validate_source_candidates(tenant_id: str, catalog: Catalog, candidates: list[Candidate]) -> None:
+    if catalog.source != "sources" or not candidates:
+        return
+    fresh = docmind_source_projection_service.load(tenant_id)
+    if fresh is None:
+        raise RuntimeError("DOCMIND_SOURCE_CHANGED")
+    for candidate in candidates:
+        document_id = str(candidate.chunk["doc_id"])
+        if (
+            fresh.document_version_ids.get(document_id)
+            != (catalog.document_version_ids or {}).get(document_id)
+            or fresh.document_parser_run_ids.get(document_id)
+            != (catalog.document_parser_run_ids or {}).get(document_id)
+            or fresh.document_chunk_set_ids.get(document_id)
+            != (catalog.document_chunk_set_ids or {}).get(document_id)
+            or fresh.document_paths.get(document_id)
+            != (catalog.document_paths or {}).get(document_id)
+        ):
+            raise RuntimeError("DOCMIND_SOURCE_CHANGED")
+
+
 async def _lane_candidates(
     tenant_id: str,
     question: str,
@@ -390,6 +457,11 @@ async def _lane_candidates(
             raise RuntimeError(f"DOCMIND_{candidate_mode.upper()}_SCOPE_ESCAPE")
         if raw_chunk.get("kb_id") not in (None, "", catalog.dataset_id):
             raise RuntimeError(f"DOCMIND_{candidate_mode.upper()}_SCOPE_ESCAPE")
+        if catalog.source == "sources" and (
+            raw_chunk.get("chunk_set_id") != (catalog.document_chunk_set_ids or {}).get(doc_id)
+            or raw_chunk.get("parse_run_id") != (catalog.document_parser_run_ids or {}).get(doc_id)
+        ):
+            raise RuntimeError(f"DOCMIND_{candidate_mode.upper()}_SOURCE_VERSION_ESCAPE")
         seen_chunks.add(chunk_id)
         candidates.append(Candidate(folder_id=document_folders[doc_id], chunk=raw_chunk, rerank_text=text))
     return candidates
@@ -519,7 +591,7 @@ async def search(
     project_id: str | None = None,
     scope: object,
 ) -> dict[str, Any]:
-    catalog = _load_catalog()
+    catalog = _load_serving_catalog(tenant_id)
     if not KnowledgebaseService.accessible(catalog.dataset_id, tenant_id):
         raise PermissionError("DocMind catalog dataset is not accessible")
     if project_id is not None and (not isinstance(project_id, str) or project_id != catalog.dataset_id):
@@ -553,6 +625,8 @@ async def search(
         result["timings_ms"]["recall"] = round((recalled_at - recall_started_at) * 1000, 2)
         result["timings_ms"]["total"] = round((recalled_at - started_at) * 1000, 2)
         return result
+
+    _validate_source_candidates(tenant_id, catalog, candidates)
 
     rerank_candidates = sorted(
         candidates,
@@ -598,10 +672,16 @@ async def search(
         chunk["folder_id"] = candidate.folder_id
         ranked_chunks.append(chunk)
 
-    relative_paths = await asyncio.to_thread(
-        document_relative_paths,
-        catalog.dataset_id,
-        {chunk["doc_id"] for chunk in ranked_chunks},
+    _validate_source_candidates(tenant_id, catalog, rerank_candidates)
+
+    relative_paths = (
+        catalog.document_paths or {}
+        if catalog.source == "sources"
+        else await asyncio.to_thread(
+            document_relative_paths,
+            catalog.dataset_id,
+            {chunk["doc_id"] for chunk in ranked_chunks},
+        )
     )
     for chunk in ranked_chunks:
         chunk.pop("document_relative_path", None)

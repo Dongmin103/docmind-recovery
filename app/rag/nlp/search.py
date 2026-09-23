@@ -857,6 +857,8 @@ class Dealer:
                 "content_ltks": chunk["content_ltks"],
                 "content_with_weight": chunk.get("content_with_weight", ""),
                 "doc_id": did,
+                "parse_run_id": chunk.get("parse_run_id"),
+                "chunk_set_id": chunk.get("chunk_set_id"),
                 "docnm_kwd": dnm,
                 "kb_id": chunk["kb_id"],
                 "important_kwd": chunk.get("important_kwd", []),

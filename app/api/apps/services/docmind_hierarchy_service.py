@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import unicodedata
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from api.apps.services import (
     docmind_canary_policy,
     docmind_hierarchy_draft_state,
     docmind_registration_service,
+    docmind_source_projection_service,
 )
 from api.db import FileType
 from api.db.db_models import (
@@ -605,6 +607,20 @@ async def import_local_folder(
 
 
 def list_hierarchy(tenant_id: str) -> dict[str, Any]:
+    if (
+        os.environ.get("DOCMIND_CATALOG_DB_PRIMARY_ENABLED") == "1"
+        and os.environ.get("DOCMIND_EMERGENCY_STATIC_FALLBACK") != "1"
+    ):
+        projection = docmind_source_projection_service.load(tenant_id)
+        if projection is None:
+            raise DocmindHierarchyError("DOCMIND_PROJECT_NOT_FOUND")
+        return {
+            "project_id": projection.project_id,
+            "dataset_id": projection.dataset_id,
+            "source_root_file_id": projection.root_id,
+            "source_sync": True,
+            "nodes": list(projection.hierarchy_nodes),
+        }
     context = _context(tenant_id)
     root = _source_root(context)
     nodes = _tree_rows(root, context.project.dataset_id)
