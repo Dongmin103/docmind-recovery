@@ -105,7 +105,8 @@ proves observation/deduplication, not a new decrypt/index activation.
 
 ## Regression evidence
 
-- Frontend: 25 focused tests passed; lint passed on changed files.
+- Frontend: 50 focused tests in eight suites passed, including shared-session
+  recovery; lint passed on changed files.
 - Backend C-search, source projection and Phase5: 38 tests passed with the app's
   Python 3.13.11 in isolated SQLite/fake-index environments.
 - The source transition test invokes real ingestion activation and host/parser
@@ -118,6 +119,25 @@ proves observation/deduplication, not a new decrypt/index activation.
 - Full frontend typecheck is **not green**: 235 diagnostics outside the changed
   DocMind files were reported. Changed-file diagnostics were zero; the production
   build passed. The full project typecheck remains follow-up work.
+
+## Restart authentication follow-up
+
+The intentional Docker restart for NVIDIA Container Toolkit activation exposed
+a second startup issue in the live browser: an authenticated library request
+received 401 and the common client redirected to Sign in. At 10:18:57 KST the
+backend logged MySQL error 1053 (`Server shutdown in progress`) while loading the
+session user. The Redis signing key persisted with no expiry; the shared-user
+resolver and generationless seed do not rotate that user's token. Once MySQL was
+available, authenticated API calls and the shared-session endpoint returned 200.
+
+Commit `2fdfa6f` adds single-flight session recovery only after the server has
+confirmed shared mode on the current DocMind page. A transient outage retains
+the page and exposes the failed request to the UI; normal query retries/polling
+can recover. Explicit authentication rejection or disabled shared mode restores
+the normal login behavior. Failed API requests are not automatically replayed,
+including document mutations. The new production build passed in 1m27s;
+deployment and a controlled live browser recovery check are pending at this
+checkpoint.
 
 ## Remaining boundaries
 
