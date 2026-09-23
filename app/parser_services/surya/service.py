@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(
@@ -79,8 +80,13 @@ class SuryaEngine:
         self.gpu_device_visible = self._gpu_device_visible()
         self.gpu_offloaded_layers: int | None = None
         self.gpu_total_layers: int | None = None
+        self._gpu_offload_handle = None
+        self._gpu_execution_handle = None
+        self._gpu_execution_pid: int | None = None
         self._llama_log_path = Path.home() / ".cache/datalab/surya/llamacpp_server.log"
+        self._llama_sentinel_path = self._llama_log_path.with_name("llamacpp_server.json")
         self._llama_log_start = self._llama_log_path.stat().st_size if self._llama_log_path.exists() else 0
+        self._proc_root = Path("/proc")
         self.max_source_bytes = int(os.environ.get("SURYA_SERVICE_MAX_SOURCE_BYTES", str(512 * 1024 * 1024)))
         self.max_media_bytes = int(os.environ.get("SURYA_SERVICE_MAX_MEDIA_BYTES", str(32 * 1024 * 1024)))
         self.max_pages = int(os.environ.get("SURYA_SERVICE_MAX_PAGES", "2000"))
@@ -132,7 +138,10 @@ class SuryaEngine:
     def _verify_gpu_offload_from_log(self) -> None:
         # Surya 0.22.1 spawns llama-server lazily. A requested layer count or a
         # visible device does not prove that this process loaded weights on GPU.
-        if self.backend != "llamacpp" or not self.gpu_layers_requested or self.gpu_offloaded_layers is not None:
+        handle = getattr(getattr(self.manager, "backend", None), "handle", None)
+        if self.backend != "llamacpp" or not self.gpu_layers_requested or handle is None:
+            return
+        if self._gpu_offload_handle is not None:
             return
         try:
             with self._llama_log_path.open("rb") as log_file:
@@ -147,8 +156,80 @@ class SuryaEngine:
         if offloaded > 0 and total > 0:
             self.gpu_offloaded_layers = offloaded
             self.gpu_total_layers = total
+            self._gpu_offload_handle = handle
+
+    @staticmethod
+    def _argument_value(arguments: list[str], flag: str) -> str | None:
+        try:
+            return arguments[arguments.index(flag) + 1]
+        except (ValueError, IndexError):
+            return None
+
+    def _gpu_execution_process_current(self, handle: Any) -> bool:
+        if handle is None or handle is not self._gpu_execution_handle or self._gpu_execution_pid is None:
+            return False
+        try:
+            sentinel = json.loads(self._llama_sentinel_path.read_text(encoding="utf-8"))
+            return (
+                int(sentinel["pid"]) == self._gpu_execution_pid
+                and os.path.samefile(self._proc_root / str(self._gpu_execution_pid) / "exe", settings.LLAMA_CPP_BINARY)
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def _verify_gpu_execution_from_process(self) -> None:
+        # b10718 may omit layer counts at normal log verbosity. Match the
+        # Surya-spawned llama-server child to NVML's CUDA compute PID after an
+        # inference call; this proves GPU execution, not a layer offload count.
+        if self.backend != "llamacpp" or not self.gpu_layers_requested or self.gpu_layers_requested <= 0:
+            return
+        handle = getattr(getattr(self.manager, "backend", None), "handle", None)
+        if handle is None or not getattr(handle, "spawned_by_us", False):
+            return
+        if self._gpu_execution_process_current(handle):
+            return
+        self._gpu_execution_handle = None
+        self._gpu_execution_pid = None
+        try:
+            sentinel = json.loads(self._llama_sentinel_path.read_text(encoding="utf-8"))
+            pid = int(sentinel["pid"])
+            port = urlparse(handle.base_url).port
+            if pid <= 0 or sentinel.get("backend") != "llamacpp" or sentinel.get("port") != port:
+                return
+            executable = self._proc_root / str(pid) / "exe"
+            if not os.path.samefile(executable, settings.LLAMA_CPP_BINARY):
+                return
+            arguments = [os.fsdecode(value) for value in (self._proc_root / str(pid) / "cmdline").read_bytes().split(b"\0") if value]
+            if (
+                self._argument_value(arguments, "-m") != self.model_path
+                or self._argument_value(arguments, "--mmproj") != self.mmproj_path
+                or self._argument_value(arguments, "-ngl") != str(self.gpu_layers_requested)
+                or self._argument_value(arguments, "--port") != str(port)
+            ):
+                return
+            binary = shutil.which("nvidia-smi")
+            if not binary:
+                return
+            result = subprocess.run(
+                [binary, "--query-compute-apps=pid", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if result.returncode == 0 and str(pid) in {line.strip() for line in result.stdout.splitlines()}:
+                self._gpu_execution_handle = handle
+                self._gpu_execution_pid = pid
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            return
 
     def manifest(self) -> dict[str, Any]:
+        handle = getattr(getattr(self.manager, "backend", None), "handle", None)
+        offload_verified = handle is not None and handle is self._gpu_offload_handle
+        execution_verified = self._gpu_execution_process_current(handle)
+        if handle is self._gpu_execution_handle and not execution_verified:
+            self._gpu_execution_handle = None
+            self._gpu_execution_pid = None
         return {
             "status": "ready",
             "parser_name": "surya",
@@ -157,9 +238,11 @@ class SuryaEngine:
             "backend": self.backend,
             "gpu_layers_requested": self.gpu_layers_requested,
             "gpu_device_visible": self.gpu_device_visible,
-            "gpu_offload_verified": self.gpu_offloaded_layers is not None,
-            "gpu_offloaded_layers": self.gpu_offloaded_layers,
-            "gpu_total_layers": self.gpu_total_layers,
+            "gpu_execution_verified": execution_verified,
+            "gpu_execution_proof_source": "nvidia_smi_compute_pid" if execution_verified else None,
+            "gpu_offload_verified": offload_verified,
+            "gpu_offloaded_layers": self.gpu_offloaded_layers if offload_verified else None,
+            "gpu_total_layers": self.gpu_total_layers if offload_verified else None,
             "task_kinds": ["pdf_document_parse", "office_media_parse"],
             "concurrency": 1,
             "model_files_verified": True,
@@ -255,6 +338,7 @@ class SuryaEngine:
                         with self.lock:
                             results = self.predictor(images, full_page=True)
                             self._verify_gpu_offload_from_log()
+                            self._verify_gpu_execution_from_process()
                         LOGGER.info(
                             "surya_inference_completed parse_run_id=%s pages=%s elapsed_seconds=%.3f",
                             parse_run_id,
@@ -364,6 +448,7 @@ class SuryaEngine:
                 try:
                     result = self.predictor([safe_image], full_page=True)[0]
                     self._verify_gpu_offload_from_log()
+                    self._verify_gpu_execution_from_process()
                 finally:
                     settings.SURYA_MAX_TOKENS_FULL_PAGE = full_page_max_tokens
                     settings.SURYA_INFERENCE_TIMEOUT_SECONDS = inference_timeout_seconds

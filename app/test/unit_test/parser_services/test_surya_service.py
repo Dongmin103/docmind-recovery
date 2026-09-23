@@ -7,6 +7,7 @@ import importlib.metadata
 import importlib.util
 import io
 import json
+import os
 import sys
 import threading
 import types
@@ -124,6 +125,7 @@ def test_gpu_health_requires_fresh_positive_cuda_offload_log_after_inference(mon
     engine = service.ENGINE
     engine.gpu_layers_requested = 99
     engine.gpu_device_visible = True
+    engine.manager = types.SimpleNamespace(backend=types.SimpleNamespace(handle=object()))
     engine._llama_log_path = tmp_path / "llamacpp_server.log"
     engine._llama_log_start = 0
 
@@ -157,6 +159,90 @@ def test_gpu_health_requires_fresh_positive_cuda_offload_log_after_inference(mon
     assert engine.manifest()["gpu_offload_verified"] is True
     assert engine.manifest()["gpu_offloaded_layers"] == 25
     assert engine.manifest()["gpu_total_layers"] == 25
+    engine.manager.backend.handle = object()
+    assert engine.manifest()["gpu_offload_verified"] is False
+    assert engine.manifest()["gpu_offloaded_layers"] is None
+
+
+def test_gpu_execution_requires_matching_spawned_cuda_compute_process(monkeypatch, tmp_path) -> None:
+    service = _load_service(monkeypatch, tmp_path)
+    engine = service.ENGINE
+    engine.gpu_layers_requested = 99
+    pid, port = 160, 8765
+    handle = types.SimpleNamespace(base_url=f"http://127.0.0.1:{port}/v1", spawned_by_us=True)
+    engine.manager = types.SimpleNamespace(backend=types.SimpleNamespace(handle=handle))
+    engine._llama_sentinel_path = tmp_path / "llamacpp_server.json"
+    engine._llama_sentinel_path.write_text(json.dumps({"pid": pid, "port": port, "backend": "llamacpp"}))
+    engine._proc_root = tmp_path / "proc"
+    proc = engine._proc_root / str(pid)
+    proc.mkdir(parents=True)
+    executable = tmp_path / "llama-server"
+    executable.write_bytes(b"binary")
+    os.link(executable, proc / "exe")
+    service.settings.LLAMA_CPP_BINARY = str(executable)
+    (proc / "cmdline").write_bytes(
+        b"/opt/llama/llama-server\0-m\0" + os.fsencode(engine.model_path)
+        + b"\0--mmproj\0" + os.fsencode(engine.mmproj_path)
+        + b"\0-ngl\099\0--port\08765\0"
+    )
+    monkeypatch.setattr(service.shutil, "which", lambda name: "/usr/bin/nvidia-smi" if name == "nvidia-smi" else None)
+    nvml = types.SimpleNamespace(returncode=0, stdout="161\n")
+    monkeypatch.setattr(service.subprocess, "run", lambda *_a, **_k: nvml)
+
+    assert engine.manifest()["gpu_execution_verified"] is False
+    engine._verify_gpu_execution_from_process()
+    assert engine.manifest()["gpu_execution_verified"] is False
+
+    nvml.stdout = "160\n"
+    engine._verify_gpu_execution_from_process()
+    assert engine.manifest()["gpu_execution_verified"] is True
+    assert engine.manifest()["gpu_execution_proof_source"] == "nvidia_smi_compute_pid"
+    assert engine.manifest()["gpu_offload_verified"] is False
+    assert engine.manifest()["gpu_offloaded_layers"] is None
+
+    nvml.stdout = ""
+    engine._verify_gpu_execution_from_process()  # Same handle keeps cached proof.
+    assert engine.manifest()["gpu_execution_verified"] is True
+    engine._llama_sentinel_path.write_text(json.dumps({"pid": 161, "port": port, "backend": "llamacpp"}))
+    assert engine.manifest()["gpu_execution_verified"] is False
+    engine._llama_sentinel_path.write_text(json.dumps({"pid": pid, "port": port, "backend": "llamacpp"}))
+    assert engine.manifest()["gpu_execution_verified"] is False  # A new inference must re-establish proof.
+    engine.manager.backend.handle = types.SimpleNamespace(base_url=handle.base_url, spawned_by_us=True)
+    assert engine.manifest()["gpu_execution_verified"] is False
+    assert engine.manifest()["gpu_execution_proof_source"] is None
+
+
+def test_gpu_execution_rejects_wrong_binary_port_or_requested_layers(monkeypatch, tmp_path) -> None:
+    service = _load_service(monkeypatch, tmp_path)
+    engine = service.ENGINE
+    engine.gpu_layers_requested = 99
+    engine.manager = types.SimpleNamespace(
+        backend=types.SimpleNamespace(handle=types.SimpleNamespace(base_url="http://127.0.0.1:8765/v1", spawned_by_us=True))
+    )
+    engine._llama_sentinel_path = tmp_path / "llamacpp_server.json"
+    engine._llama_sentinel_path.write_text(json.dumps({"pid": 160, "port": 8765, "backend": "llamacpp"}))
+    engine._proc_root = tmp_path / "proc"
+    proc = engine._proc_root / "160"
+    proc.mkdir(parents=True)
+    (proc / "exe").write_bytes(b"other-binary")
+    binary = tmp_path / "llama-server"
+    binary.write_bytes(b"expected-binary")
+    service.settings.LLAMA_CPP_BINARY = str(binary)
+    (proc / "cmdline").write_bytes(
+        b"/opt/llama/llama-server\0-m\0" + os.fsencode(engine.model_path)
+        + b"\0--mmproj\0" + os.fsencode(engine.mmproj_path)
+        + b"\0-ngl\00\0--port\08765\0"
+    )
+    monkeypatch.setattr(service.shutil, "which", lambda _name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(service.subprocess, "run", lambda *_a, **_k: types.SimpleNamespace(returncode=0, stdout="160\n"))
+    engine._verify_gpu_execution_from_process()
+    assert engine.manifest()["gpu_execution_verified"] is False
+    service.settings.LLAMA_CPP_BINARY = str(proc / "exe")
+    engine._verify_gpu_execution_from_process()
+    assert engine.manifest()["gpu_execution_verified"] is False
+    (proc / "cmdline").write_bytes((proc / "cmdline").read_bytes().replace(b"--port\08765", b"--port\08766").replace(b"-ngl\00", b"-ngl\099"))
+    engine._verify_gpu_execution_from_process()
+    assert engine.manifest()["gpu_execution_verified"] is False
 
 
 def test_gpu_health_rejects_zero_offload_or_stale_log(monkeypatch, tmp_path) -> None:
