@@ -104,6 +104,15 @@ The first full start downloads the pinned BGE-M3 model into the dedicated
 The UI is then available only from the same Windows machine at
 `http://127.0.0.1:18080`.
 
+For the generationless cloud-source validation path, pass the reviewed app
+image ID explicitly to `Test-DocMindGenerationlessE2EReadiness.ps1` using
+`-ExpectedAppImageId sha256:<64 lowercase hexadecimal characters>`. The check
+compares that ID with both the local `docmind-ragflow:windows-dev` image and the
+running app container. Pass `-HostWorkerConfigPath` for the ignored local host
+worker configuration. Registered sources may have an explicit empty `documents`
+array when no individual file has been approved yet; a missing array still
+fails readiness.
+
 The tracked defaults cap the six full-profile services at about 12.25 GiB in
 total so the stack can fit on the confirmed 16 GiB development host. Actual
 model and indexing load must still be observed; adjust the ignored env file if

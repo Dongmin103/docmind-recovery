@@ -2,7 +2,8 @@
 param(
     [string]$DockerCommand = 'docker',
     [string]$EnvFile,
-    [string]$HostWorkerConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG
+    [string]$HostWorkerConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG,
+    [string]$ExpectedAppImageId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,6 @@ $envPath = [IO.Path]::GetFullPath($EnvFile)
 $overlayPath = Join-Path $repoRoot 'app/docker/docker-compose-windows-dev-generationless-e2e.yml'
 $reportRoot = Join-Path $repoRoot '.local/uEncryptor2/reports'
 $jobRoot = Join-Path $repoRoot '.local/uEncryptor2/jobs'
-$expectedAppImageId = 'sha256:7c14804c8325729a8f72a5310518d8b0b206cd106ff25c2a4bc15b635f29c9dc'
 $blockers = [Collections.Generic.List[string]]::new()
 
 function Add-Blocker([string]$Code) {
@@ -69,6 +69,22 @@ function Get-ContainerHealth([string]$Name) {
     } catch {
         return 'missing'
     }
+}
+
+function Get-RunningContainerImageId([string]$Name) {
+    try {
+        $raw = & $DockerCommand inspect $Name 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+        $row = @($raw | ConvertFrom-Json)[0]
+        if (-not $row.State.Running) { return $null }
+        return [string]$row.Image
+    } catch {
+        return $null
+    }
+}
+
+if ($ExpectedAppImageId -cnotmatch '^sha256:[a-f0-9]{64}$') {
+    Add-Blocker 'EXPECTED_APP_IMAGE_DIGEST_INVALID'
 }
 
 $envValues = Read-EnvFile -LiteralPath $envPath
@@ -131,7 +147,8 @@ if ([string]::IsNullOrWhiteSpace($HostWorkerConfigPath)) {
             if (
                 [string]::IsNullOrWhiteSpace([string]$source.source_id) -or
                 -not (Test-Path -LiteralPath ([string]$source.root) -PathType Container) -or
-                @($source.documents).Count -eq 0
+                $source.PSObject.Properties.Name -notcontains 'documents' -or
+                $source.documents -isnot [array]
             ) { throw 'invalid host config' }
             foreach ($document in @($source.documents)) {
                 if (
@@ -171,11 +188,13 @@ if ($remainingHostJobs -ne 0) { Add-Blocker 'WINDOWS_PLAINTEXT_JOB_REMAINS' }
 
 if (-not (Test-Path -LiteralPath $overlayPath -PathType Leaf)) { Add-Blocker 'GENERATIONLESS_COMPOSE_OVERLAY_MISSING' }
 $appImageId = Get-ImageId 'docmind-ragflow:windows-dev'
+$runningAppImageId = Get-RunningContainerImageId 'docmind-windows-dev-ragflow-cpu-1'
 if ([string]::IsNullOrWhiteSpace($appImageId)) {
     Add-Blocker 'APP_IMAGE_MISSING'
-} elseif ($appImageId -ne $expectedAppImageId) {
+} elseif ($appImageId -ne $ExpectedAppImageId) {
     Add-Blocker 'APP_IMAGE_DIGEST_UNAPPROVED'
 }
+if ($runningAppImageId -ne $ExpectedAppImageId) { Add-Blocker 'APP_CONTAINER_IMAGE_MISMATCH' }
 $officeImageReady = -not [string]::IsNullOrWhiteSpace((Get-ImageId 'docmind-docling-office:2.115.0-legacy-doc-amd64'))
 if (-not $officeImageReady) { Add-Blocker 'DOCLING_OFFICE_IMAGE_MISSING' }
 
@@ -198,7 +217,8 @@ $result = [ordered]@{
     registered_source_count = $hostSourceCount
     approved_decryption_reports = $successfulReports
     remaining_windows_plaintext_jobs = $remainingHostJobs
-    app_image_approved = $appImageId -eq $expectedAppImageId
+    app_image_approved = $appImageId -eq $ExpectedAppImageId
+    app_container_image_approved = $runningAppImageId -eq $ExpectedAppImageId
     office_parser_image_ready = $officeImageReady
     infrastructure = $infraHealth
     blockers = @($blockers)
