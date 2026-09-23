@@ -5,23 +5,23 @@ import { useRevalidator, useRouteError } from 'react-router';
 
 export default function DocMindWorkspaceError() {
   const error = useRouteError();
-  const revalidator = useRevalidator();
+  const { state, revalidate } = useRevalidator();
   const [attempts, setAttempts] = useState(0);
   const recoverable =
     error instanceof DocMindSharedWorkspaceError && error.status >= 500;
 
   useEffect(() => {
-    if (!recoverable || revalidator.state !== 'idle' || attempts >= 12) return;
+    if (!recoverable || state !== 'idle' || attempts >= 12) return;
     const timer = window.setTimeout(() => {
       setAttempts((count) => count + 1);
-      void revalidator.revalidate();
+      void revalidate();
     }, 5000);
     return () => window.clearTimeout(timer);
-  }, [recoverable, revalidator.state, revalidator.revalidate, attempts]);
+  }, [recoverable, state, revalidate, attempts]);
 
   const retry = () => {
     setAttempts(0);
-    void revalidator.revalidate();
+    void revalidate();
   };
 
   if (!recoverable) return <FallbackComponent />;
@@ -38,7 +38,7 @@ export default function DocMindWorkspaceError() {
       <button
         type="button"
         onClick={retry}
-        disabled={revalidator.state !== 'idle'}
+        disabled={state !== 'idle'}
         className="mt-5 rounded border border-border-button px-4 py-2 disabled:opacity-50"
       >
         다시 연결
