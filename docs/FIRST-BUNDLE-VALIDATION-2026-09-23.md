@@ -108,7 +108,7 @@ proves observation/deduplication, not a new decrypt/index activation.
 
 ## Regression evidence
 
-- Frontend: 50 focused tests in eight suites passed, including shared-session
+- Frontend: 55 focused tests in nine suites passed, including shared-session
   recovery; lint passed on changed files.
 - Backend C-search, source projection and Phase5: 38 tests passed with the app's
   Python 3.13.11 in isolated SQLite/fake-index environments.
@@ -143,7 +143,21 @@ the startup agent deployed it and verified HTML 200 and shared-session code 0 /
 ready true. Before the app-only recreation, the host had zero plaintext job
 directories and no uEncryptor process. Worker/watcher tasks were paused then
 restored to Running; midnight reconciliation stayed disabled. A controlled live
-browser recovery check is pending at this checkpoint.
+browser recovery check subsequently found that navigation during the outage
+failed in the route loader with `DOCMIND_SHARED_WORKSPACE_INTERNAL_ERROR`. It did
+not redirect to Sign in, but remained in the generic error boundary after the
+database returned. This was observed by the Terra high verification agent,
+without a manual reload. The controlled MySQL-only outage lasted 35 seconds;
+the startup agent restored the database in a `finally` block and restored the
+two running source tasks.
+
+Commits `1a129b8` and `6c2e17d` add a dedicated transient workspace-loader error
+view with bounded automatic revalidation (12 attempts, five seconds apart), a
+manual reconnect control, and cleanup when the view unmounts. Other rendering
+errors and explicit authentication denials are not automatically retried.
+Network failure during initial workspace loading is classified into the same
+recoverable path. Live verification of this final loader change is pending at
+this checkpoint.
 
 ## Remaining boundaries
 
