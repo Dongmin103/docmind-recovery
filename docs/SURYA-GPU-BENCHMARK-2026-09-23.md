@@ -56,11 +56,10 @@ of the following observed facts:
 - GPU memory rose from about 133 MiB before model execution to 1,951 MiB.
 
 The `b10718` logger at its configured verbosity did not emit the old
-`load_tensors: offloaded N/M layers to GPU` line. Therefore the previous
-log-only `gpu_offload_verified` field stayed false and this benchmark does not
-claim a verified per-layer count. A runtime health change must report the
-observed CUDA execution separately from a known layer count before the GPU
-parser replaces the live CPU alias.
+`load_tensors: offloaded N/M layers to GPU` line. Therefore
+`gpu_offload_verified` remains false and this benchmark does not claim a
+verified per-layer count. The runtime health endpoint now reports separately
+whether a completed OCR was associated with its CUDA llama-server process.
 
 ## Parser contract check outside timed samples
 
@@ -70,13 +69,28 @@ a concurrent parse with `503 PARSER_SURYA_BUSY`. The isolated parser's `/tmp`
 and `/opt/surya/runtime` had no files after the check; the disposable client
 container used for the probe was removed.
 
+## Live alias activation
+
+After the isolated execution-health check passed, the live `surya-parser`
+alias was recreated with GPU image
+`sha256:7128dc32fb5e854ee5e2c8989164834dcd9746c1aecc86827894e78d9a5e3f45`.
+The CPU parser was not run in parallel against the same model mount. Before
+the first request, health correctly reported CUDA execution as unverified.
+
+One post-activation in-memory synthetic OCR then passed with non-empty output,
+health responsive during inference (0.001 seconds), and a second request
+rejected as `503 PARSER_SURYA_BUSY`. Health subsequently reported
+`gpu_execution_verified=true`, while still reporting `gpu_offload_verified=false`
+and null layer counts. No files remained under the parser temporary/runtime
+directories after the request.
+
 ## Limits and next step
 
 This is a small synthetic Office-media OCR measurement, not a production
 document corpus, p50/p95, capacity test, or SLA. It does not measure PDF,
 legacy DOC conversion, network transfer, indexing, or source decryption.
 
-Keep the CPU parser live until the new execution-health reporting is built and
-an isolated GPU parser reports a completed OCR with its CUDA process identity.
-Then perform one post-activation synthetic contract check through the live
-`surya-parser` alias before treating GPU acceleration as enabled for DocMind.
+GPU acceleration is enabled for the live `surya-parser` alias in this Windows
+development environment. The reported result is limited to synthetic
+Office-media OCR; measure representative document formats, concurrency, and
+p50/p95 before applying it as an operational performance target.
