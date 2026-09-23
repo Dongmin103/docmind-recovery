@@ -22,6 +22,7 @@ import {
   type RouteObject,
 } from 'react-router';
 import FallbackComponent from './components/fallback-component';
+import DocMindWorkspaceError from './pages/docmind/workspace-error';
 import { IS_ENTERPRISE } from './pages/admin/utils';
 import authorizationUtil from './utils/authorization-util';
 import { initializeDocMindSharedWorkspace } from './utils/docmind-shared-workspace';
@@ -165,6 +166,7 @@ const routeConfigOptions = [
     path: Routes.DocMind,
     Component: () => import('@/pages/docmind'),
     loader: initializeDocMindSharedWorkspace,
+    errorElement: <DocMindWorkspaceError />,
     layout: false,
   },
   {
@@ -455,7 +457,7 @@ const routeConfigOptions = [
 const wrapRoutes = (routes: LazyRouteConfig[]): RouteObject[] =>
   routes.map((item) => {
     const { Component, children, ...rest } = item;
-    const next: RouteObject = { ...rest, errorElement: <FallbackComponent /> };
+    const next: RouteObject = { errorElement: <FallbackComponent />, ...rest };
     if (Component) {
       next.Component = withLazyRoute(Component);
     }

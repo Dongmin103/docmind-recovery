@@ -58,7 +58,15 @@ export class DocMindSharedWorkspaceError extends Error {
 
 export const initializeDocMindSharedWorkspace = async () => {
   sharedWorkspaceConfirmed = false;
-  const response = await createSharedSession();
+  let response: Response;
+  try {
+    response = await createSharedSession();
+  } catch {
+    throw new DocMindSharedWorkspaceError(
+      '서버에 연결하지 못했습니다. 연결을 다시 시도합니다.',
+      503,
+    );
+  }
 
   // A normal authenticated RAGFlow deployment can keep using its login flow.
   if (response.status === 404) return null;

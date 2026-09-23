@@ -48,6 +48,16 @@ it('blocks the workspace when the configured shared user is unavailable', async 
   });
 });
 
+it('classifies an initial network outage as a recoverable workspace error', async () => {
+  jest
+    .spyOn(globalThis, 'fetch')
+    .mockRejectedValue(new TypeError('Failed to fetch'));
+  await expect(initializeDocMindSharedWorkspace()).rejects.toMatchObject({
+    name: 'DocMindSharedWorkspaceError',
+    status: 503,
+  });
+});
+
 it('coalesces expired shared-session recovery without replaying an API request', async () => {
   window.history.replaceState({}, '', '/docmind?view=library');
   const fetch = jest
