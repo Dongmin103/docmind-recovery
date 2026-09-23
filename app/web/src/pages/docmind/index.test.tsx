@@ -2,6 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 const mockSearchMutate = jest.fn();
+const mockRefetch = jest.fn();
+let mockCanAdminister = false;
+let mockFolderError = false;
+let mockHierarchyError = false;
+let mockRegistrationError = false;
 
 jest.mock('@tanstack/react-query', () => ({
   useMutation: (options: { mutationKey?: string[] }) => ({
@@ -20,7 +25,9 @@ jest.mock('@tanstack/react-query', () => ({
         data: {
           project_id: 'project-1',
           dataset_id: 'dataset-1',
-          can_administer: false,
+          can_administer: mockCanAdminister,
+          can_upload: false,
+          source_sync: true,
           documents: [
             {
               id: 'document-1',
@@ -34,7 +41,8 @@ jest.mock('@tanstack/react-query', () => ({
             { id: 'folder-2', name: '밸리데이션', document_count: 1 },
           ],
         },
-        isError: false,
+        isError: mockFolderError,
+        refetch: mockRefetch,
       };
     }
     if (options.queryKey?.[0] === 'docmind-hierarchy') {
@@ -53,10 +61,15 @@ jest.mock('@tanstack/react-query', () => ({
             },
           ],
         },
-        isError: false,
+        isError: mockHierarchyError,
+        refetch: mockRefetch,
       };
     }
-    return { data: { registrations: [] }, isError: false, refetch: jest.fn() };
+    return {
+      data: { registrations: [] },
+      isError: mockRegistrationError,
+      refetch: mockRefetch,
+    };
   },
 }));
 
@@ -102,9 +115,9 @@ jest.mock('./workspace-views', () => ({
 
 import DocMind from './index';
 
-function renderDocMind() {
+function renderDocMind(path = '/docmind') {
   return render(
-    <MemoryRouter initialEntries={['/docmind']}>
+    <MemoryRouter initialEntries={[path]}>
       <DocMind />
     </MemoryRouter>,
   );
@@ -117,7 +130,14 @@ function enterQuestion() {
 }
 
 describe('DocMind search scopes', () => {
-  beforeEach(() => mockSearchMutate.mockClear());
+  beforeEach(() => {
+    mockSearchMutate.mockClear();
+    mockRefetch.mockClear();
+    mockCanAdminister = false;
+    mockFolderError = false;
+    mockHierarchyError = false;
+    mockRegistrationError = false;
+  });
 
   it('searches all accessible documents by default', () => {
     renderDocMind();
@@ -175,5 +195,40 @@ describe('DocMind search scopes', () => {
     renderDocMind();
 
     expect(screen.queryByText('Catalog')).not.toBeInTheDocument();
+  });
+
+  it('keeps unverified direct uploads out of the cloud library', () => {
+    mockCanAdminister = true;
+    renderDocMind('/docmind?view=library');
+    expect(screen.queryByLabelText('등록할 문서')).not.toBeInTheDocument();
+    expect(screen.getByText(/문서 추가·수정은 All-in-One/)).toBeInTheDocument();
+  });
+
+  it('blocks search on a failed scope load and allows scope recovery', () => {
+    mockFolderError = true;
+    renderDocMind();
+    enterQuestion();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '검색 범위를 불러오지 못했습니다',
+    );
+    expect(screen.getByLabelText('검색 실행')).toBeDisabled();
+    fireEvent.submit(screen.getByLabelText('문서 검색 질문').closest('form')!);
+    expect(mockSearchMutate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('검색 범위 다시 불러오기'));
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a failed library request instead of an empty library and supports retry', () => {
+    mockCanAdminister = true;
+    mockHierarchyError = true;
+    mockRegistrationError = true;
+    renderDocMind('/docmind?view=library');
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    expect(screen.queryByText('문서가 없습니다.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('현재 진행하거나 반영할 작업이 없습니다.'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('자료 목록 새로고침'));
+    expect(mockRefetch).toHaveBeenCalledTimes(3);
   });
 });

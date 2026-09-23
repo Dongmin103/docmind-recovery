@@ -46,6 +46,11 @@ import WorkspaceShell from './workspace-shell';
 import './index.less';
 
 const RESULTS_PER_PAGE = 10;
+const DocMindKeys = {
+  folders: () => ['docmind-folders'] as const,
+  hierarchy: () => ['docmind-hierarchy'] as const,
+  registrations: () => ['docmind-registrations'] as const,
+};
 
 const InspectionNavigation = React.createContext<{
   view: DocMindSection;
@@ -264,18 +269,22 @@ export default function DocMind() {
   const [registrationFiles, setRegistrationFiles] = useState<File[]>([]);
 
   const folderCatalog = useQuery<DocMindFolderCatalog, Error>({
-    queryKey: ['docmind-folders'],
+    queryKey: DocMindKeys.folders(),
     queryFn: async () => {
       const { data } = await getDocMindFolders();
       if (data.code !== 0)
         throw new Error(data.message || '폴더 목록 조회 실패');
       return data.data as DocMindFolderCatalog;
     },
-    staleTime: 60_000,
+    staleTime: 10_000,
+    refetchInterval:
+      workspaceView === 'search' || workspaceView === 'library'
+        ? 10_000
+        : false,
   });
   const canAdminister = Boolean(folderCatalog.data?.can_administer);
   const hierarchyQuery = useQuery<DocMindHierarchy, Error>({
-    queryKey: ['docmind-hierarchy'],
+    queryKey: DocMindKeys.hierarchy(),
     queryFn: async () => {
       const { data } = await getDocMindHierarchy();
       if (data.code !== 0)
@@ -285,6 +294,8 @@ export default function DocMind() {
     enabled:
       canAdminister &&
       (workspaceView === 'search' || workspaceView === 'library'),
+    refetchInterval:
+      canAdminister && workspaceView === 'library' ? 10_000 : false,
   });
   const retrieval = useMutation<
     DocMindSearchResult,
@@ -300,7 +311,7 @@ export default function DocMind() {
     onMutate: () => setVisibleCount(RESULTS_PER_PAGE),
   });
   const registrationQuery = useQuery<DocMindRegistrationList, Error>({
-    queryKey: ['docmind-registrations'],
+    queryKey: DocMindKeys.registrations(),
     queryFn: async () => {
       const { data } = await getDocMindRegistrations();
       if (data.code !== 0)
@@ -348,6 +359,16 @@ export default function DocMind() {
     () => folderCatalog.data?.folders ?? [],
     [folderCatalog.data?.folders],
   );
+  const refreshLibrary = () => {
+    void Promise.all([
+      folderCatalog.refetch(),
+      hierarchyQuery.refetch(),
+      registrationQuery.refetch(),
+    ]);
+  };
+  const refreshFolders = () => {
+    void folderCatalog.refetch();
+  };
   const documentNodes = useMemo(
     () => folderCatalog.data?.documents ?? [],
     [folderCatalog.data?.documents],
@@ -412,7 +433,13 @@ export default function DocMind() {
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (!query.trim() || explicitScopeEmpty) return;
+    if (
+      !query.trim() ||
+      explicitScopeEmpty ||
+      folderCatalog.isError ||
+      folderCatalog.isPending
+    )
+      return;
     const scope: DocMindSearchScope =
       scopeMode === 'folders'
         ? { mode: scopeMode, folderIds: canonicalFolderIds }
@@ -451,6 +478,21 @@ export default function DocMind() {
         sharedWorkspace={folderCatalog.data?.workspace_mode === 'shared'}
       >
         <main className="flex h-full min-h-0 flex-col">
+          {folderCatalog.isError && (
+            <div role="alert" className="p-5 text-state-error">
+              <p>
+                검색 범위를 불러오지 못했습니다. 연결을 확인한 뒤 다시
+                시도하세요.
+              </p>
+              <button
+                type="button"
+                onClick={refreshFolders}
+                className="mt-2 rounded-lg border border-border-button px-3 py-2"
+              >
+                검색 범위 다시 불러오기
+              </button>
+            </div>
+          )}
           {workspaceView === 'document' && (
             <div className="min-h-0 flex-1" aria-label="문서 상세">
               {validInspection ? (
@@ -643,7 +685,11 @@ export default function DocMind() {
                     type="submit"
                     form="docmind-search"
                     disabled={
-                      !query.trim() || explicitScopeEmpty || retrieval.isPending
+                      !query.trim() ||
+                      explicitScopeEmpty ||
+                      retrieval.isPending ||
+                      folderCatalog.isError ||
+                      folderCatalog.isPending
                     }
                     className="grid size-11 place-items-center rounded-lg bg-accent-primary text-primary-foreground disabled:opacity-40"
                     aria-label="검색 실행"
@@ -711,45 +757,61 @@ export default function DocMind() {
                 <p className="mt-1 text-sm text-text-secondary">
                   인덱싱 완료 후 별도 발행 없이 검색됩니다.
                 </p>
-                <form
-                  onSubmit={submitRegistration}
-                  className="mt-6 grid gap-3 rounded-xl border border-border-button p-4 md:grid-cols-[14rem_minmax(0,1fr)_auto]"
+                <button
+                  type="button"
+                  onClick={refreshLibrary}
+                  className="mt-3 rounded-lg border border-border-button px-3 py-2 text-sm"
                 >
-                  <select
-                    value={registrationFolderId}
-                    onChange={(event) =>
-                      setRegistrationFolderId(event.target.value)
-                    }
-                    aria-label="등록할 폴더"
-                    className="h-10 rounded-md border border-border-button bg-bg-input px-3"
+                  자료 목록 새로고침
+                </button>
+                {folderCatalog.data?.can_upload === true ? (
+                  <form
+                    onSubmit={submitRegistration}
+                    className="mt-6 grid gap-3 rounded-xl border border-border-button p-4 md:grid-cols-[14rem_minmax(0,1fr)_auto]"
                   >
-                    {folders.map((folder) => (
-                      <option key={folder.id} value={folder.id}>
-                        {folder.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="file"
-                    multiple
-                    onChange={(event) =>
-                      setRegistrationFiles(Array.from(event.target.files ?? []))
-                    }
-                    aria-label="등록할 문서"
-                    className="h-10 rounded-md border border-border-button px-3 py-2 text-sm"
-                  />
-                  <button
-                    type="submit"
-                    disabled={
-                      !registrationFolderId ||
-                      !registrationFiles.length ||
-                      registrationUpload.isPending
-                    }
-                    className="rounded-lg bg-accent-primary px-4 py-2 text-primary-foreground disabled:opacity-40"
-                  >
-                    {registrationUpload.isPending ? '등록 중' : '문서 등록'}
-                  </button>
-                </form>
+                    <select
+                      value={registrationFolderId}
+                      onChange={(event) =>
+                        setRegistrationFolderId(event.target.value)
+                      }
+                      aria-label="등록할 폴더"
+                      className="h-10 rounded-md border border-border-button bg-bg-input px-3"
+                    >
+                      {folders.map((folder) => (
+                        <option key={folder.id} value={folder.id}>
+                          {folder.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={(event) =>
+                        setRegistrationFiles(
+                          Array.from(event.target.files ?? []),
+                        )
+                      }
+                      aria-label="등록할 문서"
+                      className="h-10 rounded-md border border-border-button px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      disabled={
+                        !registrationFolderId ||
+                        !registrationFiles.length ||
+                        registrationUpload.isPending
+                      }
+                      className="rounded-lg bg-accent-primary px-4 py-2 text-primary-foreground disabled:opacity-40"
+                    >
+                      {registrationUpload.isPending ? '등록 중' : '문서 등록'}
+                    </button>
+                  </form>
+                ) : (
+                  <p className="mt-4 text-sm text-text-secondary">
+                    문서 추가·수정은 All-in-One에서 진행하세요. 연결된 원본의
+                    처리 상태는 아래에서 확인할 수 있습니다.
+                  </p>
+                )}
                 {registrationUpload.isError && (
                   <p role="alert" className="mt-3 text-state-error">
                     {registrationUpload.error.message}
@@ -757,31 +819,47 @@ export default function DocMind() {
                 )}
                 <section className="mt-6 rounded-xl border border-border-button p-4">
                   <h3 className="mb-3 font-semibold">문서 라이브러리</h3>
-                  <SourceTree
-                    nodes={hierarchyQuery.data?.nodes ?? []}
-                    renderDocumentAction={(node: DocMindHierarchyNode) => (
+                  {hierarchyQuery.isError ? (
+                    <p role="alert" className="text-state-error">
+                      문서 목록을 불러오지 못했습니다. 자료 목록 새로고침으로
+                      다시 시도하세요.
+                    </p>
+                  ) : hierarchyQuery.isPending ? (
+                    <p role="status">문서 목록을 불러오는 중입니다.</p>
+                  ) : (
+                    <SourceTree
+                      nodes={hierarchyQuery.data?.nodes ?? []}
+                      renderDocumentAction={(node: DocMindHierarchyNode) => (
+                        <InspectionLink
+                          datasetId={hierarchyQuery.data?.dataset_id}
+                          documentId={node.document_id}
+                          compact
+                        />
+                      )}
+                    />
+                  )}
+                </section>
+                {registrationQuery.isError ? (
+                  <p role="alert" className="mt-3 text-state-error">
+                    문서 처리 현황을 불러오지 못했습니다. 자료 목록 새로고침으로
+                    다시 시도하세요.
+                  </p>
+                ) : (
+                  <RegistrationPanel
+                    registrations={registrationQuery.data?.registrations ?? []}
+                    folderNames={folderNames}
+                    documentFolderNames={documentFolderNames}
+                    retryPending={registrationRetry.isPending}
+                    onRetry={(id: string) => registrationRetry.mutate(id)}
+                    renderInspection={(registration: DocMindRegistration) => (
                       <InspectionLink
-                        datasetId={hierarchyQuery.data?.dataset_id}
-                        documentId={node.document_id}
+                        datasetId={registrationQuery.data?.dataset_id}
+                        documentId={registration.document_id}
                         compact
                       />
                     )}
                   />
-                </section>
-                <RegistrationPanel
-                  registrations={registrationQuery.data?.registrations ?? []}
-                  folderNames={folderNames}
-                  documentFolderNames={documentFolderNames}
-                  retryPending={registrationRetry.isPending}
-                  onRetry={(id: string) => registrationRetry.mutate(id)}
-                  renderInspection={(registration: DocMindRegistration) => (
-                    <InspectionLink
-                      datasetId={registrationQuery.data?.dataset_id}
-                      documentId={registration.document_id}
-                      compact
-                    />
-                  )}
-                />
+                )}
               </div>
             </div>
           )}

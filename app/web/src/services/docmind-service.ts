@@ -25,6 +25,8 @@ export interface DocMindFolderCatalog {
   hierarchical?: boolean;
   initialized?: boolean;
   can_administer?: boolean;
+  can_upload?: boolean;
+  source_sync?: boolean;
   workspace_mode?: 'authenticated' | 'shared';
 }
 
