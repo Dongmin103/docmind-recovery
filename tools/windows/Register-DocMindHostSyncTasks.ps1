@@ -10,13 +10,15 @@ Set-StrictMode -Version Latest
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
 $acl = Get-Acl -LiteralPath $configFile
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
-$allow = [Security.AccessControl.AccessControlType]::Allow
-foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
-    [void]$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, $allow))
+$allowedSids = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18')
+$rules = @($acl.Access)
+if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 2) { throw 'HOST_CONFIG_ACL_UNSAFE' }
+foreach ($rule in $rules) {
+    $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($sid -notin $allowedSids -or $rule.IsInherited -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl) {
+        throw 'HOST_CONFIG_ACL_UNSAFE'
+    }
 }
-Set-Acl -LiteralPath $configFile -AclObject $acl
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($config.PSObject.Properties.Name -notcontains 'sources' -or @($config.sources).Count -eq 0) { throw 'No configured sources are available.' }
 if (-not $AllowFullScan -and ($config.PSObject.Properties.Name -notcontains 'initial_scan_on_startup' -or [bool]$config.initial_scan_on_startup)) {
