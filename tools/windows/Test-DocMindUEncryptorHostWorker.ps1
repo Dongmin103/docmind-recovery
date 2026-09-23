@@ -28,6 +28,7 @@ try {
     $signature = Get-DocMindHmacSignature -Key $key -Method 'POST' -PathAndQuery '/api/v1/cloud-sync/host-worker/claim' -Timestamp $timestamp -Nonce $nonce -ContentSha256 $bodyHash
     Assert-True (Test-DocMindSignedMessage -Key $key -Method 'POST' -PathAndQuery '/api/v1/cloud-sync/host-worker/claim' -Timestamp $timestamp -Nonce $nonce -ContentSha256 $bodyHash -Signature $signature -BodyBytes $body) 'Valid signed message was rejected.'
     Assert-True (-not (Test-DocMindSignedMessage -Key $key -Method 'POST' -PathAndQuery '/api/v1/cloud-sync/host-worker/claim' -Timestamp $timestamp -Nonce $nonce -ContentSha256 $bodyHash -Signature ('0' * 64) -BodyBytes $body)) 'Tampered signature was accepted.'
+    Assert-True ((New-DocMindRandomBytes -Count 16).Length -eq 16) 'Windows-compatible nonce generation failed.'
 
     $fixedNow = [DateTimeOffset]::Parse('2026-09-22T00:00:00Z')
     $artifactTimeout = Get-DocMindArtifactRequestTimeoutSeconds -LeaseExpiresAt $fixedNow.AddSeconds(300) -Now $fixedNow -SafetySeconds 5
@@ -58,6 +59,12 @@ try {
     Assert-True ($snapshot[0].relative_path -eq 'folder/sample.enc') 'Snapshot exposed or changed the logical relative path.'
     Assert-True ($snapshot[0].ciphertext_sha256 -eq (Get-DocMindFileSha256 -LiteralPath $resolved)) 'Snapshot fingerprint changed.'
     Assert-True ($snapshot[0].PSObject.Properties.Name -notcontains 'root') 'Snapshot exposed the physical source root.'
+    $unicodeName = ([string][char]0xD55C) + ([string][char]0xAE00) + '.doc'
+    [IO.File]::WriteAllBytes((Join-Path $sourceRoot $unicodeName), [byte[]](5, 6, 7))
+    $unicodeConfig = Join-Path $testRoot 'utf8-config.json'
+    [IO.File]::WriteAllText($unicodeConfig, (@{ relative_path = $unicodeName } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+    $decodedRelativePath = [string](Get-Content -LiteralPath $unicodeConfig -Raw -Encoding UTF8 | ConvertFrom-Json).relative_path
+    Assert-True ((Resolve-DocMindSourceFile -Root $sourceRoot -RelativePath $decodedRelativePath) -eq (Join-Path $sourceRoot $unicodeName)) 'UTF-8 source path was corrupted under Windows PowerShell.'
     Assert-True (-not (Test-DocMindConfirmedSourceFileAbsence -Root $sourceRoot -RelativePath 'folder/sample.enc')) 'Existing source file was reported deleted.'
     Assert-True (Test-DocMindConfirmedSourceFileAbsence -Root $sourceRoot -RelativePath 'folder/missing.enc') 'Accessible, absent source file was not confirmed deleted.'
     Assert-True (Test-DocMindConfirmedSourceFileAbsence -Root $sourceRoot -RelativePath 'removed-folder/missing.enc') 'Missing subtree under an accessible root was not confirmed deleted.'
@@ -75,6 +82,9 @@ try {
     $watchScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Watch-DocMindEncryptedSources.ps1') -Raw
     Assert-True $watchScript.Contains("'/api/v1/cloud-sync/host-worker/deletions'") 'Deletion endpoint contract is missing.'
     Assert-True $watchScript.Contains('Test-DocMindConfirmedSourceFileAbsence') 'Deletion events are not guarded by an absence proof.'
+    Assert-True $watchScript.Contains('Get-Content -LiteralPath $configFile -Raw -Encoding UTF8') 'Watch config must decode UTF-8 source paths on Windows PowerShell.'
+    Assert-True $watchScript.Contains('FileSystemWatcher') 'Discovery event watcher is missing.'
+    Assert-True $watchScript.Contains('DiscoveryFallbackSeconds') 'Discovery fallback scan is missing.'
     $planConfig = Join-Path $testRoot 'schedule-config.json'
     [IO.File]::WriteAllText($planConfig, (@{
         daily_reconciliation_timezone = 'Asia/Seoul'

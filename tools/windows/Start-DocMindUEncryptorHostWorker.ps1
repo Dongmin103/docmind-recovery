@@ -12,7 +12,7 @@ Set-StrictMode -Version Latest
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { throw 'DOCMIND_HOST_WORKER_CONFIG or -ConfigPath is required.' }
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
-$config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+$config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $requiredConfig = @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'executable_path', 'executable_sha256', 'executable_signer_thumbprint', 'work_root')
 foreach ($name in $requiredConfig) {
@@ -115,8 +115,7 @@ function Assert-ExecutableIdentity {
 function New-SignedRequestHeaders {
     param([string]$Method, [Uri]$Uri, [string]$ContentSha256)
     $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
-    $nonceBytes = [byte[]]::new(16)
-    [Security.Cryptography.RandomNumberGenerator]::Fill($nonceBytes)
+    $nonceBytes = New-DocMindRandomBytes -Count 16
     $nonce = ConvertTo-DocMindHex -Bytes $nonceBytes
     $signature = Get-DocMindHmacSignature -Key $secret -Method $Method -PathAndQuery $Uri.PathAndQuery -Timestamp $timestamp -Nonce $nonce -ContentSha256 $ContentSha256
     return @{

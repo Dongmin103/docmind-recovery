@@ -1,6 +1,14 @@
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.Net.Http
 
+function New-DocMindRandomBytes {
+    param([ValidateRange(1, 1024)][int]$Count)
+    $bytes = [byte[]]::new($Count)
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $generator.GetBytes($bytes) } finally { $generator.Dispose() }
+    return ,$bytes
+}
+
 function ConvertTo-DocMindHex {
     param([Parameter(Mandatory = $true)][byte[]]$Bytes)
     return ([BitConverter]::ToString($Bytes) -replace '-', '').ToLowerInvariant()
@@ -356,7 +364,7 @@ function Write-DocMindCleanupReceiptAtomic {
 function Read-DocMindCleanupReceipt {
     param([Parameter(Mandatory = $true)][string]$LiteralPath, [Parameter(Mandatory = $true)][string]$ReceiptRoot)
     Assert-DocMindNoReparsePoint -LiteralPath $LiteralPath -Boundary $ReceiptRoot -Name 'Cleanup receipt'
-    $receipt = Get-Content -LiteralPath $LiteralPath -Raw -ErrorAction Stop | ConvertFrom-Json
+    $receipt = Get-Content -LiteralPath $LiteralPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
     $expected = @('job_id', 'version_id', 'fencing_token', 'final_state', 'error_code')
     $actual = @($receipt.PSObject.Properties.Name)
     if (@($actual | Where-Object { $_ -notin $expected }).Count -gt 0 -or @($expected | Where-Object { $_ -notin $actual }).Count -gt 0) { throw 'CLEANUP_RECEIPT_SCHEMA_INVALID' }
@@ -417,7 +425,7 @@ function Remove-DocMindExpiredJobDirectories {
         $state = $null
         if (Test-Path -LiteralPath $statePath -PathType Leaf) {
             try {
-                $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+                $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
                 $leaseExpiry = ConvertTo-DocMindDateTimeOffset -Value $state.lease_expires_at -Name 'lease_expires_at'
                 $leaseExpired = $leaseExpiry -lt [DateTimeOffset]::UtcNow
             } catch { $leaseExpired = $false }

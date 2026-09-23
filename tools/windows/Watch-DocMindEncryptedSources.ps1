@@ -2,7 +2,10 @@
 param(
     [string]$ConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG,
     [switch]$Once,
-    [ValidateRange(2, 3600)][int]$PollSeconds = 10
+    [ValidateRange(2, 3600)][int]$PollSeconds = 10,
+    [switch]$EnableDiscovery,
+    [ValidateRange(2, 300)][int]$DiscoverySettleSeconds = 10,
+    [ValidateRange(60, 86400)][int]$DiscoveryFallbackSeconds = 3600
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,7 +15,7 @@ Set-StrictMode -Version Latest
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { throw 'DOCMIND_HOST_WORKER_CONFIG or -ConfigPath is required.' }
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
-$config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+$config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($name in @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'sources')) {
     if ($config.PSObject.Properties.Name -notcontains $name -or $null -eq $config.$name) { throw "Host worker config is missing $name." }
 }
@@ -26,10 +29,12 @@ $deletionEndpoint = '/api/v1/cloud-sync/host-worker/deletions'
 $responseNonces = @{}
 $reportedDeletions = @{}
 $registrations = @()
+$sourceRoots = @{}
 foreach ($source in @($config.sources)) {
     Assert-DocMindIdentifier -Value ([string]$source.source_id) -Name 'source_id'
     $root = [IO.Path]::GetFullPath([string]$source.root).TrimEnd('\', '/')
-    if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'A configured source root is unavailable.' }
+    if ($sourceRoots.ContainsKey([string]$source.source_id)) { throw 'Duplicate source_id in host config.' }
+    $sourceRoots[[string]$source.source_id] = $root
     if ($source.PSObject.Properties.Name -notcontains 'documents') { continue }
     foreach ($document in @($source.documents)) {
         Assert-DocMindIdentifier -Value ([string]$document.document_id) -Name 'document_id'
@@ -42,7 +47,72 @@ foreach ($source in @($config.sources)) {
         }
     }
 }
-if ($registrations.Count -eq 0) { throw 'No registered documents are configured for observation.' }
+if ($registrations.Count -eq 0 -and -not $EnableDiscovery) { throw 'No registered documents are configured for observation.' }
+
+$discoveryWatchers = @{}
+$discoveryDue = @{}
+$discoveryLastAttempt = @{}
+$discoveryEventPrefix = 'DocMindSource-' + [Guid]::NewGuid().ToString('n') + '-'
+
+function Update-DiscoveryWatchers {
+    foreach ($sourceId in @($sourceRoots.Keys)) {
+        $root = [string]$sourceRoots[$sourceId]
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            if ($discoveryWatchers.ContainsKey($sourceId)) {
+                $watcher = $discoveryWatchers[$sourceId]
+                $watcher.EnableRaisingEvents = $false
+                $watcher.Dispose()
+                [void]$discoveryWatchers.Remove($sourceId)
+                foreach ($subscriber in @(Get-EventSubscriber | Where-Object { $_.SourceIdentifier.StartsWith(($discoveryEventPrefix + $sourceId + '-'), [StringComparison]::Ordinal) })) {
+                    Unregister-Event -SubscriptionId $subscriber.SubscriptionId
+                }
+            }
+            continue
+        }
+        if ($discoveryWatchers.ContainsKey($sourceId)) { continue }
+        $watcher = $null
+        try {
+            Assert-DocMindNoReparsePoint -LiteralPath $root -Boundary $root -Name 'Source root'
+            $watcher = [IO.FileSystemWatcher]::new($root)
+            $watcher.IncludeSubdirectories = $true
+            $watcher.NotifyFilter = [IO.NotifyFilters]'FileName, DirectoryName, LastWrite, Size, CreationTime'
+            $watcher.InternalBufferSize = 65536
+            foreach ($eventName in @('Changed', 'Created', 'Deleted', 'Renamed', 'Error')) {
+                [void](Register-ObjectEvent -InputObject $watcher -EventName $eventName -SourceIdentifier ($discoveryEventPrefix + $sourceId + '-' + $eventName) -MessageData $sourceId)
+            }
+            $watcher.EnableRaisingEvents = $true
+            $discoveryWatchers[$sourceId] = $watcher
+            $discoveryDue[$sourceId] = [DateTimeOffset]::UtcNow.AddSeconds($DiscoverySettleSeconds)
+        } catch {
+            if ($null -ne $watcher) { $watcher.Dispose() }
+            Write-Warning 'Source discovery watcher registration failed; the fallback scan will retry.'
+        }
+    }
+}
+
+function Invoke-DueDiscoveryScans {
+    $now = [DateTimeOffset]::UtcNow
+    foreach ($eventRecord in @(Get-Event | Where-Object { $_.SourceIdentifier.StartsWith($discoveryEventPrefix, [StringComparison]::Ordinal) })) {
+        $sourceId = [string]$eventRecord.MessageData
+        if ($sourceRoots.ContainsKey($sourceId)) { $discoveryDue[$sourceId] = $now.AddSeconds($DiscoverySettleSeconds) }
+        Remove-Event -EventIdentifier $eventRecord.EventIdentifier
+    }
+    foreach ($sourceId in @($sourceRoots.Keys)) {
+        if (-not $discoveryWatchers.ContainsKey($sourceId)) { continue }
+        $fallbackDue = -not $discoveryLastAttempt.ContainsKey($sourceId) -or $now -ge $discoveryLastAttempt[$sourceId].AddSeconds($DiscoveryFallbackSeconds)
+        $eventDue = $discoveryDue.ContainsKey($sourceId) -and $now -ge $discoveryDue[$sourceId]
+        if (-not $fallbackDue -and -not $eventDue) { continue }
+        [void]$discoveryDue.Remove($sourceId)
+        $discoveryLastAttempt[$sourceId] = $now
+        try {
+            & (Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1') -ConfigPath $configFile -Reason manual -SourceId $sourceId
+        } catch {
+            # A partial scan cannot authorize deletions. Retry after a quiet interval.
+            $discoveryDue[$sourceId] = [DateTimeOffset]::UtcNow.AddSeconds($DiscoverySettleSeconds)
+            Write-Warning 'Source discovery scan failed; retry is pending.'
+        }
+    }
+}
 
 function Get-HeaderValue {
     param($Response, [string]$Name)
@@ -66,8 +136,7 @@ function Send-Observation {
     $uri = [Uri]::new($apiBase, $endpoint)
     if (-not $uri.IsLoopback -or $uri.Authority -ne $apiBase.Authority) { throw 'Observation endpoint escaped the configured loopback origin.' }
     $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
-    $nonceBytes = [byte[]]::new(16)
-    [Security.Cryptography.RandomNumberGenerator]::Fill($nonceBytes)
+    $nonceBytes = New-DocMindRandomBytes -Count 16
     $nonce = ConvertTo-DocMindHex -Bytes $nonceBytes
     $signature = Get-DocMindHmacSignature -Key $secret -Method 'POST' -PathAndQuery $uri.PathAndQuery -Timestamp $timestamp -Nonce $nonce -ContentSha256 $contentHash
     $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Post, $uri)
@@ -121,8 +190,7 @@ function Send-DeletionObservation {
     $uri = [Uri]::new($apiBase, $deletionEndpoint)
     if (-not $uri.IsLoopback -or $uri.Authority -ne $apiBase.Authority) { throw 'Deletion endpoint escaped the configured loopback origin.' }
     $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
-    $nonceBytes = [byte[]]::new(16)
-    [Security.Cryptography.RandomNumberGenerator]::Fill($nonceBytes)
+    $nonceBytes = New-DocMindRandomBytes -Count 16
     $nonce = ConvertTo-DocMindHex -Bytes $nonceBytes
     $signature = Get-DocMindHmacSignature -Key $secret -Method 'POST' -PathAndQuery $uri.PathAndQuery -Timestamp $timestamp -Nonce $nonce -ContentSha256 $contentHash
     $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Post, $uri)
@@ -159,7 +227,10 @@ function Send-DeletionObservation {
     }
 }
 
+try {
 do {
+    if ($EnableDiscovery) { Update-DiscoveryWatchers }
+    $cycleFailures = 0
     foreach ($registration in $registrations) {
         try {
             $sourceFile = Resolve-DocMindSourceFile -Root $registration.root -RelativePath $registration.relative_path
@@ -186,9 +257,24 @@ do {
                     }
                 } catch { $safeCode = $_.Exception.Message }
             }
-            if ($safeCode -notmatch '^[A-Z0-9_]+$' -and -not $safeCode.StartsWith('OBSERVATION_HTTP_')) { $safeCode = 'OBSERVATION_FAILED' }
-            Write-Warning ("Registered document observation failed: {0}" -f $safeCode)
+            if ($safeCode -notmatch '^[A-Z0-9_]+$' -and -not $safeCode.StartsWith('OBSERVATION_HTTP_')) {
+                $innerType = if ($null -ne $_.Exception.InnerException) { $_.Exception.InnerException.GetType().Name.ToUpperInvariant() } else { 'UNKNOWN' }
+                $safeCode = 'OBSERVATION_' + $_.Exception.GetType().Name.ToUpperInvariant() + '_' + $innerType
+            }
+            Write-Warning ("Registered document observation failed: {0}, script_line={1}" -f $safeCode, $_.InvocationInfo.ScriptLineNumber)
+            $cycleFailures++
         }
     }
+    if ($EnableDiscovery) { Invoke-DueDiscoveryScans }
+    if ($Once -and $cycleFailures -gt 0) { throw 'SOURCE_OBSERVATION_CYCLE_FAILED' }
     if (-not $Once) { Start-Sleep -Seconds $PollSeconds }
 } while (-not $Once)
+} finally {
+    foreach ($subscriber in @(Get-EventSubscriber | Where-Object { $_.SourceIdentifier.StartsWith($discoveryEventPrefix, [StringComparison]::Ordinal) })) {
+        Unregister-Event -SubscriptionId $subscriber.SubscriptionId
+    }
+    foreach ($eventRecord in @(Get-Event | Where-Object { $_.SourceIdentifier.StartsWith($discoveryEventPrefix, [StringComparison]::Ordinal) })) {
+        Remove-Event -EventIdentifier $eventRecord.EventIdentifier
+    }
+    foreach ($watcher in @($discoveryWatchers.Values)) { $watcher.EnableRaisingEvents = $false; $watcher.Dispose() }
+}

@@ -13,7 +13,7 @@ Set-StrictMode -Version Latest
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { throw 'DOCMIND_HOST_WORKER_CONFIG or -ConfigPath is required.' }
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
-$config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+$config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($name in @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'sources')) {
     if ($config.PSObject.Properties.Name -notcontains $name -or $null -eq $config.$name) { throw "Host worker config is missing $name." }
 }
@@ -47,8 +47,7 @@ function Invoke-SignedJsonPost {
     $uri = [Uri]::new($apiBase, $RelativeEndpoint)
     if (-not $uri.IsLoopback -or $uri.Authority -ne $apiBase.Authority) { throw 'Scan endpoint escaped the configured loopback origin.' }
     $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
-    $nonceBytes = [byte[]]::new(16)
-    [Security.Cryptography.RandomNumberGenerator]::Fill($nonceBytes)
+    $nonceBytes = New-DocMindRandomBytes -Count 16
     $nonce = ConvertTo-DocMindHex -Bytes $nonceBytes
     $signature = Get-DocMindHmacSignature -Key $secret -Method 'POST' -PathAndQuery $uri.PathAndQuery -Timestamp $timestamp -Nonce $nonce -ContentSha256 $contentHash
     $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Post, $uri)
