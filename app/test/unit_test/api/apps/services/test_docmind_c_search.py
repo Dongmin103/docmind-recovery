@@ -1,9 +1,51 @@
+from __future__ import annotations
+
 import asyncio
+import importlib.util
+import sys
+import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from api.apps.services import docmind_api_service as service
+service = None
+
+
+@pytest.fixture(autouse=True)
+def isolated_docmind_search_service(monkeypatch):
+    global service
+
+    app_root = Path(__file__).resolve().parents[5]
+    apps = types.ModuleType("api.apps")
+    apps.__path__ = [str(app_root / "api" / "apps")]
+    services = types.ModuleType("api.apps.services")
+    services.__path__ = [str(app_root / "api" / "apps" / "services")]
+    dataset_service = types.ModuleType("api.apps.services.dataset_api_service")
+
+    async def no_recall(*_args, **_kwargs):
+        raise AssertionError("recall was not configured for this test")
+
+    dataset_service.search_datasets = no_recall
+    services.dataset_api_service = dataset_service
+    services.docmind_source_projection_service = SimpleNamespace()
+    apps.services = services
+    for name, module in (
+        ("api.apps", apps),
+        ("api.apps.services", services),
+        ("api.apps.services.dataset_api_service", dataset_service),
+        ("api.apps.services.docmind_source_projection_service", services.docmind_source_projection_service),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delenv("DOCMIND_CATALOG_DB_PRIMARY_ENABLED", raising=False)
+    path = app_root / "api" / "apps" / "services" / "docmind_api_service.py"
+    spec = importlib.util.spec_from_file_location("docmind_c_search_under_test", path)
+    assert spec and spec.loader
+    service = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, service)
+    spec.loader.exec_module(service)
+    yield
+    service = None
 
 
 def _catalog() -> service.Catalog:
