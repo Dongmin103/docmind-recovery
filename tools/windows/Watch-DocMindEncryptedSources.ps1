@@ -84,6 +84,9 @@ function Update-DiscoveryWatchers {
             $discoveryWatchers[$sourceId] = $watcher
             $discoveryDue[$sourceId] = [DateTimeOffset]::UtcNow.AddSeconds($DiscoverySettleSeconds)
         } catch {
+            foreach ($subscriber in @(Get-EventSubscriber | Where-Object { $_.SourceIdentifier.StartsWith(($discoveryEventPrefix + $sourceId + '-'), [StringComparison]::Ordinal) })) {
+                Unregister-Event -SubscriptionId $subscriber.SubscriptionId
+            }
             if ($null -ne $watcher) { $watcher.Dispose() }
             Write-Warning 'Source discovery watcher registration failed; the fallback scan will retry.'
         }
@@ -122,12 +125,12 @@ function Get-HeaderValue {
 }
 
 function Send-Observation {
-    param($Registration, [IO.FileInfo]$File)
+    param($Registration, [IO.FileInfo]$File, [string]$CiphertextSha256)
     $body = [ordered]@{
         source_id = $Registration.source_id
         document_id = $Registration.document_id
         relative_path = $Registration.relative_path
-        ciphertext_sha256 = Get-DocMindFileSha256 -LiteralPath $File.FullName
+        ciphertext_sha256 = $CiphertextSha256
         size = [Int64]$File.Length
         mtime_ns = ([Int64]$File.LastWriteTimeUtc.Ticks - 621355968000000000L) * 100L
     }
@@ -241,7 +244,7 @@ do {
             $after = Get-Item -LiteralPath $sourceFile
             if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeMtime) { continue }
             if (-not (Test-DocMindFixedTimeHexEqual $hash (Get-DocMindFileSha256 -LiteralPath $sourceFile))) { continue }
-            Send-Observation -Registration $registration -File $after
+            Send-Observation -Registration $registration -File $after -CiphertextSha256 $hash
             [void]$reportedDeletions.Remove(('{0}/{1}' -f $registration.source_id, $registration.document_id))
         } catch {
             $safeCode = $_.Exception.Message
