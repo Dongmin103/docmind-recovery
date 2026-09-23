@@ -81,6 +81,11 @@ export function SourceTree({ nodes, renderDocumentAction }: SourceTreeProps) {
         <details className="group rounded-lg border border-border-button bg-bg-card px-3 py-2">
           <summary className="cursor-pointer text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary">
             <span className="font-medium">{node.name}</span>
+            {node.source_enabled === false && (
+              <span className="ml-2 text-xs text-state-warning">
+                동기화 중지
+              </span>
+            )}
             <span className="ml-2 text-xs text-text-secondary">
               파일 {fileCount}개 · 하위 폴더 {folderCount}개
             </span>

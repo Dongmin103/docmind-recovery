@@ -45,6 +45,12 @@ const Nodes: DocMindHierarchyNode[] = [
 ];
 
 describe('SourceTree', () => {
+  it('distinguishes a registered paused source from an active empty folder', () => {
+    render(<SourceTree nodes={[{ ...Nodes[0], source_enabled: false }]} />);
+    expect(screen.getByText('동기화 중지')).toBeInTheDocument();
+    expect(screen.getByText('파일 0개 · 하위 폴더 0개')).toBeInTheDocument();
+  });
+
   it('keeps nested folders collapsed and exposes document actions after expansion', () => {
     render(
       <SourceTree

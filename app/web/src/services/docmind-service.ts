@@ -122,6 +122,7 @@ export interface DocMindHierarchyNode {
   depth: number;
   type: 'folder' | 'file';
   child_count?: number;
+  source_enabled?: boolean;
   document_id?: string;
   document_exists: boolean;
   index_state?: 'INDEXED' | 'PENDING';
