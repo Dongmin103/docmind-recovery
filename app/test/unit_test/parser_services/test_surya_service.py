@@ -63,6 +63,7 @@ def _load_service(monkeypatch, tmp_path):
 
     settings = types.SimpleNamespace(
         SURYA_INFERENCE_BACKEND="llamacpp",
+        LLAMA_CPP_NGL=0,
         IMAGE_DPI_HIGHRES=144,
         SURYA_MAX_TOKENS_FULL_PAGE=12288,
         SURYA_INFERENCE_TIMEOUT_SECONDS=570,
@@ -105,6 +106,8 @@ def test_office_media_endpoint_engine_verifies_models_and_returns_manifest(monke
     )
 
     assert service.ENGINE.manifest()["model_files_verified"] is True
+    assert service.ENGINE.manifest()["gpu_layers_requested"] == 0
+    assert service.ENGINE.manifest()["gpu_offload_verified"] is False
     assert response["task_kind"] == "office_media_parse"
     assert response["blocks"][0]["html"] == "<p>surya media text</p>"
     assert service.ENGINE.predictor.observed_full_page_max_tokens == 1024
@@ -114,6 +117,67 @@ def test_office_media_endpoint_engine_verifies_models_and_returns_manifest(monke
     assert service.settings.SURYA_INFERENCE_TIMEOUT_SECONDS == 570
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
         service.SuryaEngine._verify_model_file(service.ENGINE.model_path, "0" * 64)
+
+
+def test_gpu_health_requires_fresh_positive_cuda_offload_log_after_inference(monkeypatch, tmp_path) -> None:
+    service = _load_service(monkeypatch, tmp_path)
+    engine = service.ENGINE
+    engine.gpu_layers_requested = 99
+    engine.gpu_device_visible = True
+    engine._llama_log_path = tmp_path / "llamacpp_server.log"
+    engine._llama_log_start = 0
+
+    image = Image.new("RGB", (32, 20), "white")
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    media_bytes = output.getvalue()
+
+    class GpuPredictor(_Predictor):
+        def __call__(self, images, *, full_page):
+            engine._llama_log_path.write_text(
+                "load_tensors: offloaded 25/25 layers to GPU\n"
+                "load_tensors:        CUDA0 model buffer size = 1024.00 MiB\n",
+                encoding="utf-8",
+            )
+            return super().__call__(images, full_page=full_page)
+
+    engine.predictor = GpuPredictor(engine.manager)
+    assert engine.manifest()["gpu_offload_verified"] is False
+    engine.parse_office_media(
+        {
+            "parse_run_id": "gpu-run",
+            "media_id": "gpu-media",
+            "media_hash": hashlib.sha256(media_bytes).hexdigest(),
+            "source_locator": "#/pictures/gpu",
+            "media_base64": base64.b64encode(media_bytes).decode("ascii"),
+        }
+    )
+    assert engine.manifest()["gpu_layers_requested"] == 99
+    assert engine.manifest()["gpu_device_visible"] is True
+    assert engine.manifest()["gpu_offload_verified"] is True
+    assert engine.manifest()["gpu_offloaded_layers"] == 25
+    assert engine.manifest()["gpu_total_layers"] == 25
+
+
+def test_gpu_health_rejects_zero_offload_or_stale_log(monkeypatch, tmp_path) -> None:
+    service = _load_service(monkeypatch, tmp_path)
+    engine = service.ENGINE
+    engine.gpu_layers_requested = 99
+    engine._llama_log_path = tmp_path / "llamacpp_server.log"
+    engine._llama_log_path.write_text(
+        "load_tensors: offloaded 25/25 layers to GPU\n"
+        "load_tensors: CUDA0 model buffer size = 1024.00 MiB\n",
+        encoding="utf-8",
+    )
+    engine._llama_log_start = engine._llama_log_path.stat().st_size
+    engine._verify_gpu_offload_from_log()
+    assert engine.manifest()["gpu_offload_verified"] is False
+
+    with engine._llama_log_path.open("a", encoding="utf-8") as log_file:
+        log_file.write("load_tensors: offloaded 0/25 layers to GPU\n")
+        log_file.write("load_tensors: CPU_Mapped model buffer size = 1024.00 MiB\n")
+    engine._verify_gpu_offload_from_log()
+    assert engine.manifest()["gpu_offload_verified"] is False
 
 
 def test_health_stays_responsive_and_second_parse_is_rejected(monkeypatch, tmp_path) -> None:

@@ -6,12 +6,16 @@ import importlib.metadata
 import json
 import logging
 import os
+import re
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 LOGGER = logging.getLogger(__name__)
@@ -71,6 +75,12 @@ class SuryaEngine:
         self.parser_version = importlib.metadata.version("surya-ocr")
         self.model_version = os.environ.get("SURYA_MODEL_REVISION", "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470")
         self.backend = settings.SURYA_INFERENCE_BACKEND or "llamacpp"
+        self.gpu_layers_requested = int(getattr(settings, "LLAMA_CPP_NGL", 0)) if self.backend == "llamacpp" else None
+        self.gpu_device_visible = self._gpu_device_visible()
+        self.gpu_offloaded_layers: int | None = None
+        self.gpu_total_layers: int | None = None
+        self._llama_log_path = Path.home() / ".cache/datalab/surya/llamacpp_server.log"
+        self._llama_log_start = self._llama_log_path.stat().st_size if self._llama_log_path.exists() else 0
         self.max_source_bytes = int(os.environ.get("SURYA_SERVICE_MAX_SOURCE_BYTES", str(512 * 1024 * 1024)))
         self.max_media_bytes = int(os.environ.get("SURYA_SERVICE_MAX_MEDIA_BYTES", str(32 * 1024 * 1024)))
         self.max_pages = int(os.environ.get("SURYA_SERVICE_MAX_PAGES", "2000"))
@@ -106,6 +116,38 @@ class SuryaEngine:
         if digest.hexdigest() != expected_sha256:
             raise ValueError("Surya model SHA-256 mismatch")
 
+    @staticmethod
+    def _gpu_device_visible() -> bool:
+        if os.path.exists("/dev/nvidia0"):
+            return True
+        binary = shutil.which("nvidia-smi")
+        if not binary:
+            return False
+        try:
+            result = subprocess.run([binary, "-L"], capture_output=True, text=True, timeout=3, check=False)
+            return result.returncode == 0 and "GPU" in result.stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    def _verify_gpu_offload_from_log(self) -> None:
+        # Surya 0.22.1 spawns llama-server lazily. A requested layer count or a
+        # visible device does not prove that this process loaded weights on GPU.
+        if self.backend != "llamacpp" or not self.gpu_layers_requested or self.gpu_offloaded_layers is not None:
+            return
+        try:
+            with self._llama_log_path.open("rb") as log_file:
+                log_file.seek(self._llama_log_start)
+                startup_log = log_file.read(4 * 1024 * 1024).decode("utf-8", errors="replace")
+        except OSError:
+            return
+        match = re.search(r"load_tensors: offloaded (\d+)/(\d+) layers to GPU", startup_log)
+        if not match or not re.search(r"load_tensors:\s+CUDA\d+ model buffer size\s*=", startup_log):
+            return
+        offloaded, total = (int(value) for value in match.groups())
+        if offloaded > 0 and total > 0:
+            self.gpu_offloaded_layers = offloaded
+            self.gpu_total_layers = total
+
     def manifest(self) -> dict[str, Any]:
         return {
             "status": "ready",
@@ -113,6 +155,11 @@ class SuryaEngine:
             "parser_version": self.parser_version,
             "model_version": self.model_version,
             "backend": self.backend,
+            "gpu_layers_requested": self.gpu_layers_requested,
+            "gpu_device_visible": self.gpu_device_visible,
+            "gpu_offload_verified": self.gpu_offloaded_layers is not None,
+            "gpu_offloaded_layers": self.gpu_offloaded_layers,
+            "gpu_total_layers": self.gpu_total_layers,
             "task_kinds": ["pdf_document_parse", "office_media_parse"],
             "concurrency": 1,
             "model_files_verified": True,
@@ -207,6 +254,7 @@ class SuryaEngine:
                         )
                         with self.lock:
                             results = self.predictor(images, full_page=True)
+                            self._verify_gpu_offload_from_log()
                         LOGGER.info(
                             "surya_inference_completed parse_run_id=%s pages=%s elapsed_seconds=%.3f",
                             parse_run_id,
@@ -315,6 +363,7 @@ class SuryaEngine:
                 settings.SURYA_INFERENCE_TIMEOUT_SECONDS = self.media_inference_timeout_seconds
                 try:
                     result = self.predictor([safe_image], full_page=True)[0]
+                    self._verify_gpu_offload_from_log()
                 finally:
                     settings.SURYA_MAX_TOKENS_FULL_PAGE = full_page_max_tokens
                     settings.SURYA_INFERENCE_TIMEOUT_SECONDS = inference_timeout_seconds
