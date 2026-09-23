@@ -30,6 +30,7 @@ import { RequestMethod, extend } from 'umi-request';
 import { convertTheKeysOfTheObjectToSnake, isFormData } from './common-util';
 import { setCachedLlmList } from './llm-cache';
 import { addTenantParams } from './llm-util';
+import { recoverDocMindSharedWorkspace } from './docmind-shared-workspace';
 
 const FAILED_TO_FETCH = 'Failed to fetch';
 
@@ -135,6 +136,7 @@ request.interceptors.response.use(async (response: Response, options) => {
 
   // Handle HTTP 401
   if (response?.status === 401) {
+    if (await recoverDocMindSharedWorkspace()) return response;
     if (!isRedirecting) {
       isRedirecting = true;
 
@@ -173,6 +175,7 @@ request.interceptors.response.use(async (response: Response, options) => {
   if (data?.code === 100) {
     message.error(data?.message);
   } else if (data?.code === 401) {
+    if (await recoverDocMindSharedWorkspace()) return response;
     if (!isRedirecting) {
       isRedirecting = true;
       notification.error({
@@ -183,8 +186,6 @@ request.interceptors.response.use(async (response: Response, options) => {
       authorizationUtil.removeAll();
       redirectToLogin();
     }
-    authorizationUtil.removeAll();
-    redirectToLogin();
   } else if (data?.code !== 0) {
     notification.error({
       message: `${i18n.t('message.hint')} : ${data?.code}`,

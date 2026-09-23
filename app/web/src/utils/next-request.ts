@@ -26,6 +26,7 @@ import axios from 'axios';
 import { convertTheKeysOfTheObjectToSnake, isFormData } from './common-util';
 import { setCachedLlmList } from './llm-cache';
 import { addTenantParams } from './llm-util';
+import { recoverDocMindSharedWorkspace } from './docmind-shared-workspace';
 
 const FAILED_TO_FETCH = 'Failed to fetch';
 
@@ -146,6 +147,7 @@ request.interceptors.response.use(
     if (data?.code === 100 && !skipErrorNotification) {
       message.error(data?.message);
     } else if (data?.code === 401) {
+      if (await recoverDocMindSharedWorkspace()) return response;
       if (!isRedirecting) {
         isRedirecting = true;
         notification.error({
@@ -165,10 +167,11 @@ request.interceptors.response.use(
     }
     return response;
   },
-  function (error) {
+  async function (error) {
     // Handle HTTP 401 (token expired / invalid)
     const status = error?.response?.status;
     if (status === 401) {
+      if (await recoverDocMindSharedWorkspace()) return Promise.reject(error);
       if (!isRedirecting) {
         isRedirecting = true;
         const messageText =
