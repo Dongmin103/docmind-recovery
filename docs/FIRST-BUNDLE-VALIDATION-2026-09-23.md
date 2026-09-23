@@ -43,20 +43,26 @@ the final app build additionally includes restart session and loader recovery.
 The preceding image is retained as
 `docmind-ragflow:rollback-20260923-pre-first-bundle`.
 
-The live composition has **three** files: the Windows development base,
-generationless E2E overlay, and ignored
-`.local/docker/legacy-doc-source-overlay.yml`. The last file preserves local
-source/test and secret mounts and must not be dropped when recreating the app.
-Only the app container was recreated for this deployment. The production web
+The live composition now has **four** files: the Windows development base,
+generationless E2E overlay, ignored
+`.local/docker/legacy-doc-source-overlay.yml`, and
+`app/docker/docker-compose-windows-dev-surya-gpu.yml`, in that order. The ignored
+file preserves local source/test and secret mounts; the fourth selects the GPU
+image for the existing `surya-parser` alias. Both must be retained for future
+service updates. The app and parser were each recreated separately. The production web
 build and image-internal retired-runtime check passed. After cold startup,
 HTML and shared-session API returned HTTP 200; the session reported code 0 and
 ready true. A cold start still has a short unavailable period (about 20 seconds
 in this run); zero-downtime deployment is not claimed.
 
 The readiness tool now accepts an explicit `-ExpectedAppImageId` and checks both
-the tagged and running image. Correct digest: ready true, no blockers, zero host
-plaintext job directories. Incorrect digest: ready false / exit 2. This replaces
-the obsolete hardcoded image expectation described in the earlier handoff.
+the tagged and running app image. With final app digest `sha256:311ef17817885ac50db3d7ae5510f832759658456dae6ec77dc6d231f5c00c1a`
+after GPU activation: ready true, exit 0, no blockers, three registered sources,
+three approved decrypt reports, zero host plaintext job directories, and
+MySQL/Elasticsearch/Redis/MinIO healthy. Incorrect digest: ready false / exit 2.
+This replaces the obsolete hardcoded image expectation described in the earlier
+handoff. The readiness script does not claim to verify CUDA execution; the
+parser's post-OCR health and image were checked separately.
 
 ## Live browser and API evidence
 
@@ -166,6 +172,31 @@ return but does not directly prove the retry view/timer branch was displayed.
 Those branches have focused component tests. An older verification tab also
 showed an empty root with a healthy backend; a fresh tab rendered normally.
 
+## GPU OCR activation
+
+The installed GTX 1080 (8 GiB) is now connected to the Docker runtime through
+NVIDIA Container Toolkit inside WSL. The CUDA 12.4 `sm_61` Surya image is pinned
+to llama.cpp b10718 and runs at
+`sha256:7128dc32fb5e854ee5e2c8989164834dcd9746c1aecc86827894e78d9a5e3f45`.
+The approved Surya model revision and SHA-verified read-only mount are unchanged;
+the parser retains one-request admission and its original security limits.
+
+The Terra high verification agent measured byte-identical, in-memory synthetic
+Office-media OCR on CPU and GPU. Three distinct inputs had a CPU median of
+8.121 seconds and GPU median of 1.333 seconds (6.09× faster, 83.6% less elapsed
+time). After the isolated GPU proof, the live alias was switched to the CUDA
+image and one further synthetic OCR passed. Live `/health` then reported
+`gpu_execution_verified=true` from the exact Surya child PID matching NVIDIA's
+compute PID. `gpu_offload_verified=false` and null layer counts honestly reflect
+that b10718 omitted per-layer lines at normal verbosity; no layer count is
+claimed. The live container was healthy with restart count 0, and the app image
+remained at the digest above. The isolated smoke container was removed. Full
+methodology and limits are in the [Surya GPU benchmark](SURYA-GPU-BENCHMARK-2026-09-23.md).
+
+After activation, the approved Host Worker and Source Watcher were restored to
+Running, midnight reconciliation remained Disabled, and the host plaintext job
+directory count was zero.
+
 ## Remaining boundaries
 
 - Three-root full discovery/initial scan and actual midnight reconciliation have
@@ -177,8 +208,7 @@ showed an empty root with a healthy backend; a fresh tab rendered normally.
   live verification used the existing approved index.
 - Click-triggered temporary original preview is not completed by this bundle.
   Existing detail/chunk rendering must not be reported as that feature passing.
-- GPU OCR was requested during this work. At this report's initial checkpoint,
-  Surya was still using its pinned CPU image; GPU migration and actual device
-  verification are a separate continuing task.
+- The GPU timing applies to synthetic Office-media images; representative PDF,
+  legacy DOC, indexing and end-to-end latency have not been measured.
 - No production security completion, operation of all sources while logged out,
   or full recovery readiness is claimed.

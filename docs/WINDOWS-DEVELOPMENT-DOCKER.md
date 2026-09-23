@@ -113,6 +113,20 @@ worker configuration. Registered sources may have an explicit empty `documents`
 array when no individual file has been approved yet; a missing array still
 fails readiness.
 
+For this host's generationless source stack with NVIDIA Surya OCR, use these
+Compose files in order: `app/docker/docker-compose-windows-dev.yml`,
+`app/docker/docker-compose-windows-dev-generationless-e2e.yml`, the ignored
+`.local/docker/legacy-doc-source-overlay.yml`, then
+`app/docker/docker-compose-windows-dev-surya-gpu.yml`. The fourth file changes
+only the existing Surya parser service to the pinned CUDA image and requests
+the GPU; it retains the app-facing `surya-parser` alias and read-only model
+mount. Preserve the ignored source overlay during every parser update. See the
+[Surya parser runbook](../app/parser_services/surya/README.md#nvidia-gpu-parser-on-the-windows-wsl-host)
+for the exact four-file command and rollback. The readiness script's
+`-ExpectedAppImageId` checks the app image, so verify Surya's running image
+and `/health.gpu_execution_verified` after a real synthetic OCR request
+separately. A missing per-layer count is reported as unknown.
+
 The tracked defaults cap the six full-profile services at about 12.25 GiB in
 total so the stack can fit on the confirmed 16 GiB development host. Actual
 model and indexing load must still be observed; adjust the ignored env file if

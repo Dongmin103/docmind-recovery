@@ -43,11 +43,41 @@ labels identify the CUDA implementation.
 
 Before replacing the CPU service, start the GPU image separately with the
 same read-only model mount and run a real OCR request. `/health` reports
-`gpu_device_visible` and `gpu_layers_requested` as configuration facts;
-`gpu_offload_verified` becomes true only when the pinned llama.cpp startup log
-reports a positive number of offloaded layers and a CUDA model buffer. A
-successful health response before OCR does not prove acceleration. Keep the
-CPU service until this proof and the parser result both pass.
+`gpu_device_visible` and `gpu_layers_requested` as configuration facts.
+`gpu_execution_verified` becomes true after a successful request only when
+the exact spawned llama-server PID appears in NVIDIA's compute-process list.
+`gpu_offload_verified` and layer counts remain false/null unless llama.cpp
+also prints its per-layer and CUDA-buffer evidence. The b10718 server on this
+host omits those lines at its default verbosity, so a null layer count does
+not negate a verified CUDA compute process. Keep the CPU service until the
+OCR result and process-specific execution proof both pass.
+
+On this Windows host, the production-like development stack has two tracked
+overlays and one ignored local source overlay. Keep all three when appending
+the GPU overlay; otherwise the existing source and secret mounts can change:
+
+```powershell
+C:\Users\uplex\bin\docker.cmd compose `
+  --env-file .local/docker/windows-dev.env `
+  -f app/docker/docker-compose-windows-dev.yml `
+  -f app/docker/docker-compose-windows-dev-generationless-e2e.yml `
+  -f .local/docker/legacy-doc-source-overlay.yml `
+  -f app/docker/docker-compose-windows-dev-surya-gpu.yml `
+  --profile full config --quiet
+
+C:\Users\uplex\bin\docker.cmd compose `
+  --env-file .local/docker/windows-dev.env `
+  -f app/docker/docker-compose-windows-dev.yml `
+  -f app/docker/docker-compose-windows-dev-generationless-e2e.yml `
+  -f .local/docker/legacy-doc-source-overlay.yml `
+  -f app/docker/docker-compose-windows-dev-surya-gpu.yml `
+  --profile full up -d --no-deps --no-build surya-parser-cpu
+```
+
+The service key is historical; with the fourth overlay its image and GPU
+device request are CUDA-backed. To roll back this one parser, repeat the
+`up -d --no-deps --no-build --force-recreate surya-parser-cpu` command with
+only the first three Compose files, leaving the app and data services alone.
 
 Before starting the service, review the pinned
 [Surya model license](https://github.com/datalab-to/surya/blob/v0.22.1/MODEL_LICENSE).
