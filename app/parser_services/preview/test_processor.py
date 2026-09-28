@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import tempfile
@@ -8,10 +9,13 @@ import threading
 import time
 import unittest
 import zipfile
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import Request, urlopen
 
 import processor
+from service import Handler
 
 
 def package(parts: dict[str, bytes]) -> bytes:
@@ -121,6 +125,36 @@ class ProcessorTest(unittest.TestCase):
         with patch.object(processor, "_run", side_effect=fail), self.assertRaisesRegex(processor.PreviewError, "PREVIEW_CANCELLED"):
             processor.render_hwp_page(source, self.output, "hwp", 1, "session-1", threading.Event())
         self.assertFalse(raw.exists())
+
+    def test_http_process_and_cancel_contract(self) -> None:
+        source = self.session / "source.pdf"
+        source.write_bytes(b"%PDF-1.7\nsynthetic")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{server.server_port}"
+
+            def post(endpoint: str, body: dict[str, object]) -> dict[str, object]:
+                request = Request(
+                    base + endpoint,
+                    data=json.dumps(body).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(request, timeout=3) as response:
+                    self.assertEqual(response.headers["Cache-Control"], "no-store")
+                    return json.loads(response.read())
+
+            result = post(
+                "/preview/process",
+                {"session_id": "session-1", "input_path": str(source), "source_format": "pdf", "output_dir": str(self.output)},
+            )
+            self.assertEqual(result["content_path"], str(source))
+            self.assertEqual(post("/preview/cancel", {"session_id": "session-1"}), {"cancelled": True})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
 
 
 if __name__ == "__main__":
