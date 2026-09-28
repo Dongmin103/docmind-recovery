@@ -272,7 +272,7 @@ class DoclingOfficeAdapter:
         if source_format in {SourceFormat.DOC, SourceFormat.DOCX}:
             return (DocxProvenance(heading_path=self._heading_path(source_ref, items), item_locator=source_ref),)
         if source_format == SourceFormat.XLSX:
-            sheet = self._container_name(source_ref, items, prefix="Sheet") or f"Sheet-{_page(item) or 1}"
+            sheet = self._sheet_name(source_ref, items) or f"Sheet-{_page(item) or 1}"
             return (XlsxProvenance(sheet=sheet, cell_range=_cell_range(item), region_locator=source_ref),)
         slide = _page(item) or self._slide_number(source_ref, items)
         return (PptxProvenance(slide=slide, shape_locator=source_ref, bbox=_bbox(item)),)
@@ -301,6 +301,18 @@ class DoclingOfficeAdapter:
             if cursor.startswith("#/groups/"):
                 return cursor
             cursor = _ref(items[cursor].get("parent"))
+        return None
+
+    @staticmethod
+    def _sheet_name(source_ref: str, items: dict[str, dict[str, Any]]) -> str | None:
+        cursor: str | None = source_ref
+        seen: set[str] = set()
+        while cursor and cursor in items and cursor not in seen:
+            seen.add(cursor)
+            item = items[cursor]
+            if item.get("label") == "sheet" and item.get("name"):
+                return str(item["name"])
+            cursor = _ref(item.get("parent"))
         return None
 
     @staticmethod

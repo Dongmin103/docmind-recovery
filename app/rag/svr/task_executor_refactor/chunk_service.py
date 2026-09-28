@@ -109,6 +109,34 @@ def apply_source_chunks_document_availability(chunks: List[Dict[str, Any]]) -> N
             )
 
 
+async def chunk_parser_platform_document(document, *, config, parser_config: dict, source_bytes: bytes) -> list[dict]:
+    """Route normalized parser results through their format's chunk policy."""
+    from rag.parser_platform import CommonToStandardChunkAdapter, SourceFormat
+
+    if document.source_format == SourceFormat.PDF:
+        from rag.parser_platform.surya_hybrid_chunker import SuryaHybridChunker
+
+        return await asyncio.to_thread(
+            SuryaHybridChunker(
+                tokenizer_path=config.surya_chunk_tokenizer_path,
+                min_tokens=config.surya_chunk_min_tokens,
+                max_tokens=config.surya_chunk_max_tokens,
+            ).chunk,
+            document,
+            source_bytes=source_bytes,
+        )
+    if document.source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX}:
+        from rag.parser_platform.office_chunker import OfficeChunker
+
+        return await asyncio.to_thread(
+            OfficeChunker().chunk,
+            document,
+            parser_config=parser_config,
+            source_bytes=source_bytes,
+        )
+    return CommonToStandardChunkAdapter().adapt(document)
+
+
 class ChunkService:
     """Service for document chunking and post-processing.
 
@@ -170,7 +198,6 @@ class ChunkService:
         if ctx.parse_run_id:
             from api.db.services.parser_run_service import ParserRunService
             from rag.parser_platform import (
-                CommonToStandardChunkAdapter,
                 ParserPlatformConfig,
                 ParserPlatformError,
                 ParserPlatformStandardBridge,
@@ -229,20 +256,12 @@ class ChunkService:
                     retryable=error.retryable,
                 )
                 raise
-            if parser_platform_document.source_format == SourceFormat.PDF:
-                from rag.parser_platform.surya_hybrid_chunker import SuryaHybridChunker
-
-                cks = await asyncio.to_thread(
-                    SuryaHybridChunker(
-                        tokenizer_path=config.surya_chunk_tokenizer_path,
-                        min_tokens=config.surya_chunk_min_tokens,
-                        max_tokens=config.surya_chunk_max_tokens,
-                    ).chunk,
-                    parser_platform_document,
-                    source_bytes=parser_source,
-                )
-            else:
-                cks = CommonToStandardChunkAdapter().adapt(parser_platform_document)
+            cks = await chunk_parser_platform_document(
+                parser_platform_document,
+                config=config,
+                parser_config=ctx.parser_config,
+                source_bytes=parser_source,
+            )
             if not cks:
                 if getattr(ctx, "_docmind_defer_activation", False):
                     cks = []

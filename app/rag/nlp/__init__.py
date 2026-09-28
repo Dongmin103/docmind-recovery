@@ -1806,6 +1806,8 @@ def _merge_cks(cks, chunk_token_num, has_custom):
 
         merged[prev_text_ck]["text"] = (merged[prev_text_ck].get("text") or "") + (cks[i].get("text") or "")
         merged[prev_text_ck]["tk_nums"] = merged[prev_text_ck].get("tk_nums", 0) + cks[i].get("tk_nums", 0)
+        if "source_indices" in cks[i]:
+            merged[prev_text_ck].setdefault("source_indices", []).extend(cks[i]["source_indices"])
 
     return merged, image_idxs
 
