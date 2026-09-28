@@ -21,6 +21,8 @@ from api.db.db_models import (
     DocmindSourceScanBatch,
     DocmindSourceScanEntry,
     DocmindSourceVersion,
+    Document,
+    Knowledgebase,
 )
 
 SERVICE_PATH = Path(__file__).resolve().parents[5] / "api" / "apps" / "services" / "docmind_reconciliation_service.py"
@@ -32,6 +34,8 @@ SPEC.loader.exec_module(service)
 
 MODELS = [
     DocmindProject,
+    Knowledgebase,
+    Document,
     DocmindFolder,
     DocmindSource,
     DocmindSourceDocument,
@@ -86,6 +90,10 @@ def reconciliation_db():
             tenant_id="tenant-1",
             dataset_id="dataset-1",
             catalog_source_mode="database",
+        )
+        Knowledgebase.create(
+            id="dataset-1", tenant_id="tenant-1", name="Fixture",
+            embd_id="BAAI/bge-m3@Builtin", created_by="tenant-1",
         )
         DocmindFolder.create(
             id="folder-1",
@@ -253,6 +261,35 @@ def test_new_file_without_explicit_folder_is_durable_action_required(reconciliat
     entry = DocmindSourceScanEntry.get()
     assert entry.source_document_id is None
     assert entry.reconciliation_state == "ACTION_REQUIRED_MAPPING"
+
+
+def test_discovered_legacy_doc_is_registered_for_existing_parser(reconciliation_db):
+    source = DocmindSource.get_by_id("home-test1")
+    source.default_folder_id = "folder-1"
+    source.save()
+    _start()
+    service.record_scan_batch(
+        source_id="home-test1",
+        scan_id="scan-1",
+        worker_id="worker-1",
+        batch_index=0,
+        documents=[_keep_document() | {"relative_path": "reports/approved-copy.doc"}],
+        observation_handler=lambda *_args, **_kwargs: {"state": "DISCOVERED"},
+    )
+
+    mapping = DocmindSourceDocument.get(
+        DocmindSourceDocument.relative_path == "reports/approved-copy.doc"
+    )
+    document = Document.get_by_id(mapping.document_id)
+    entry = DocmindSourceScanEntry.get()
+    assert mapping.relative_path == "reports/approved-copy.doc"
+    assert entry.source_document_id == mapping.id
+    assert entry.reconciliation_state == "DISCOVERED"
+    assert document.type == "doc"
+    assert document.suffix == "doc"
+    assert document.parser_id == "naive"
+    assert document.location is None
+    assert Knowledgebase.get_by_id("dataset-1").doc_num == 1
 
 
 def test_cloud_document_payload_has_no_fake_object_store_location(reconciliation_db):

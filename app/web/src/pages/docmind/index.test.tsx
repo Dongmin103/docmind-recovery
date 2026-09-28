@@ -7,10 +7,20 @@ let mockCanAdminister = false;
 let mockFolderError = false;
 let mockHierarchyError = false;
 let mockRegistrationError = false;
+let mockSearchResult: any;
+let mockSearchVariables: any;
+let mockDocumentOptions: any[];
 
 jest.mock('@tanstack/react-query', () => ({
   useMutation: (options: { mutationKey?: string[] }) => ({
-    data: undefined,
+    data:
+      options.mutationKey?.[0] === 'docmind-search'
+        ? mockSearchResult
+        : undefined,
+    variables:
+      options.mutationKey?.[0] === 'docmind-search'
+        ? mockSearchVariables
+        : undefined,
     error: undefined,
     isError: false,
     isPending: false,
@@ -28,14 +38,7 @@ jest.mock('@tanstack/react-query', () => ({
           can_administer: mockCanAdminister,
           can_upload: false,
           source_sync: true,
-          documents: [
-            {
-              id: 'document-1',
-              name: 'protocol.pdf',
-              folder_id: 'folder-1',
-              relative_path: '품질/protocol.pdf',
-            },
-          ],
+          documents: mockDocumentOptions,
           folders: [
             { id: 'folder-1', name: '품질', document_count: 1 },
             { id: 'folder-2', name: '밸리데이션', document_count: 1 },
@@ -137,6 +140,16 @@ describe('DocMind search scopes', () => {
     mockFolderError = false;
     mockHierarchyError = false;
     mockRegistrationError = false;
+    mockSearchResult = undefined;
+    mockSearchVariables = undefined;
+    mockDocumentOptions = [
+      {
+        id: 'document-1',
+        name: 'protocol.pdf',
+        folder_id: 'folder-1',
+        relative_path: '품질/protocol.pdf',
+      },
+    ];
   });
 
   it('searches all accessible documents by default', () => {
@@ -230,5 +243,49 @@ describe('DocMind search scopes', () => {
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('자료 목록 새로고침'));
     expect(mockRefetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('hides results from a previous scope after the selection changes', () => {
+    mockSearchVariables = {
+      projectId: 'project-1',
+      scope: { mode: 'all' },
+    };
+    mockSearchResult = {
+      dataset_id: 'dataset-1',
+      candidate_count: 1,
+      ranked_chunks: [{ doc_id: 'document-1', doc_name: 'protocol.pdf', content_with_weight: 'saved result' }],
+    };
+    renderDocMind();
+    expect(screen.getByText('결과 1개 · 후보 1개')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('전체 문서'));
+    fireEvent.click(screen.getByLabelText('선택 문서'));
+
+    expect(screen.queryByText('saved result')).not.toBeInTheDocument();
+    expect(screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.')).toBeInTheDocument();
+  });
+
+  it('hides a cached result when its document leaves the live catalog', () => {
+    mockSearchVariables = {
+      projectId: 'project-1',
+      scope: { mode: 'all' },
+    };
+    mockSearchResult = {
+      dataset_id: 'dataset-1',
+      candidate_count: 1,
+      ranked_chunks: [{ doc_id: 'document-1', doc_name: 'protocol.pdf', content_with_weight: 'saved result' }],
+    };
+    const view = renderDocMind();
+    expect(screen.getByText('결과 1개 · 후보 1개')).toBeInTheDocument();
+
+    mockDocumentOptions = [];
+    view.rerender(
+      <MemoryRouter initialEntries={['/docmind']}>
+        <DocMind />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('saved result')).not.toBeInTheDocument();
+    expect(screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.')).toBeInTheDocument();
   });
 });

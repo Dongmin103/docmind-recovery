@@ -158,11 +158,10 @@ def _provision_discovered_document(
     if folder is None:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_DEFAULT_FOLDER_INVALID")
     suffix = relative_path.rsplit(".", 1)[-1].lower() if "." in relative_path else ""
-    if suffix not in {"pdf", "docx", "xlsx", "pptx", "hwp", "hwpx"}:
+    if suffix not in {"pdf", "doc", "docx", "xlsx", "pptx", "hwp", "hwpx"}:
         return None
 
-    from api.db.db_models import Knowledgebase
-    from api.db.services.document_service import DocumentService
+    from api.db.db_models import Document, Knowledgebase
     from api.db.services.file_service import FileService
     from api.utils.file_utils import filename_type
 
@@ -173,8 +172,12 @@ def _provision_discovered_document(
     filename = relative_path.rsplit("/", 1)[-1]
     file_type = filename_type(filename)
     parser_id = FileService.get_parser(file_type, filename, knowledgebase.parser_id)
-    DocumentService.insert(
-        _discovered_document_payload(
+    # This runs inside record_scan_batch's atomic transaction. DocumentService.insert
+    # opens a new connection context and closes that connection while the scan's
+    # transaction is still active, so create the document and increment the
+    # dataset count on the existing connection.
+    Document.create(
+        **_discovered_document_payload(
             document_id=document_id,
             project=project,
             knowledgebase=knowledgebase,
@@ -183,6 +186,13 @@ def _provision_discovered_document(
             parser_id=parser_id,
         )
     )
+    updated = Knowledgebase.update(
+        doc_num=Knowledgebase.doc_num + 1,
+        update_time=current_timestamp(),
+        update_date=_now(),
+    ).where(Knowledgebase.id == knowledgebase.id).execute()
+    if updated != 1:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_DATASET_UPDATE_FAILED")
     return DocmindSourceDocument.create(
         id=_stable_id("docmind-source-document", project.id, source.id, document_id),
         project_id=project.id,

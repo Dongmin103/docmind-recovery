@@ -390,8 +390,28 @@ export default function DocMind() {
   const explicitScopeEmpty =
     (scopeMode === 'folders' && canonicalFolderIds.length === 0) ||
     (scopeMode === 'documents' && canonicalDocumentIds.length === 0);
-  const searchChunks =
+  const currentScope: DocMindSearchScope =
+    scopeMode === 'folders'
+      ? { mode: scopeMode, folderIds: canonicalFolderIds }
+      : scopeMode === 'documents'
+        ? { mode: scopeMode, documentIds: canonicalDocumentIds }
+        : { mode: 'all' };
+  const returnedChunks =
     retrieval.data?.ranked_chunks ?? retrieval.data?.chunks ?? [];
+  const availableDocumentIds = new Set(
+    documentNodes.map((document) => document.id),
+  );
+  const searchResultValid = Boolean(
+    retrieval.data &&
+      retrieval.variables &&
+      !explicitScopeEmpty &&
+      !folderCatalog.isError &&
+      !folderCatalog.isPending &&
+      retrieval.variables.projectId === folderCatalog.data?.project_id &&
+      JSON.stringify(retrieval.variables.scope) === JSON.stringify(currentScope) &&
+      returnedChunks.every((chunk) => availableDocumentIds.has(chunk.doc_id)),
+  );
+  const searchChunks = searchResultValid ? returnedChunks : [];
   const folderNames = useMemo(
     () => new Map(folders.map((folder) => [folder.id, folder.name])),
     [folders],
@@ -440,16 +460,10 @@ export default function DocMind() {
       folderCatalog.isPending
     )
       return;
-    const scope: DocMindSearchScope =
-      scopeMode === 'folders'
-        ? { mode: scopeMode, folderIds: canonicalFolderIds }
-        : scopeMode === 'documents'
-          ? { mode: scopeMode, documentIds: canonicalDocumentIds }
-          : { mode: 'all' };
     retrieval.mutate({
       question: query.trim(),
       projectId: folderCatalog.data?.project_id,
-      scope,
+      scope: currentScope,
     });
   };
   const toggle = (
@@ -707,7 +721,12 @@ export default function DocMind() {
                     검색 후보를 모으고 재정렬하는 중입니다.
                   </p>
                 )}
-                {retrieval.data && !retrieval.isPending && (
+                {retrieval.data && !retrieval.isPending && !searchResultValid && (
+                  <p role="status" className="mt-8 text-text-secondary">
+                    검색 범위가 변경되었습니다. 다시 검색해 주세요.
+                  </p>
+                )}
+                {retrieval.data && !retrieval.isPending && searchResultValid && (
                   <section className="mt-6" aria-label="검색 결과">
                     <p className="text-sm text-text-secondary">
                       결과 {searchChunks.length}개 · 후보{' '}
@@ -865,7 +884,11 @@ export default function DocMind() {
           )}
         </main>
         <DocumentModal
-          chunk={selectedChunk}
+          chunk={
+            selectedChunk && availableDocumentIds.has(selectedChunk.doc_id)
+              ? selectedChunk
+              : undefined
+          }
           datasetId={retrieval.data?.dataset_id}
           onClose={() => setSelectedChunk(undefined)}
         />
