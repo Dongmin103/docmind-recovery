@@ -178,22 +178,57 @@ async function stripWpsDispImg(data: ArrayBuffer): Promise<ArrayBuffer> {
  * root element leaves the model undefined and crashes with
  * "Cannot read properties of undefined (reading 'sheets')".
  *
- * When such a prefix is detected, re-serialize the file with SheetJS (which
- * always emits a standard, prefix-free xlsx) so ExcelJS can parse it.
+ * Also rebase package-absolute drawing relationships to relative package
+ * targets so ExcelJS can resolve images. When a workbook root prefix is
+ * detected, re-serialize the file with SheetJS for ExcelJS parsing.
  */
-async function normalizeXlsxForExcelJS(
+export async function normalizeXlsxForExcelJS(
   data: ArrayBuffer,
 ): Promise<ArrayBuffer> {
   try {
     const zip = await JSZip.loadAsync(data);
+    let changed = false;
+    // Some producers write package-absolute relationship targets. ExcelJS
+    // resolves worksheet drawings and their media from relative targets.
+    // Rebase only internal drawing relationships; keep the drawing and image.
+    const relationshipPaths = Object.keys(zip.files).filter((path) =>
+      /^xl\/(?:worksheets|drawings)\/_rels\/[^/]+\.rels$/.test(path),
+    );
+    for (const path of relationshipPaths) {
+      const file = zip.file(path);
+      if (!file) continue;
+      const xml = await file.async('string');
+      const ownerParts = path.replace('/_rels/', '/').replace(/\.rels$/, '').split('/');
+      ownerParts.pop();
+      const normalized = xml.replace(
+        /(\bTarget\s*=\s*)(["'])(\/xl\/[^"'<>]+)\2/g,
+        (match, prefix: string, quote: string, target: string) => {
+          const targetParts = target.slice(1).split('/');
+          if (targetParts.some((part) => !part || part === '..' || part === '.')) return match;
+          const sourceParts = [...ownerParts];
+          while (sourceParts.length && sourceParts[0] === targetParts[0]) {
+            sourceParts.shift();
+            targetParts.shift();
+          }
+          return `${prefix}${quote}${'../'.repeat(sourceParts.length)}${targetParts.join('/')}${quote}`;
+        },
+      );
+      if (normalized !== xml) {
+        zip.file(path, normalized);
+        changed = true;
+      }
+    }
+    const normalizedData = changed
+      ? await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })
+      : data;
     const workbookFile = zip.file('xl/workbook.xml');
-    if (!workbookFile) return data;
+    if (!workbookFile) return normalizedData;
 
     const xml = await workbookFile.async('string');
     // Detect a namespace prefix on the root <workbook> element, e.g. <x:workbook>
-    if (!/<\w+:workbook[\s>]/.test(xml)) return data;
+    if (!/<\w+:workbook[\s>]/.test(xml)) return normalizedData;
 
-    const workbook = XLSX.read(data, { type: 'array' });
+    const workbook = XLSX.read(normalizedData, { type: 'array' });
     return XLSX.write(workbook, {
       bookType: 'xlsx',
       type: 'array',

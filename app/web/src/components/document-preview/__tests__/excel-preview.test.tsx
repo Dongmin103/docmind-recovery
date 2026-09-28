@@ -71,7 +71,8 @@ jest.mock('@js-preview/excel', () => ({
     },
   },
 }));
-import { useFetchExcel } from '../hooks';
+import JSZip from 'jszip';
+import { normalizeXlsxForExcelJS, useFetchExcel } from '../hooks';
 
 const flush = async () => {
   await act(async () => {
@@ -101,6 +102,30 @@ beforeEach(() => {
 });
 afterEach(() => {
   jest.useRealTimers();
+});
+
+test('rebases absolute drawing links without removing image bytes', async () => {
+  jest.useRealTimers();
+  const zip = new JSZip();
+  zip.file('xl/workbook.xml', '<workbook/>');
+  zip.file(
+    'xl/worksheets/_rels/sheet1.xml.rels',
+    '<Relationships><Relationship Target="/xl/drawings/drawing1.xml" Id="rId1"/></Relationships>',
+  );
+  zip.file(
+    'xl/drawings/_rels/drawing1.xml.rels',
+    '<Relationships><Relationship Target="/xl/media/image1.png" Id="rId1"/></Relationships>',
+  );
+  zip.file('xl/drawings/drawing1.xml', '<drawing/>');
+  zip.file('xl/media/image1.png', new Uint8Array([137, 80, 78, 71]));
+  const original = await zip.generateAsync({ type: 'arraybuffer' });
+  const normalized = await JSZip.loadAsync(await normalizeXlsxForExcelJS(original));
+  expect(await normalized.file('xl/worksheets/_rels/sheet1.xml.rels')?.async('string'))
+    .toContain('Target="../drawings/drawing1.xml"');
+  expect(await normalized.file('xl/drawings/_rels/drawing1.xml.rels')?.async('string'))
+    .toContain('Target="../media/image1.png"');
+  expect(await normalized.file('xl/media/image1.png')?.async('uint8array'))
+    .toEqual(new Uint8Array([137, 80, 78, 71]));
 });
 
 test('selects XLS parsing from metadata for opaque preview URLs', async () => {
