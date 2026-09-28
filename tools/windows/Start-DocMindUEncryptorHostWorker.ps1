@@ -2,6 +2,7 @@
 param(
     [string]$ConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG,
     [switch]$Once,
+    [switch]$PreviewOnly,
     [ValidateRange(1, 300)][int]$PollSeconds = 5
 )
 
@@ -35,9 +36,11 @@ $workRoot = [IO.Path]::GetFullPath([string]$config.work_root)
 $receiptRoot = if ($config.PSObject.Properties.Name -contains 'cleanup_receipt_root' -and -not [string]::IsNullOrWhiteSpace([string]$config.cleanup_receipt_root)) {
     [IO.Path]::GetFullPath([string]$config.cleanup_receipt_root)
 } else { [IO.Path]::GetFullPath(([string]$config.work_root + '-cleanup-receipts')) }
+$previewWorkRoot = [IO.Path]::GetFullPath((Join-Path $workRoot 'previews'))
+$previewReceiptRoot = [IO.Path]::GetFullPath((Join-Path $receiptRoot 'previews'))
 $secretFile = [IO.Path]::GetFullPath([string]$config.shared_secret_file)
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf) -or [IO.Path]::GetExtension($executable) -ne '.exe') { throw 'Configured executable is unavailable or is not an .exe.' }
-if ($executable.Contains('"') -or $workRoot.Contains('"') -or $receiptRoot.Contains('"')) { throw 'Configured paths containing quotation marks are unsupported.' }
+if ($executable.Contains('"') -or $workRoot.Contains('"') -or $receiptRoot.Contains('"') -or $previewWorkRoot.Contains('"') -or $previewReceiptRoot.Contains('"')) { throw 'Configured paths containing quotation marks are unsupported.' }
 
 $sources = @{}
 foreach ($source in @($config.sources)) {
@@ -58,6 +61,12 @@ foreach ($sourceRoot in $sources.Values) {
     $receiptPrefix = $receiptRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ($receiptRoot.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or $receiptRoot.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase) -or $sourceRoot.StartsWith($receiptPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'cleanup_receipt_root must be separate from every source root.'
+    }
+    foreach ($previewRoot in @($previewWorkRoot, $previewReceiptRoot)) {
+        $previewPrefix = $previewRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ($previewRoot.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or $previewRoot.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase) -or $sourceRoot.StartsWith($previewPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Preview roots must be separate from every source root.'
+        }
     }
 }
 $workBoundary = $workRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -99,6 +108,11 @@ $expectedExecutableHash = ([string]$config.executable_sha256).ToLowerInvariant()
 $expectedSignerThumbprint = (([string]$config.executable_signer_thumbprint) -replace '\s', '').ToUpperInvariant()
 $claimPath = '/api/v1/cloud-sync/host-worker/claim'
 $jobsPath = '/api/v1/cloud-sync/host-worker/jobs'
+$previewClaimPath = '/api/v1/cloud-sync/host-worker/preview/claim'
+$previewJobsPath = '/api/v1/cloud-sync/host-worker/previews'
+$previewEnabled = $false
+if ($config.PSObject.Properties.Name -contains 'preview_enabled') { $previewEnabled = [bool]$config.preview_enabled }
+if ($PreviewOnly -and -not $previewEnabled) { throw 'PREVIEW_NOT_ENABLED' }
 $responseNonces = @{}
 $lastFencingTokenByJob = @{}
 
@@ -201,7 +215,7 @@ function Invoke-SignedJsonRequest {
 }
 
 function Send-WorkerStatus {
-    param($Lease, [string]$State, [string]$ErrorCode, [bool]$CleanupComplete)
+    param($Lease, [string]$State, [string]$ErrorCode, [bool]$CleanupComplete, [ValidateSet('ingest', 'preview')][string]$Purpose = 'ingest')
     $status = if ($State -eq 'COMPLETE' -and $CleanupComplete) { 'CLEANED' } elseif (-not $CleanupComplete) { 'CLEANUP_FAILED' } else { 'FAILED' }
     $body = [ordered]@{
         worker_id = [string]$config.worker_id
@@ -210,19 +224,20 @@ function Send-WorkerStatus {
         status = $status
         error_code = $ErrorCode
     }
-    Send-WorkerStatusBody -JobId ([string]$Lease.job_id) -Body $body
+    Send-WorkerStatusBody -JobId ([string]$Lease.job_id) -Body $body -Purpose $Purpose
 }
 
 function Send-WorkerStatusBody {
-    param([string]$JobId, $Body)
-    $result = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri ("$jobsPath/$([Uri]::EscapeDataString($JobId))/status") -Body $Body
+    param([string]$JobId, $Body, [ValidateSet('ingest', 'preview')][string]$Purpose = 'ingest')
+    $path = if ($Purpose -eq 'preview') { $previewJobsPath } else { $jobsPath }
+    $result = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri ("$path/$([Uri]::EscapeDataString($JobId))/status") -Body $Body
     if ($result.Body.Length -eq 0) { throw 'STATUS_ACK_MISSING' }
     $ack = [Text.Encoding]::UTF8.GetString($result.Body) | ConvertFrom-Json
     if ($ack.accepted -ne $true -or [string]$ack.job_id -ne $JobId -or [string]$ack.version_id -ne [string]$Body.version_id -or [Int64]$ack.fencing_token -ne [Int64]$Body.fencing_token) { throw 'STATUS_ACK_MISMATCH' }
 }
 
 function Send-CleanupReceipt {
-    param($Receipt)
+    param($Receipt, [ValidateSet('ingest', 'preview')][string]$Purpose = 'ingest')
     $body = [ordered]@{
         worker_id = [string]$config.worker_id
         version_id = [string]$Receipt.version_id
@@ -230,7 +245,7 @@ function Send-CleanupReceipt {
         status = [string]$Receipt.final_state
         error_code = $Receipt.error_code
     }
-    Send-WorkerStatusBody -JobId ([string]$Receipt.job_id) -Body $body
+    Send-WorkerStatusBody -JobId ([string]$Receipt.job_id) -Body $body -Purpose $Purpose
 }
 
 function Write-JobState {
@@ -259,12 +274,19 @@ function Stop-WorkerProcessTree {
 }
 
 function Invoke-LeasedDecryptJob {
-    param($Lease)
-    $leaseExpiry = Assert-DocMindLeasePayload -Payload $Lease -MinimumRemainingSeconds $leaseSafetySeconds
+    param($Lease, [ValidateSet('ingest', 'preview')][string]$Purpose = 'ingest')
+    if ($Purpose -eq 'preview') {
+        $workRoot = $previewWorkRoot
+        $receiptRoot = $previewReceiptRoot
+        $jobsPath = $previewJobsPath
+    }
+    $validationLease = if ($Purpose -eq 'preview') { $Lease | Select-Object job_id, source_id, document_id, version_id, relative_path, ciphertext_sha256, fencing_token, lease_expires_at } else { $Lease }
+    $leaseExpiry = Assert-DocMindLeasePayload -Payload $validationLease -MinimumRemainingSeconds $leaseSafetySeconds
     if (-not $sources.ContainsKey([string]$Lease.source_id)) { throw 'SOURCE_NOT_REGISTERED' }
     $sourceFile = Resolve-DocMindSourceFile -Root $sources[[string]$Lease.source_id] -RelativePath ([string]$Lease.relative_path)
     $sourceHashBefore = Get-DocMindFileSha256 -LiteralPath $sourceFile
     if (-not (Test-DocMindFixedTimeHexEqual $sourceHashBefore ([string]$Lease.ciphertext_sha256).ToLowerInvariant())) { throw 'SOURCE_FINGERPRINT_MISMATCH' }
+    if ($Purpose -eq 'preview' -and $Lease.PSObject.Properties.Name -contains 'ciphertext_size' -and (Get-Item -LiteralPath $sourceFile).Length -ne [Int64]$Lease.ciphertext_size) { throw 'SOURCE_FINGERPRINT_MISMATCH' }
     $executableHashBefore = Assert-ExecutableIdentity
 
     [IO.Directory]::CreateDirectory($workRoot) | Out-Null
@@ -310,6 +332,7 @@ function Invoke-LeasedDecryptJob {
         if (-not (Test-Path -LiteralPath $outputFile -PathType Leaf)) { throw 'OUTPUT_MISSING' }
         $outputItem = Get-Item -LiteralPath $outputFile
         if ($outputItem.Length -le 0) { throw 'OUTPUT_EMPTY' }
+        if ($Purpose -eq 'preview' -and $outputItem.Length -gt 64MB) { throw 'PREVIEW_INPUT_TOO_LARGE' }
 
         $sourceHashAfter = Get-DocMindFileSha256 -LiteralPath $sourceFile
         $executableHashAfter = Assert-ExecutableIdentity
@@ -330,11 +353,13 @@ function Invoke-LeasedDecryptJob {
                 'X-DocMind-Plaintext-Size' = [string]$outputItem.Length
             }
             $artifactTimeoutSeconds = Get-DocMindArtifactRequestTimeoutSeconds -LeaseExpiresAt $leaseExpiry -SafetySeconds 5
+            if ($Purpose -eq 'preview') { $artifactTimeoutSeconds = [Math]::Min(120, $artifactTimeoutSeconds) }
             $result = Invoke-SignedBytesRequest -Method 'PUT' -RelativeUri $relativeUri -ContentSha256 $plainHash -Content $content -ContentType 'application/octet-stream' -AdditionalHeaders $artifactHeaders -RequestTimeoutSeconds $artifactTimeoutSeconds
         } finally { $stream.Dispose() }
         if ($result.Body.Length -eq 0) { throw 'DELIVERY_ACK_MISSING' }
         $ack = [Text.Encoding]::UTF8.GetString($result.Body) | ConvertFrom-Json
         if ($ack.accepted -ne $true -or [string]$ack.job_id -ne [string]$Lease.job_id -or [string]$ack.version_id -ne [string]$Lease.version_id -or [Int64]$ack.fencing_token -ne [Int64]$Lease.fencing_token) { throw 'DELIVERY_ACK_MISMATCH' }
+        if ($Purpose -eq 'preview' -and $ack.cleanup_required -ne $true) { throw 'DELIVERY_ACK_MISMATCH' }
         $jobSucceeded = $true
         Write-JobState -JobDirectory $jobDirectory -Lease $Lease -State 'ACKNOWLEDGED'
     } catch {
@@ -367,7 +392,7 @@ function Invoke-LeasedDecryptJob {
         } catch { $jobSucceeded = $false; $errorCode = 'CLEANUP_RECEIPT_WRITE_FAILED' }
     }
     try {
-        Send-WorkerStatus -Lease $Lease -State $finalState -ErrorCode $errorCode -CleanupComplete $cleanupComplete
+        Send-WorkerStatus -Lease $Lease -State $finalState -ErrorCode $errorCode -CleanupComplete $cleanupComplete -Purpose $Purpose
         if ($cleanupComplete -and $null -ne $receiptPath -and (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
             Assert-DocMindNoReparsePoint -LiteralPath $receiptPath -Boundary $receiptRoot -Name 'Acknowledged cleanup receipt'
             Remove-Item -LiteralPath $receiptPath -Force -ErrorAction Stop
@@ -376,18 +401,50 @@ function Invoke-LeasedDecryptJob {
     if (-not $jobSucceeded) { throw $errorCode }
 }
 
+function ConvertTo-PreviewLease {
+    param([Parameter(Mandatory = $true)]$Claim)
+    if ($Claim.PSObject.Properties.Name -notcontains 'id' -or [string]$Claim.id -ne [string]$Claim.job_id) { throw 'PREVIEW_CLAIM_ID_MISMATCH' }
+    if ($Claim.PSObject.Properties.Name -notcontains 'ciphertext_size') { throw 'PREVIEW_CLAIM_SIZE_MISSING' }
+    $sourceSize = 0L
+    if (-not [Int64]::TryParse([string]$Claim.ciphertext_size, [ref]$sourceSize) -or $sourceSize -lt 1) { throw 'PREVIEW_CLAIM_SIZE_INVALID' }
+    $lease = [pscustomobject]@{
+        job_id = [string]$Claim.job_id
+        source_id = [string]$Claim.source_id
+        document_id = [string]$Claim.document_id
+        version_id = [string]$Claim.version_id
+        relative_path = [string]$Claim.relative_path
+        ciphertext_sha256 = [string]$Claim.ciphertext_sha256
+        fencing_token = $Claim.fencing_token
+        lease_expires_at = $Claim.lease_expires_at
+    }
+    [void](Assert-DocMindLeasePayload -Payload $lease -MinimumRemainingSeconds $leaseSafetySeconds)
+    $lease | Add-Member -NotePropertyName ciphertext_size -NotePropertyValue $sourceSize
+    return $lease
+}
+
 [void](Assert-ExecutableIdentity)
 [IO.Directory]::CreateDirectory($workRoot) | Out-Null
 Protect-DocMindJobDirectory -LiteralPath $workRoot
 [IO.Directory]::CreateDirectory($receiptRoot) | Out-Null
 Protect-DocMindJobDirectory -LiteralPath $receiptRoot
-$removed = Remove-DocMindExpiredJobDirectories -WorkRoot $workRoot -ReceiptRoot $receiptRoot -MinimumAgeSeconds $reaperMinimumAgeSeconds
-$receiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt }
+[IO.Directory]::CreateDirectory($previewWorkRoot) | Out-Null
+Protect-DocMindJobDirectory -LiteralPath $previewWorkRoot
+[IO.Directory]::CreateDirectory($previewReceiptRoot) | Out-Null
+Protect-DocMindJobDirectory -LiteralPath $previewReceiptRoot
+$removed = 0
+$receiptReplay = [pscustomobject]@{ acknowledged = 0; pending = 0 }
+if (-not $PreviewOnly) {
+    $removed = Remove-DocMindExpiredJobDirectories -WorkRoot $workRoot -ReceiptRoot $receiptRoot -MinimumAgeSeconds $reaperMinimumAgeSeconds -ExcludedDirectoryNames @('previews')
+    $receiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt }
+}
+$previewRemoved = Remove-DocMindExpiredJobDirectories -WorkRoot $previewWorkRoot -ReceiptRoot $previewReceiptRoot -MinimumAgeSeconds $reaperMinimumAgeSeconds
+$previewReceiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $previewReceiptRoot -WorkRoot $previewWorkRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt -Purpose preview }
 $lastReceiptReplayAt = [DateTimeOffset]::UtcNow
-Write-Output ("Host worker ready; stale job directories removed: {0}; cleanup receipts acknowledged: {1}; pending: {2}." -f $removed, $receiptReplay.acknowledged, $receiptReplay.pending)
+Write-Output ("Host worker ready; stale job directories removed: {0}; preview directories removed: {1}; cleanup receipts acknowledged: {2}; preview receipts acknowledged: {3}." -f $removed, $previewRemoved, $receiptReplay.acknowledged, $previewReceiptReplay.acknowledged)
 
 $runInitialScan = $true
 if ($config.PSObject.Properties.Name -contains 'initial_scan_on_startup') { $runInitialScan = [bool]$config.initial_scan_on_startup }
+if ($PreviewOnly) { $runInitialScan = $false }
 if ($runInitialScan) {
     try {
         & (Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1') -ConfigPath $configFile -Reason startup
@@ -398,23 +455,41 @@ if ($runInitialScan) {
     }
 }
 
+$consecutivePreviewClaims = 0
 do {
     try {
         if ([DateTimeOffset]::UtcNow -ge $lastReceiptReplayAt.AddSeconds($cleanupReceiptReplaySeconds)) {
-            $receiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt }
+            if (-not $PreviewOnly) {
+                $receiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt }
+            }
+            $previewReceiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $previewReceiptRoot -WorkRoot $previewWorkRoot -Sender { param($receipt) Send-CleanupReceipt -Receipt $receipt -Purpose preview }
             if ($receiptReplay.pending -gt 0) { Write-Warning ("Cleanup receipts awaiting a valid signed status ACK: {0}." -f $receiptReplay.pending) }
+            if ($previewReceiptReplay.pending -gt 0) { Write-Warning ("Preview cleanup receipts awaiting a valid signed status ACK: {0}." -f $previewReceiptReplay.pending) }
             $lastReceiptReplayAt = [DateTimeOffset]::UtcNow
         }
         $claimBody = [ordered]@{ worker_id = [string]$config.worker_id; protocol_version = 1; lease_seconds = $claimLeaseSeconds }
-        $claimResult = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri $claimPath -Body $claimBody
-        if ($claimResult.Body.Length -gt 0) {
+        $claimOrder = if ($PreviewOnly) { @('preview') } elseif (-not $previewEnabled) { @('ingest') } elseif ($consecutivePreviewClaims -ge 3) { @('ingest', 'preview') } else { @('preview', 'ingest') }
+        foreach ($purpose in $claimOrder) {
+            $path = if ($purpose -eq 'preview') { $previewClaimPath } else { $claimPath }
+            try {
+                $claimResult = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri $path -Body $claimBody
+            } catch {
+                if ($purpose -ne 'preview') { throw }
+                Write-Warning 'Preview claim unavailable; ingestion claim will continue.'
+                continue
+            }
+            if ($claimResult.Body.Length -eq 0) { continue }
             $claimEnvelope = [Text.Encoding]::UTF8.GetString($claimResult.Body) | ConvertFrom-Json
             if ($null -ne $claimEnvelope.job) {
-                $claimedJobId = [string]$claimEnvelope.job.job_id
-                $claimedFence = [Int64]$claimEnvelope.job.fencing_token
-                if ($lastFencingTokenByJob.ContainsKey($claimedJobId) -and $claimedFence -le [Int64]$lastFencingTokenByJob[$claimedJobId]) { throw 'STALE_FENCING_TOKEN' }
-                $lastFencingTokenByJob[$claimedJobId] = $claimedFence
-                Invoke-LeasedDecryptJob -Lease $claimEnvelope.job
+                $lease = if ($purpose -eq 'preview') { ConvertTo-PreviewLease -Claim $claimEnvelope.job } else { $claimEnvelope.job }
+                $claimedJobId = [string]$lease.job_id
+                $claimedFence = [Int64]$lease.fencing_token
+                $claimKey = "${purpose}:$claimedJobId"
+                if ($lastFencingTokenByJob.ContainsKey($claimKey) -and $claimedFence -le [Int64]$lastFencingTokenByJob[$claimKey]) { throw 'STALE_FENCING_TOKEN' }
+                $lastFencingTokenByJob[$claimKey] = $claimedFence
+                Invoke-LeasedDecryptJob -Lease $lease -Purpose $purpose
+                if ($purpose -eq 'preview') { $consecutivePreviewClaims++ } else { $consecutivePreviewClaims = 0 }
+                break
             }
         }
     } catch {

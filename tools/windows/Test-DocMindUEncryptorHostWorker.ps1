@@ -135,18 +135,22 @@ try {
     $receiptRoot = Join-Path $testRoot 'cleanup-receipts'
     $expired = Join-Path $workRoot 'expired-job'
     $active = Join-Path $workRoot 'active-job'
+    $previewContainer = Join-Path $workRoot 'previews'
     [IO.Directory]::CreateDirectory($expired) | Out-Null
     [IO.Directory]::CreateDirectory($active) | Out-Null
+    [IO.Directory]::CreateDirectory($previewContainer) | Out-Null
     [IO.File]::WriteAllText((Join-Path $expired 'plaintext.bin'), 'synthetic')
     [IO.File]::WriteAllText((Join-Path $active 'plaintext.bin'), 'synthetic')
     [IO.File]::WriteAllText((Join-Path $expired 'job-state.json'), (@{ job_id = 'expired-job'; version_id = 'version-expired'; fencing_token = 3; lease_expires_at = [DateTimeOffset]::UtcNow.AddMinutes(-10).ToString('o') } | ConvertTo-Json))
     [IO.File]::WriteAllText((Join-Path $active 'job-state.json'), (@{ job_id = 'active-job'; version_id = 'version-active'; fencing_token = 4; lease_expires_at = [DateTimeOffset]::UtcNow.AddMinutes(10).ToString('o') } | ConvertTo-Json))
     (Get-Item -LiteralPath $expired).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
     (Get-Item -LiteralPath $active).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
-    $removed = Remove-DocMindExpiredJobDirectories -WorkRoot $workRoot -ReceiptRoot $receiptRoot -MinimumAgeSeconds 30
+    (Get-Item -LiteralPath $previewContainer).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
+    $removed = Remove-DocMindExpiredJobDirectories -WorkRoot $workRoot -ReceiptRoot $receiptRoot -MinimumAgeSeconds 30 -ExcludedDirectoryNames @('previews')
     Assert-True ($removed -eq 1) 'Reaper did not remove exactly one expired job.'
     Assert-True (-not (Test-Path -LiteralPath $expired)) 'Expired job survived reaping.'
     Assert-True (Test-Path -LiteralPath $active) 'Active leased job was removed.'
+    Assert-True (Test-Path -LiteralPath $previewContainer) 'Ingestion reaper removed the preview work container.'
     $receipts = @(Get-ChildItem -LiteralPath $receiptRoot -File -Filter '*.json')
     Assert-True ($receipts.Count -eq 1) 'Reaper did not persist exactly one cleanup receipt.'
     $receipt = Read-DocMindCleanupReceipt -LiteralPath $receipts[0].FullName -ReceiptRoot $receiptRoot
@@ -176,7 +180,23 @@ try {
     $promotedReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($item) $script:pendingReceiptWasSent = ([string]$item.final_state -eq 'CLEANED') }
     Assert-True ($promotedReplay.acknowledged -eq 1 -and $script:pendingReceiptWasSent) 'Deleted plaintext did not promote its pending receipt to CLEANED.'
 
-    Write-Output 'Host worker self-test passed: HMAC/tamper, lease-bounded ACK timeout, explicit Content-Length, ACL idempotency, path boundary, full-scan/deletion proof, fencing, reaping, and durable cleanup-receipt replay.'
+    $previewReceiptRoot = Join-Path $testRoot 'preview-cleanup-receipts'
+    [void](Write-DocMindCleanupReceiptAtomic -ReceiptRoot $receiptRoot -JobId 'same-job' -VersionId 'same-version' -FencingToken 6 -FinalState 'CLEANED' -ErrorCode $null)
+    [void](Write-DocMindCleanupReceiptAtomic -ReceiptRoot $previewReceiptRoot -JobId 'same-job' -VersionId 'same-version' -FencingToken 6 -FinalState 'CLEANED' -ErrorCode $null)
+    $ingestReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $receiptRoot -WorkRoot $workRoot -Sender { param($item) }
+    Assert-True ($ingestReplay.acknowledged -eq 1) 'Ingestion cleanup receipt was not replayed.'
+    Assert-True (@(Get-ChildItem -LiteralPath $previewReceiptRoot -File -Filter '*.json').Count -eq 1) 'Ingestion replay consumed a preview receipt with the same job identity.'
+    $previewReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $previewReceiptRoot -Sender { param($item) }
+    Assert-True ($previewReplay.acknowledged -eq 1) 'Preview cleanup receipt was not replayed separately.'
+    $workerScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Start-DocMindUEncryptorHostWorker.ps1') -Raw
+    Assert-True $workerScript.Contains("'/api/v1/cloud-sync/host-worker/preview/claim'") 'Preview claim endpoint contract is missing.'
+    Assert-True $workerScript.Contains('$consecutivePreviewClaims -ge 3') 'Preview fairness bound is missing.'
+    Assert-True $workerScript.Contains('preview_enabled') 'Preview opt-in switch is missing.'
+    Assert-True $workerScript.Contains('if ($PreviewOnly -and -not $previewEnabled)') 'Preview-only smoke must refuse a disabled preview config.'
+    Assert-True $workerScript.Contains('if ($PreviewOnly) { @(''preview'') }') 'Preview-only smoke must not claim ingestion.'
+    Assert-True $workerScript.Contains('if ($PreviewOnly) { $runInitialScan = $false }') 'Preview-only smoke must skip source reconciliation.'
+
+    Write-Output 'Host worker self-test passed: HMAC/tamper, lease-bounded ACK timeout, explicit Content-Length, ACL idempotency, path boundary, full-scan/deletion proof, fencing, reaping, and purpose-isolated durable cleanup-receipt replay.'
 } finally {
     if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
 }

@@ -11,6 +11,7 @@
   "cleanup_receipt_replay_seconds": 60,
   "job_timeout_seconds": 120,
   "claim_lease_seconds": 1800,
+  "preview_enabled": false,
   "lease_safety_seconds": 10,
   "reaper_minimum_age_seconds": 300,
   "initial_scan_on_startup": true,

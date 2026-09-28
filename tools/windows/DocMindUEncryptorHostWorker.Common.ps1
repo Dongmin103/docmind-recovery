@@ -448,12 +448,14 @@ function Remove-DocMindExpiredJobDirectories {
     param(
         [Parameter(Mandatory = $true)][string]$WorkRoot,
         [string]$ReceiptRoot,
-        [ValidateRange(30, 86400)][int]$MinimumAgeSeconds = 300
+        [ValidateRange(30, 86400)][int]$MinimumAgeSeconds = 300,
+        [string[]]$ExcludedDirectoryNames = @()
     )
     if (-not (Test-Path -LiteralPath $WorkRoot -PathType Container)) { return 0 }
     Assert-DocMindNoReparsePoint -LiteralPath $WorkRoot -Boundary $WorkRoot -Name 'Work root'
     $removed = 0
     foreach ($directory in Get-ChildItem -LiteralPath $WorkRoot -Directory -Force) {
+        if ($directory.Name -in $ExcludedDirectoryNames) { continue }
         if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
         if ($directory.LastWriteTimeUtc -gt [DateTime]::UtcNow.AddSeconds(-$MinimumAgeSeconds)) { continue }
         $statePath = Join-Path $directory.FullName 'job-state.json'
