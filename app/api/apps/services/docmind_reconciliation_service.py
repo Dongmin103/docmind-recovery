@@ -34,7 +34,7 @@ from common.time_utils import current_timestamp
 SEOUL = ZoneInfo("Asia/Seoul")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-RETRYABLE_STATES = frozenset({"FAILED", "RETRY_WAIT", "CLEANUP_FAILED"})
+RETRYABLE_STATES = frozenset({"FAILED", "CLEANUP_FAILED"})
 
 
 class DocmindReconciliationError(RuntimeError):
@@ -847,23 +847,30 @@ def reschedule_retryable_jobs(
     cap_seconds: int = 21_600,
     jitter_ratio: float = 0.2,
     limit: int = 100,
+    source_id: str | None = None,
 ) -> list[dict]:
     now = now or _now()
+    if source_id is not None:
+        source_id = _identifier(source_id, max_length=64)
     if max_attempts < 1 or base_seconds < 1 or cap_seconds < base_seconds or not 0 <= jitter_ratio <= 1:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_RETRY_POLICY_INVALID")
-    jobs = list(
+    retryable = (
         DocmindIngestionJob.select()
         .join(
             DocmindSourceDocument,
             on=(DocmindIngestionJob.source_document_id == DocmindSourceDocument.id),
         )
+        .switch(DocmindIngestionJob)
+        .join(DocmindSource, on=(DocmindIngestionJob.source_id == DocmindSource.id))
         .where(
             (DocmindIngestionJob.lifecycle_state.in_(RETRYABLE_STATES))
             & (DocmindSourceDocument.deleted_at.is_null(True))
+            & (DocmindSource.enabled == True)
         )
-        .order_by(DocmindIngestionJob.update_time.asc())
-        .limit(limit)
     )
+    if source_id is not None:
+        retryable = retryable.where(DocmindIngestionJob.source_id == source_id)
+    jobs = list(retryable.order_by(DocmindIngestionJob.update_time.asc()).limit(limit))
     scheduled: list[dict] = []
     for job in jobs:
         if job.lifecycle_state == "CLEANUP_FAILED":
@@ -944,25 +951,41 @@ def ensure_midnight_schedules(*, now: datetime | None = None) -> int:
 
 
 def claim_due_midnight_scan(
-    worker_id: str, *, now: datetime | None = None, lease_seconds: int = 300
+    worker_id: str,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int = 300,
+    source_id: str | None = None,
 ) -> dict | None:
     worker_id = _identifier(worker_id, max_length=128)
+    if source_id is not None:
+        source_id = _identifier(source_id, max_length=64)
     if lease_seconds < 30 or lease_seconds > 1800:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_LEASE_INVALID")
     now = now or _now()
     ensure_midnight_schedules(now=now)
-    schedule = (
+    due_schedules = (
         DocmindSourceReconciliationSchedule.select()
+        .join(
+            DocmindSource,
+            on=(DocmindSourceReconciliationSchedule.source_id == DocmindSource.id),
+        )
         .where(
             (DocmindSourceReconciliationSchedule.next_due_at <= now)
+            & (DocmindSource.enabled == True)
             & (
                 DocmindSourceReconciliationSchedule.lease_expires_at.is_null(True)
                 | (DocmindSourceReconciliationSchedule.lease_expires_at <= now)
             )
         )
-        .order_by(DocmindSourceReconciliationSchedule.next_due_at.asc())
-        .first()
     )
+    if source_id is not None:
+        due_schedules = due_schedules.where(
+            DocmindSourceReconciliationSchedule.source_id == source_id
+        )
+    schedule = due_schedules.order_by(
+        DocmindSourceReconciliationSchedule.next_due_at.asc()
+    ).first()
     if schedule is None:
         return None
     local_date = schedule.pending_local_date or schedule.next_due_at.replace(

@@ -187,15 +187,17 @@ foreach ($configuredSource in @($config.sources)) {
 if ($configuredSources.Count -eq 0) { throw 'At least one configured source is required.' }
 $failedSources = 0
 if ($Reason -eq 'scheduled') {
-    if (-not [string]::IsNullOrWhiteSpace($SourceId)) { throw 'Scheduled reconciliation source selection is controlled by the signed claim.' }
+    if (-not [string]::IsNullOrWhiteSpace($SourceId) -and -not $configuredSources.ContainsKey($SourceId)) { throw 'No configured source matched the requested source_id.' }
     $attemptedScheduledScans = @{}
     do {
         $claimBody = [ordered]@{ protocol_version = 1; worker_id = [string]$config.worker_id; lease_seconds = 1800 }
+        if (-not [string]::IsNullOrWhiteSpace($SourceId)) { $claimBody.source_id = $SourceId }
         $claim = Invoke-SignedJsonPost -RelativeEndpoint $claimEndpoint -Body $claimBody
         if ($null -eq $claim -or $null -eq $claim.scan) { break }
         $claimedSourceId = [string]$claim.scan.source_id
         $claimedScanId = [string]$claim.scan.scan_id
         Assert-DocMindIdentifier -Value $claimedSourceId -Name 'source_id'
+        if (-not [string]::IsNullOrWhiteSpace($SourceId) -and $claimedSourceId -ne $SourceId) { throw 'SIGNED_SCHEDULED_SOURCE_OUT_OF_SCOPE' }
         Assert-DocMindIdentifier -Value $claimedScanId -Name 'scan_id'
         if ($claimedScanId -notmatch '^midnight-\d{4}-\d{2}-\d{2}$') { throw 'SIGNED_SCHEDULED_SCAN_ID_INVALID' }
         $claimedFence = 0L

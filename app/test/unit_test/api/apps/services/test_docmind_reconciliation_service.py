@@ -519,6 +519,52 @@ def test_retry_policy_is_bounded_delayed_and_forces_new_decryption(reconciliatio
     assert job.plaintext_sha256 is None
     assert job.parser_input_token_hash is None
     assert job.host_cleanup_state == "NOT_STARTED"
+    assert service.reschedule_retryable_jobs(now=now + timedelta(seconds=1)) == []
+    assert service.reschedule_retryable_jobs(now=now + timedelta(seconds=241)) == []
+    assert DocmindIngestionJob.get_by_id(job.id).retry_not_before == now + timedelta(seconds=240)
+
+
+def test_scoped_reconciliation_does_not_retry_another_source(reconciliation_db):
+    DocmindSource.create(id="dept-2", project_id="project-1", display_name="DEPT_2")
+    DocmindSourceDocument.create(
+        id="source-document-dept-2",
+        project_id="project-1",
+        source_id="dept-2",
+        document_id="document-dept-2",
+        folder_id="folder-1",
+        relative_path="reports/dept-2.pdf",
+        relative_path_hash="b" * 64,
+    )
+    for source_id, source_document_id, document_id in (
+        ("home-test1", "source-document-keep", "document-keep"),
+        ("dept-2", "source-document-dept-2", "document-dept-2"),
+    ):
+        DocmindIngestionJob.create(
+            id=f"job-{source_id}",
+            project_id="project-1",
+            source_id=source_id,
+            source_document_id=source_document_id,
+            document_id=document_id,
+            version_id=f"version-{source_id}",
+            idempotency_key=f"key-{source_id}",
+            lifecycle_state="FAILED",
+            attempt=1,
+            host_cleanup_state="COMPLETE",
+            cleanup_state="COMPLETE",
+        )
+
+    scheduled = service.reschedule_retryable_jobs(
+        now=datetime(2026, 9, 22), source_id="home-test1"
+    )
+    assert [item["job_id"] for item in scheduled] == ["job-home-test1"]
+    assert DocmindIngestionJob.get_by_id("job-home-test1").lifecycle_state == "RETRY_WAIT"
+    assert DocmindIngestionJob.get_by_id("job-dept-2").lifecycle_state == "FAILED"
+    DocmindSource.update(enabled=False).where(DocmindSource.id == "dept-2").execute()
+    assert service.reschedule_retryable_jobs(
+        now=datetime(2026, 9, 22), source_id="dept-2"
+    ) == []
+    assert service.reschedule_retryable_jobs(now=datetime(2026, 9, 22)) == []
+    assert DocmindIngestionJob.get_by_id("job-dept-2").lifecycle_state == "FAILED"
 
 
 def test_cleanup_failed_job_is_not_retried_until_both_cleanup_receipts_are_complete(
@@ -587,6 +633,47 @@ def test_midnight_schedule_uses_seoul_and_claim_is_lease_deduplicated(reconcilia
     assert claim["source_id"] == "home-test1"
     assert claim["scan_id"] == "midnight-2026-09-22"
     assert service.claim_due_midnight_scan("worker-2", now=due, lease_seconds=300) is None
+
+
+def test_midnight_claim_can_limit_one_enabled_source(reconciliation_db):
+    DocmindSource.create(id="dept-2", project_id="project-1", display_name="DEPT_2")
+    due = datetime(2026, 9, 21, 15, 0)
+    assert service.ensure_midnight_schedules(now=due - timedelta(minutes=1)) == 2
+
+    assert service.claim_due_midnight_scan(
+        "worker-1", now=due, source_id="not-configured"
+    ) is None
+    selected = service.claim_due_midnight_scan(
+        "worker-1", now=due, source_id="home-test1"
+    )
+    assert selected["source_id"] == "home-test1"
+    assert service.claim_due_midnight_scan(
+        "worker-1", now=due, source_id="home-test1"
+    ) is None
+    other = service.claim_due_midnight_scan(
+        "worker-2", now=due, source_id="dept-2"
+    )
+    assert other["source_id"] == "dept-2"
+
+
+def test_midnight_claim_skips_disabled_source_with_old_due_schedule(reconciliation_db):
+    due = datetime(2026, 9, 21, 15, 0)
+    service.ensure_midnight_schedules(now=due - timedelta(minutes=1))
+    DocmindSource.create(
+        id="disabled-source", project_id="project-1", display_name="Disabled", enabled=False
+    )
+    DocmindSourceReconciliationSchedule.create(
+        id=service._stable_id("docmind-source-reconciliation-schedule", "disabled-source"),
+        project_id="project-1",
+        source_id="disabled-source",
+        next_due_at=due - timedelta(days=1),
+    )
+    assert service.claim_due_midnight_scan(
+        "worker-1", now=due, source_id="disabled-source"
+    ) is None
+    selected = service.claim_due_midnight_scan("worker-1", now=due)
+    assert selected["source_id"] == "home-test1"
+    assert service.claim_due_midnight_scan("worker-1", now=due) is None
 
 
 def test_scheduled_failure_before_start_is_recorded_and_can_be_reclaimed(reconciliation_db):

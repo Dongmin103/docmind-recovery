@@ -213,19 +213,24 @@ async def claim_reconciliation():
     try:
         key_id = await _authenticate(body)
         req = _base(await request.get_json(silent=True))
-        if set(req) - {"protocol_version", "worker_id", "lease_seconds"}:
+        if set(req) - {"protocol_version", "worker_id", "lease_seconds", "source_id"}:
             raise docmind_reconciliation_service.DocmindReconciliationError(
                 "DOCMIND_RECONCILIATION_REQUEST_INVALID"
             )
         worker_id = str(req.get("worker_id") or "")
         lease_seconds = req.get("lease_seconds", 300)
-        if not isinstance(lease_seconds, int):
+        source_id = req.get("source_id")
+        if not isinstance(lease_seconds, int) or (
+            "source_id" in req and (not isinstance(source_id, str) or not source_id)
+        ):
             raise docmind_reconciliation_service.DocmindReconciliationError(
                 "DOCMIND_RECONCILIATION_REQUEST_INVALID"
             )
-        retries = docmind_reconciliation_service.reschedule_retryable_jobs()
+        retries = docmind_reconciliation_service.reschedule_retryable_jobs(
+            source_id=source_id
+        )
         scan = docmind_reconciliation_service.claim_due_midnight_scan(
-            worker_id, lease_seconds=lease_seconds
+            worker_id, lease_seconds=lease_seconds, source_id=source_id
         )
         return _signed({"scan": scan, "retries_scheduled": len(retries)}, key_id)
     except docmind_worker_auth.WorkerAuthenticationError:
