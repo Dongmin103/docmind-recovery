@@ -2,6 +2,11 @@
 
 이 문서는 실제 확인한 제약과 다음 적용 방법을 구분한다. 원문, 키, 설정 파일 내용은 포함하지 않는다. 네 DOC의 처리 결과는 [실제 검증 보고서](REMAINING-INGESTION-VALIDATION-2026-09-28.md)를 참고한다.
 
+후속 적용 결과는 [제한된 자동 동기화와 Surya 복구 실환경 검증](LIVE-SYNC-RECOVERY-VALIDATION-2026-09-28.md)을 따른다.
+아래의 “미적용” 설명은 조사 시점 기록이다. 이후 source별 상주 작업, Surya readiness,
+claim 준비 검사, 명시적 재처리 및 재처리 중 검색 유지 수정이 개발 서버에 적용됐다.
+사용자의 상시 켜짐 조건에 따라 로그아웃/S4U 검증은 후순위로 남겼다.
+
 ## 1. 로그인에 의존하는 Windows 실행
 
 현재 KeepAlive, Host Worker, Source Watcher, 자정 정합성 작업은 같은 `uplex` 계정의 Interactive 작업이다. Ubuntu WSL도 이 사용자에게 등록되어 있다. 다른 서비스 계정이나 SYSTEM으로 principal만 바꾸는 방식은 WSL과 파일 접근 권한을 그대로 보존한다고 볼 수 없다.

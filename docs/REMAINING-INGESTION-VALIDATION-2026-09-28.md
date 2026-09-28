@@ -1,5 +1,10 @@
 # Remaining live-ingestion validation — 2026-09-28
 
+Later on the same day, scoped persistent sync, Surya readiness, and reprocessing
+fixes were deployed and verified. See [the follow-up live report](LIVE-SYNC-RECOVERY-VALIDATION-2026-09-28.md)
+for the current enabled-source/task state and the repaired OCR warning. The
+restored-disabled state below records this earlier test window.
+
 Times in this report use Asia/Seoul. This is the isolated Windows development
 stack. The All-in-One source roots were read only. The user approved the three
 legacy DOC test files under `home-test1-e2e` and one under `dept-1-e2e` for
