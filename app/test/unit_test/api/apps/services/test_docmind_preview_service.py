@@ -228,8 +228,8 @@ def test_host_cleanup_before_processing_cannot_ready_early(preview_db, monkeypat
     assert row.lifecycle_state == "READY"
 
 
-@pytest.mark.parametrize("change_source", [False, True])
-def test_ready_file_missing_or_source_revoked_cleans_immediately(preview_db, change_source):
+@pytest.mark.parametrize("failure_mode", ["missing", "disabled", "deleted"])
+def test_ready_file_missing_or_source_revoked_cleans_immediately(preview_db, failure_mode):
     created = _create()
     directory = preview_db[1] / created["preview_id"]
     directory.mkdir()
@@ -237,8 +237,12 @@ def test_ready_file_missing_or_source_revoked_cleans_immediately(preview_db, cha
     DocmindPreviewSession.update(
         lifecycle_state="READY", display_format="pdf", viewer_kind="pdf", host_cleanup_state="COMPLETE"
     ).where(DocmindPreviewSession.id == created["preview_id"]).execute()
-    if change_source:
+    if failure_mode == "disabled":
         DocmindSource.update(enabled=False).where(DocmindSource.id == "source-1").execute()
+    elif failure_mode == "deleted":
+        DocmindSourceDocument.update(deleted_at=service._now()).where(
+            DocmindSourceDocument.id == "mapping-1"
+        ).execute()
     else:
         (directory / "input.pdf").unlink()
     with pytest.raises(service.PreviewError):
@@ -247,6 +251,72 @@ def test_ready_file_missing_or_source_revoked_cleans_immediately(preview_db, cha
     assert row.lifecycle_state == "EXPIRED"
     assert row.cleanup_state == "COMPLETE"
     assert not directory.exists()
+
+
+def test_missing_heartbeat_expires_ready_plaintext(preview_db):
+    created = _create()
+    directory = preview_db[1] / created["preview_id"]
+    directory.mkdir()
+    (directory / "input.pdf").write_bytes(b"%PDF-1.4")
+    DocmindPreviewSession.update(
+        lifecycle_state="READY", display_format="pdf", viewer_kind="pdf",
+        host_cleanup_state="COMPLETE", expires_at=service._now() - timedelta(seconds=1),
+    ).where(DocmindPreviewSession.id == created["preview_id"]).execute()
+    service.reap()
+    row = DocmindPreviewSession.get_by_id(created["preview_id"])
+    assert row.lifecycle_state == "EXPIRED"
+    assert row.cleanup_state == "COMPLETE"
+    assert row.reserved_bytes == 0
+    assert not directory.exists()
+    with pytest.raises(service.PreviewError, match="PREVIEW_EXPIRED"):
+        service.status(row.id, "owner-1", created["preview_token"])
+
+
+def test_reaper_cleans_abandoned_processing_after_lease(preview_db, monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(service, "_processor", lambda endpoint, payload, timeout: cancelled.append((endpoint, payload, timeout)))
+    created = _create()
+    job = service.claim("worker-1")
+    directory = preview_db[1] / created["preview_id"]
+    directory.mkdir()
+    (directory / "input.pdf").write_bytes(b"%PDF-1.4")
+    DocmindPreviewSession.update(
+        lifecycle_state="PROCESSING", lease_expires_at=service._now() - timedelta(seconds=1),
+    ).where(DocmindPreviewSession.id == created["preview_id"]).execute()
+    service.reap()
+    row = DocmindPreviewSession.get_by_id(created["preview_id"])
+    assert row.lifecycle_state == "FAILED"
+    assert row.cleanup_state == "COMPLETE"
+    assert not directory.exists()
+    assert cancelled == [("/preview/cancel", {"session_id": row.id}, 30)]
+    receipt = service.worker_status(
+        row.id, worker_id="worker-1", version_id="version-1",
+        fencing_token=job["fencing_token"], status="CLEANED", error_code=None,
+    )
+    assert receipt["accepted"]
+    assert DocmindPreviewSession.get_by_id(row.id).lifecycle_state == "FAILED"
+
+
+def test_stale_worker_artifact_and_status_cannot_publish(preview_db):
+    created = _create()
+    job = service.claim("worker-1")
+    DocmindPreviewSession.update(fencing_token=job["fencing_token"] + 1, lease_owner="worker-2").where(
+        DocmindPreviewSession.id == created["preview_id"]
+    ).execute()
+    body = b"%PDF-1.4"
+    with pytest.raises(service.PreviewError, match="PREVIEW_STALE_WORKER_RESULT"):
+        service.accept_artifact(
+            created["preview_id"], worker_id="worker-1", version_id="version-1",
+            fencing_token=job["fencing_token"], plaintext=body,
+            plaintext_sha256=hashlib.sha256(body).hexdigest(), plaintext_size=len(body),
+        )
+    with pytest.raises(service.PreviewError, match="PREVIEW_STALE_WORKER_RESULT"):
+        service.worker_status(
+            created["preview_id"], worker_id="worker-1", version_id="version-1",
+            fencing_token=job["fencing_token"], status="CLEANED", error_code=None,
+        )
+    assert not (preview_db[1] / created["preview_id"]).exists()
+    assert DocmindPreviewSession.get_by_id(created["preview_id"]).lifecycle_state == "DECRYPTING"
 
 
 def test_reaper_releases_stale_reader_after_restart(preview_db):
