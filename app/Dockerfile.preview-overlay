@@ -1,0 +1,8 @@
+# Local development overlay: retain the verified runtime dependency environment.
+ARG BASE_IMAGE=docmind-ragflow:windows-dev
+FROM ${BASE_IMAGE}
+COPY api/ /ragflow/api/
+COPY web/dist/ /ragflow/web/dist/
+COPY scripts/verify_removed_runtime.py /ragflow/scripts/verify_removed_runtime.py
+RUN python scripts/verify_removed_runtime.py --root /ragflow
+LABEL io.docmind.preview="temporary-original-20260928"
