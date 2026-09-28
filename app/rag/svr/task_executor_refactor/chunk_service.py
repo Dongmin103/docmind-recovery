@@ -125,7 +125,7 @@ async def chunk_parser_platform_document(document, *, config, parser_config: dic
             document,
             source_bytes=source_bytes,
         )
-    if document.source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX}:
+    if document.source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
         from rag.parser_platform.office_chunker import OfficeChunker
 
         return await asyncio.to_thread(

@@ -158,7 +158,51 @@ def test_xlsx_table_ocr_attachment_remains_searchable_once() -> None:
     assert meta["office_locators"]
 
 
-@pytest.mark.parametrize("source_format", [SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX])
+def test_pptx_groups_text_within_each_slide_and_preserves_shapes() -> None:
+    document, source = _document(SourceFormat.PPTX)
+    original = CommonToStandardChunkAdapter().adapt(document)
+    chunks = OfficeChunker().chunk(document, parser_config={"chunk_token_num": 128, "delimiter": "\n"}, source_bytes=source)
+    assert len(chunks) < len(original)
+    assert {
+        stable_id for chunk in chunks
+        for stable_id in chunk["metadata"]["parser_platform"]["stable_block_ids"]
+    } == {
+        chunk["metadata"]["parser_platform"]["stable_block_id"] for chunk in original
+    }
+    assert sum(chunk["doc_type_kwd"] != "text" for chunk in chunks) == sum(
+        chunk["doc_type_kwd"] != "text" for chunk in original
+    )
+    for chunk in chunks:
+        meta = chunk["metadata"]["parser_platform"]
+        assert len({item["slide"] for item in meta["contributing_provenance"]}) == 1
+        assert all(locator["shape_locator"] for locator in meta["office_locators"])
+
+
+def test_pptx_media_ocr_attachment_remains_with_shape() -> None:
+    document, source = _document(SourceFormat.PPTX)
+    media = next(block for block in document.blocks if block.block_type == BlockType.MEDIA)
+    attachment_id = "e" * 32
+    attachment = ParsedBlock(
+        stable_block_id=attachment_id,
+        source_item_id="#/ocr/slide",
+        block_type=BlockType.OCR_ATTACHMENT,
+        reading_order=max(block.reading_order for block in document.blocks) + 1,
+        text="OCR SLIDE MARKER",
+        parent_id=media.stable_block_id,
+        provenance=media.provenance,
+    )
+    document = document.model_copy(update={"blocks": tuple(
+        block.model_copy(update={"ocr_attachment_ids": (attachment_id,)}) if block == media else block
+        for block in document.blocks
+    ) + (attachment,)})
+    chunks = OfficeChunker().chunk(document, parser_config={"chunk_token_num": 128}, source_bytes=source)
+    matching = [chunk for chunk in chunks if "OCR SLIDE MARKER" in chunk["content_with_weight"]]
+    assert len(matching) == 1
+    assert matching[0]["doc_type_kwd"] == "image"
+    assert matching[0]["metadata"]["parser_platform"]["ocr_attachment_ids"] == [attachment_id]
+
+
+@pytest.mark.parametrize("source_format", [SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX])
 def test_task_chunk_dispatch_uses_office_policy(source_format: SourceFormat) -> None:
     document, source = _document(SourceFormat.DOCX if source_format == SourceFormat.DOC else source_format)
     if source_format == SourceFormat.DOC:
@@ -171,7 +215,7 @@ def test_task_chunk_dispatch_uses_office_policy(source_format: SourceFormat) -> 
     ))
     assert chunks
     assert all(chunk["metadata"]["parser_platform"]["chunk_token_count"] is not None for chunk in chunks)
-    if source_format != SourceFormat.XLSX:
+    if source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.PPTX}:
         assert len(chunks) < len(CommonToStandardChunkAdapter().adapt(document))
     else:
         assert any(chunk["metadata"]["parser_platform"].get("source_cells") for chunk in chunks)
