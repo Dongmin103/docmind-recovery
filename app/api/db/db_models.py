@@ -1877,6 +1877,43 @@ class DocmindIngestionJob(DataBaseModel):
         )
 
 
+class DocmindPreviewSession(DataBaseModel):
+    """Short-lived, owner-bound preview metadata; file contents stay in tmpfs."""
+
+    id = CharField(max_length=32, primary_key=True)
+    owner_id = CharField(max_length=32, null=False, index=True)
+    project_id = CharField(max_length=32, null=False, index=True)
+    source_id = CharField(max_length=64, null=False, index=True)
+    source_document_id = CharField(max_length=32, null=False, index=True)
+    document_id = CharField(max_length=32, null=False, index=True)
+    version_id = CharField(max_length=32, null=False, index=True)
+    requested_chunk_set_id = CharField(max_length=32, null=False)
+    idempotency_hash = CharField(max_length=64, null=False, unique=True)
+    token_hash = CharField(max_length=64, null=False)
+    lifecycle_state = CharField(max_length=32, null=False, default="QUEUED", index=True)
+    source_format = CharField(max_length=16, null=False)
+    display_format = CharField(max_length=16, null=True)
+    viewer_kind = CharField(max_length=16, null=True)
+    page_count = IntegerField(null=True)
+    reserved_bytes = BigIntegerField(null=False)
+    artifact_bytes = BigIntegerField(null=True)
+    fencing_token = BigIntegerField(default=0, null=False)
+    lease_owner = CharField(max_length=128, null=True)
+    lease_expires_at = DateTimeField(null=True, index=True)
+    host_cleanup_state = CharField(max_length=32, null=False, default="NOT_STARTED")
+    cleanup_state = CharField(max_length=32, null=False, default="NOT_STARTED")
+    error_code = CharField(max_length=64, null=True)
+    last_heartbeat_at = DateTimeField(null=False)
+    expires_at = DateTimeField(null=False, index=True)
+    hard_expires_at = DateTimeField(null=False)
+    active_readers = IntegerField(default=0, null=False)
+    reader_lease_expires_at = DateTimeField(null=True)
+
+    class Meta:
+        db_table = "docmind_preview_session"
+        indexes = ((('owner_id', 'document_id', 'version_id'), False),)
+
+
 class DocmindWorkerRequestNonce(DataBaseModel):
     id = CharField(max_length=64, primary_key=True)
     key_id = CharField(max_length=128, null=False, index=True)

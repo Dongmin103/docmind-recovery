@@ -1,21 +1,26 @@
 import asyncio
+import json
 import logging
 import os
+import re
+import time
+from pathlib import Path
 
 from quart import Response, request
 
-from api.apps import login_required, login_user
+from api.apps import current_user, login_required, login_user
 from api.apps.services import (
     docmind_api_service,
     docmind_bootstrap_service,
     docmind_catalog_admin_service,
     docmind_hierarchy_service,
     docmind_ingestion_service,
+    docmind_preview_service,
     docmind_registration_service,
     docmind_shared_workspace_service,
     docmind_worker_auth,
 )
-from api.db.db_models import DocmindIngestionJob
+from api.db.db_models import DocmindIngestionJob, DocmindPreviewSession
 from api.db.services.document_service import DocmindProtectedEvidenceError
 from api.utils.api_utils import add_tenant_id_to_kwargs, get_error_argument_result, get_error_data_result, get_result
 
@@ -55,7 +60,40 @@ def _signed_worker_response(payload: dict, key_id: str, status: int = 200) -> Re
         path_and_query=_worker_path_and_query(),
         key_id=key_id,
     )
-    return Response(body, status=status, content_type="application/json", headers=headers)
+    response = Response(body, status=status, content_type="application/json", headers=headers)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _preview_json(payload: dict, status: int = 200) -> Response:
+    response = Response(json.dumps(payload, ensure_ascii=False), status=status, content_type="application/json")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _preview_error(error: docmind_preview_service.PreviewError) -> Response:
+    return _preview_json({"error": error.code}, error.status)
+
+
+def _preview_db(fn, *args, **kwargs):
+    with DocmindPreviewSession._meta.database.connection_context():
+        return fn(*args, **kwargs)
+
+
+async def _preview_reaper_loop():
+    while True:
+        try:
+            await asyncio.to_thread(_preview_db, docmind_preview_service.reap)
+        except Exception:
+            logger.exception("DocMind preview reaper failed")
+        await asyncio.sleep(30)
+
+
+@app.before_serving  # noqa: F821
+async def _start_preview_reaper():
+    root = Path(os.getenv("DOCMIND_PREVIEW_ROOT", "/run/docmind-previews"))
+    if os.getenv("DOCMIND_PREVIEW_ENABLED") == "1" or root.is_dir():
+        app.add_background_task(_preview_reaper_loop)  # noqa: F821
 
 
 def _public_search_result(result):
@@ -238,6 +276,251 @@ async def update_cloud_sync_job_status(job_id: str):
         if key_id:
             return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+
+
+@manager.route("/cloud-sync/host-worker/preview/claim", methods=["POST"])  # noqa: F821
+async def claim_preview_job():
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate_worker(body)
+        req = await request.get_json(silent=True)
+        if (
+            not isinstance(req, dict)
+            or set(req) - {"worker_id", "protocol_version", "lease_seconds"}
+            or req.get("protocol_version") != 1
+            or not isinstance(req.get("lease_seconds", 300), int)
+        ):
+            raise docmind_preview_service.PreviewError("PREVIEW_REQUEST_INVALID", 400)
+        job = await asyncio.to_thread(
+            _preview_db, docmind_preview_service.claim,
+            str(req.get("worker_id") or ""), req.get("lease_seconds", 300),
+        )
+        return _signed_worker_response({"job": job}, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return _preview_json({"error": "WORKER_AUTH_FAILED"}, 401)
+    except docmind_preview_service.PreviewError as error:
+        return _signed_worker_response({"error": error.code}, key_id, error.status)
+    except Exception:
+        logger.exception("DocMind preview claim failed")
+        return _signed_worker_response({"error": "PREVIEW_INTERNAL_ERROR"}, key_id, 500) if key_id else _preview_json({"error": "WORKER_AUTH_FAILED"}, 401)
+
+
+@manager.route("/cloud-sync/host-worker/previews/<preview_id>/artifact", methods=["PUT"])  # noqa: F821
+async def upload_preview_artifact(preview_id: str):
+    key_id = ""
+    try:
+        size_limit = docmind_preview_service.INPUT_LIMIT
+        if request.content_length is None:
+            return _preview_json({"error": "CONTENT_LENGTH_REQUIRED"}, 411)
+        if request.content_length < 1 or request.content_length > size_limit:
+            return _preview_json({"error": "PREVIEW_ARTIFACT_TOO_LARGE"}, 413)
+        body = await request.get_data()
+        key_id = await _authenticate_worker(body)
+        if len(body) > size_limit:
+            return _signed_worker_response({"error": "PREVIEW_ARTIFACT_TOO_LARGE"}, key_id, 413)
+        try:
+            fence = int(request.headers.get("X-DocMind-Fencing-Token") or "")
+            declared_size = int(request.headers.get("X-DocMind-Plaintext-Size") or "")
+        except ValueError as error:
+            raise docmind_preview_service.PreviewError("PREVIEW_REQUEST_INVALID", 400) from error
+        result = await asyncio.to_thread(
+            _preview_db, docmind_preview_service.accept_artifact, preview_id,
+            worker_id=str(request.headers.get("X-DocMind-Worker-Id") or ""),
+            version_id=str(request.headers.get("X-DocMind-Version-Id") or ""),
+            fencing_token=fence, plaintext=body,
+            plaintext_sha256=str(request.headers.get("X-DocMind-Plaintext-SHA256") or "").lower(),
+            plaintext_size=declared_size,
+        )
+        return _signed_worker_response(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return _preview_json({"error": "WORKER_AUTH_FAILED"}, 401)
+    except docmind_preview_service.PreviewError as error:
+        return _signed_worker_response({"error": error.code}, key_id, error.status)
+    except Exception:
+        logger.exception("DocMind preview artifact failed")
+        return _signed_worker_response({"error": "PREVIEW_INTERNAL_ERROR"}, key_id, 500) if key_id else _preview_json({"error": "WORKER_AUTH_FAILED"}, 401)
+
+
+@manager.route("/cloud-sync/host-worker/previews/<preview_id>/status", methods=["POST"])  # noqa: F821
+async def update_preview_worker_status(preview_id: str):
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate_worker(body)
+        req = await request.get_json(silent=True)
+        if (
+            not isinstance(req, dict)
+            or set(req) - {"worker_id", "version_id", "fencing_token", "status", "error_code"}
+            or not isinstance(req.get("fencing_token"), int)
+        ):
+            raise docmind_preview_service.PreviewError("PREVIEW_REQUEST_INVALID", 400)
+        result = await asyncio.to_thread(
+            _preview_db, docmind_preview_service.worker_status, preview_id,
+            worker_id=str(req.get("worker_id") or ""),
+            version_id=str(req.get("version_id") or ""),
+            fencing_token=req["fencing_token"], status=str(req.get("status") or ""),
+            error_code=str(req["error_code"]) if req.get("error_code") else None,
+        )
+        return _signed_worker_response(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return _preview_json({"error": "WORKER_AUTH_FAILED"}, 401)
+    except docmind_preview_service.PreviewError as error:
+        return _signed_worker_response({"error": error.code}, key_id, error.status)
+    except Exception:
+        logger.exception("DocMind preview worker status failed")
+        return _signed_worker_response({"error": "PREVIEW_INTERNAL_ERROR"}, key_id, 500) if key_id else _preview_json({"error": "WORKER_AUTH_FAILED"}, 401)
+
+
+@manager.route("/docmind/documents/<document_id>/previews", methods=["POST"])  # noqa: F821
+@login_required
+async def create_preview(document_id: str):
+    req = await request.get_json(silent=True)
+    if not isinstance(req, dict) or set(req) != {"source_version_id", "chunk_set_id", "idempotency_key"}:
+        return _preview_json({"error": "PREVIEW_REQUEST_INVALID"}, 400)
+    try:
+        result = await asyncio.to_thread(
+            _preview_db, docmind_preview_service.create, document_id, str(current_user.id),
+            source_version_id=req["source_version_id"],
+            chunk_set_id=req["chunk_set_id"], idempotency_key=req["idempotency_key"],
+        )
+        return _preview_json(result, 202)
+    except docmind_preview_service.PreviewError as error:
+        return _preview_error(error)
+    except Exception:
+        logger.exception("DocMind preview create failed")
+        return _preview_json({"error": "PREVIEW_INTERNAL_ERROR"}, 500)
+
+
+def _preview_header_token() -> str:
+    return str(request.headers.get("X-DocMind-Preview-Token") or "")
+
+
+@manager.route("/docmind/previews/<preview_id>", methods=["GET", "DELETE"])  # noqa: F821
+@login_required
+async def preview_session(preview_id: str):
+    try:
+        operation = docmind_preview_service.cancel if request.method == "DELETE" else docmind_preview_service.status
+        result = await asyncio.to_thread(_preview_db, operation, preview_id, str(current_user.id), _preview_header_token())
+        return _preview_json(result)
+    except docmind_preview_service.PreviewError as error:
+        return _preview_error(error)
+    except Exception:
+        logger.exception("DocMind preview session failed")
+        return _preview_json({"error": "PREVIEW_INTERNAL_ERROR"}, 500)
+
+
+@manager.route("/docmind/previews/<preview_id>/heartbeat", methods=["POST"])  # noqa: F821
+@login_required
+async def heartbeat_preview(preview_id: str):
+    try:
+        result = await asyncio.to_thread(
+            _preview_db, docmind_preview_service.heartbeat,
+            preview_id, str(current_user.id), _preview_header_token(),
+        )
+        return _preview_json(result)
+    except docmind_preview_service.PreviewError as error:
+        return _preview_error(error)
+    except Exception:
+        logger.exception("DocMind preview heartbeat failed")
+        return _preview_json({"error": "PREVIEW_INTERNAL_ERROR"}, 500)
+
+
+async def _preview_binary(preview_id: str, page: int | None = None):
+    source = None
+    handed_off = False
+    try:
+        source, display_format = await asyncio.to_thread(
+            _preview_db, docmind_preview_service.acquire_file,
+            preview_id, str(current_user.id), _preview_header_token(), page,
+        )
+        size = os.fstat(source.fileno()).st_size
+        start, end = 0, size - 1
+        status_code = 200
+        range_header = request.headers.get("Range") if display_format == "pdf" else None
+        if range_header:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+            if not match or (not match[1] and not match[2]):
+                source.close()
+                await asyncio.to_thread(_preview_db, docmind_preview_service.release_file, preview_id)
+                source = None
+                response = _preview_json({"error": "PREVIEW_RANGE_INVALID"}, 416)
+                response.headers["Content-Range"] = f"bytes */{size}"
+                return response
+            if match[1]:
+                start = int(match[1])
+                end = min(int(match[2]), size - 1) if match[2] else size - 1
+            else:
+                suffix = int(match[2])
+                start = max(size - suffix, 0)
+            if start >= size or end < start:
+                source.close()
+                await asyncio.to_thread(_preview_db, docmind_preview_service.release_file, preview_id)
+                source = None
+                response = _preview_json({"error": "PREVIEW_RANGE_INVALID"}, 416)
+                response.headers["Content-Range"] = f"bytes */{size}"
+                return response
+            status_code = 206
+        mime = {
+            "pdf": "application/pdf",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xls": "application/vnd.ms-excel",
+            "svg": "image/svg+xml",
+        }[display_format]
+
+        async def stream():
+            remaining = end - start + 1
+            started = time.monotonic()
+            try:
+                source.seek(start)
+                while remaining > 0 and time.monotonic() - started < 30:
+                    block = await asyncio.to_thread(source.read, min(256 * 1024, remaining))
+                    if not block:
+                        break
+                    remaining -= len(block)
+                    yield block
+            finally:
+                source.close()
+                await asyncio.to_thread(_preview_db, docmind_preview_service.release_file, preview_id)
+
+        response = Response(stream(), status=status_code, content_type=mime)
+        response.timeout = 30
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Content-Length"] = str(end - start + 1)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        if display_format == "pdf":
+            response.headers["Accept-Ranges"] = "bytes"
+        if status_code == 206:
+            response.headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        if display_format == "svg":
+            response.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+        handed_off = True
+        return response
+    except docmind_preview_service.PreviewError as error:
+        if source is not None and not handed_off:
+            source.close()
+            await asyncio.to_thread(_preview_db, docmind_preview_service.release_file, preview_id)
+        return _preview_error(error)
+    except Exception:
+        if source is not None and not handed_off:
+            source.close()
+            await asyncio.to_thread(_preview_db, docmind_preview_service.release_file, preview_id)
+        logger.exception("DocMind preview content failed")
+        return _preview_json({"error": "PREVIEW_INTERNAL_ERROR"}, 500)
+
+
+@manager.route("/docmind/previews/<preview_id>/content", methods=["GET"])  # noqa: F821
+@login_required
+async def preview_content(preview_id: str):
+    return await _preview_binary(preview_id)
+
+
+@manager.route("/docmind/previews/<preview_id>/pages/<int:page>", methods=["GET"])  # noqa: F821
+@login_required
+async def preview_page(preview_id: str, page: int):
+    return await _preview_binary(preview_id, page)
 
 
 @manager.route("/docmind/shared-session", methods=["POST"])  # noqa: F821

@@ -579,6 +579,21 @@ async def list_chunks(tenant_id, dataset_id, document_id):
         query["available_int"] = 1 if req["available"] == "true" else 0
 
     res = {"total": 0, "chunks": [], "doc": _map_doc(doc)}
+    # Source-backed previews must be fenced to the active encrypted original.
+    # A local document has no source version and cannot use this path.
+    from api.db.db_models import DocmindSourceDocument, DocmindSourceVersion
+
+    source_mapping = DocmindSourceDocument.get_or_none(
+        (DocmindSourceDocument.document_id == document_id)
+        & (DocmindSourceDocument.deleted_at.is_null(True))
+    )
+    if source_mapping is not None and source_mapping.active_source_version_id:
+        source_version = DocmindSourceVersion.get_or_none(
+            DocmindSourceVersion.id == source_mapping.active_source_version_id
+        )
+        if source_version is not None and source_version.lifecycle_state == "ACTIVE":
+            res["doc"]["source_version_id"] = source_version.id
+            res["doc"]["chunk_set_id"] = doc.active_chunk_set_id
     if req.get("id"):
         chunk = settings.docStoreConn.get(req.get("id"), search.index_name(dataset_tenant_id), [dataset_id])
         if not chunk:

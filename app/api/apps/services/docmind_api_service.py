@@ -241,6 +241,8 @@ def _document_options(catalog: Catalog) -> list[dict[str, str]]:
                 "name": names[document_id],
                 "folder_id": folder_by_document[document_id],
                 "relative_path": paths[document_id],
+                "source_version_id": (catalog.document_version_ids or {}).get(document_id),
+                "chunk_set_id": (catalog.document_chunk_set_ids or {}).get(document_id),
             }
             for document_id in document_ids
         ]
@@ -687,6 +689,9 @@ async def search(
         chunk.pop("document_relative_path", None)
         if relative_path := relative_paths.get(chunk["doc_id"]):
             chunk["document_relative_path"] = relative_path
+        if catalog.source == "sources":
+            chunk["source_version_id"] = (catalog.document_version_ids or {}).get(chunk["doc_id"])
+            chunk["chunk_set_id"] = (catalog.document_chunk_set_ids or {}).get(chunk["doc_id"])
 
     finished_at = time.monotonic()
     timings_ms = {
