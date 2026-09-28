@@ -711,6 +711,8 @@ class OfficeMediaOcrPipeline:
                     )
                 )
             except ParserPlatformError as error:
+                if error.code == "PARSER_SURYA_NOT_READY":
+                    raise
                 outcomes.append(
                     OfficeMediaOcrOutcome(
                         media_block_id=media_block.stable_block_id,

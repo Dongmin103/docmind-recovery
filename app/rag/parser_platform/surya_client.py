@@ -56,6 +56,17 @@ class SuryaClient:
         self.timeout_seconds = timeout_seconds
         self.session = session or requests.Session()
 
+    @staticmethod
+    def _raise_if_not_ready(response: HttpResponse) -> None:
+        if response.status_code != 503:
+            return
+        try:
+            body = response.json()
+        except (ValueError, TypeError):
+            return
+        if isinstance(body, dict) and body.get("code") == "PARSER_SURYA_NOT_READY":
+            raise parser_error("PARSER_SURYA_NOT_READY")
+
     def parse_pdf(self, request: SuryaPdfClientRequest) -> SuryaServiceManifest:
         payload = {
             "task_kind": "pdf_document_parse",
@@ -80,6 +91,7 @@ class SuryaClient:
         except requests.RequestException as error:
             raise parser_error("PARSER_SURYA_UNAVAILABLE", detail=str(error)) from error
 
+        self._raise_if_not_ready(response)
         if response.status_code >= 500:
             raise parser_error("PARSER_SURYA_UNAVAILABLE", detail=f"HTTP {response.status_code}")
         if response.status_code >= 400:
@@ -122,6 +134,7 @@ class SuryaClient:
         except requests.RequestException as error:
             raise parser_error("PARSER_SURYA_UNAVAILABLE", detail=str(error)) from error
 
+        self._raise_if_not_ready(response)
         if response.status_code >= 500:
             raise parser_error("PARSER_SURYA_UNAVAILABLE", detail=f"HTTP {response.status_code}")
         if response.status_code >= 400:

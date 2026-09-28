@@ -71,6 +71,7 @@ class SuryaEngine:
         )
         self.manager = SuryaInferenceManager(method=settings.SURYA_INFERENCE_BACKEND or "llamacpp", lazy=True)
         self.predictor = RecognitionPredictor(self.manager)
+        self.inference_ready = threading.Event()
         self.lock = threading.Lock()
         self.request_admission = threading.BoundedSemaphore(1)
         self.parser_version = importlib.metadata.version("surya-ocr")
@@ -231,7 +232,7 @@ class SuryaEngine:
             self._gpu_execution_handle = None
             self._gpu_execution_pid = None
         return {
-            "status": "ready",
+            "status": "ready" if self.inference_ready.is_set() else "starting",
             "parser_name": "surya",
             "parser_version": self.parser_version,
             "model_version": self.model_version,
@@ -247,6 +248,25 @@ class SuryaEngine:
             "concurrency": 1,
             "model_files_verified": True,
         }
+
+    def start_inference(self) -> None:
+        started = time.monotonic()
+        LOGGER.info("surya_startup_started backend=%s", self.backend)
+        startup_timeout = int(float(getattr(settings, "SURYA_INFERENCE_STARTUP_TIMEOUT", 900))) + 30
+        watchdog = self._watchdog(startup_timeout, "startup", "-", [])
+        try:
+            self.manager.start()
+        except Exception as error:
+            LOGGER.error(
+                "surya_startup_failed error_type=%s elapsed_seconds=%.3f",
+                type(error).__name__,
+                time.monotonic() - started,
+            )
+            raise
+        finally:
+            watchdog.cancel()
+        self.inference_ready.set()
+        LOGGER.info("surya_startup_completed elapsed_seconds=%.3f", time.monotonic() - started)
 
     def parse(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("task_kind") == "office_media_parse":
@@ -409,14 +429,16 @@ class SuryaEngine:
         scope: str,
         parse_run_id: str,
         pages: list[int],
+        phase: dict[str, str] | None = None,
     ) -> threading.Timer:
         def terminate() -> None:
             LOGGER.error(
-                "surya_timeout scope=%s parse_run_id=%s pages=%s timeout_seconds=%d",
+                "surya_timeout scope=%s parse_run_id=%s pages=%s timeout_seconds=%d phase=%s",
                 scope,
                 parse_run_id,
                 pages,
                 timeout_seconds,
+                phase["name"] if phase else "unknown",
             )
             os._exit(124)
 
@@ -435,11 +457,22 @@ class SuryaEngine:
             raise ValueError("invalid or oversized Office media")
         if hashlib.sha256(media_bytes).hexdigest() != media_hash:
             raise ValueError("media hash mismatch")
-        media_watchdog = self._watchdog(self.media_timeout_seconds, "media", parse_run_id, [])
+        phase = {"name": "decode"}
+        media_started = time.monotonic()
+        media_watchdog = self._watchdog(self.media_timeout_seconds, "media", parse_run_id, [], phase=phase)
         try:
+            LOGGER.info("surya_media_decode_started")
             with Image.open(BytesIO(media_bytes)) as image:
                 image.load()
                 safe_image = image.convert("RGB")
+            LOGGER.info(
+                "surya_media_decode_completed elapsed_seconds=%.3f image_size=%s",
+                time.monotonic() - media_started,
+                safe_image.size,
+            )
+            phase["name"] = "inference"
+            inference_started = time.monotonic()
+            LOGGER.info("surya_media_inference_started")
             with self.lock:
                 full_page_max_tokens = settings.SURYA_MAX_TOKENS_FULL_PAGE
                 inference_timeout_seconds = settings.SURYA_INFERENCE_TIMEOUT_SECONDS
@@ -452,6 +485,7 @@ class SuryaEngine:
                 finally:
                     settings.SURYA_MAX_TOKENS_FULL_PAGE = full_page_max_tokens
                     settings.SURYA_INFERENCE_TIMEOUT_SECONDS = inference_timeout_seconds
+            LOGGER.info("surya_media_inference_completed elapsed_seconds=%.3f", time.monotonic() - inference_started)
         finally:
             media_watchdog.cancel()
         raw = result.model_dump()
@@ -534,12 +568,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._write(HTTPStatus.OK, ENGINE.manifest())
+        elif self.path == "/ready":
+            if ENGINE.inference_ready.is_set():
+                self._write(HTTPStatus.OK, ENGINE.manifest())
+            else:
+                self._write(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"code": "PARSER_SURYA_NOT_READY", "status": "starting"},
+                )
         else:
             self._write(HTTPStatus.NOT_FOUND, {"code": "NOT_FOUND"})
 
     def do_POST(self) -> None:
         if self.path not in {"/v1/parse", "/v1/parse-media"}:
             self._write(HTTPStatus.NOT_FOUND, {"code": "NOT_FOUND"})
+            return
+        if not ENGINE.inference_ready.is_set():
+            self._write(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"code": "PARSER_SURYA_NOT_READY", "message": "Surya model is starting"},
+            )
             return
         if not ENGINE.request_admission.acquire(blocking=False):
             self._write(
@@ -584,7 +632,15 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("SURYA_SERVICE_HOST", "0.0.0.0")
     port = int(os.environ.get("SURYA_SERVICE_PORT", "8091"))
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    server = ThreadingHTTPServer((host, port), Handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        ENGINE.start_inference()
+        server_thread.join()
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":

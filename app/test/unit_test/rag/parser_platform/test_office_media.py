@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import shutil
+import types
 from pathlib import Path
 
 import pytest
@@ -520,6 +521,33 @@ def test_surya_media_client_sends_only_rendered_media_and_preserves_identity() -
     assert set(payload) == {"task_kind", "parse_run_id", "trace_id", "media_id", "media_hash", "source_locator", "media_base64"}
 
 
+def test_surya_media_client_distinguishes_model_startup_from_other_503() -> None:
+    media_bytes = (FIXTURES / "screenshot.png").read_bytes()
+    request = SuryaOfficeMediaClientRequest(
+        parse_run_id="run-media",
+        trace_id="trace-media",
+        media_id="media-block",
+        media_hash=hashlib.sha256(media_bytes).hexdigest(),
+        source_locator="#/pictures/0",
+        expected_parser_name="surya",
+        expected_parser_version="0.22.1",
+        expected_model_version="6a3a4c30",
+        expected_backend="llamacpp",
+        media_bytes=media_bytes,
+    )
+    session = FakeSession(FakeResponse({"code": "PARSER_SURYA_NOT_READY"}, status_code=503))
+    client = SuryaClient("http://surya:8091", timeout_seconds=10, session=session)
+    with pytest.raises(ParserPlatformError) as error:
+        client.parse_office_media(request)
+    assert error.value.code == "PARSER_SURYA_NOT_READY"
+    assert error.value.retryable is True
+
+    session.response = FakeResponse({"code": "PARSER_SURYA_BUSY"}, status_code=503)
+    with pytest.raises(ParserPlatformError) as error:
+        client.parse_office_media(request)
+    assert error.value.code == "PARSER_SURYA_UNAVAILABLE"
+
+
 class RecordingMediaClient:
     def __init__(self):
         self.requests = []
@@ -578,6 +606,44 @@ class FailOnceMediaClient(RecordingMediaClient):
             self.requests.append(request)
             raise parser_error("PARSER_SURYA_TIMEOUT")
         return super().parse_office_media(request)
+
+
+class NotReadyMediaClient(RecordingMediaClient):
+    def parse_office_media(self, request):
+        self.requests.append(request)
+        raise parser_error("PARSER_SURYA_NOT_READY")
+
+
+def test_model_startup_propagates_instead_of_publishing_ocr_warning(monkeypatch) -> None:
+    media_block = types.SimpleNamespace(
+        stable_block_id="0" * 32,
+        source_item_id="#/pictures/0",
+        block_type=BlockType.MEDIA,
+    )
+    document = types.SimpleNamespace(parse_run_id="run-starting", blocks=(media_block,))
+    decision = types.SimpleNamespace(
+        ocr_selected=True,
+        media_block_id=media_block.stable_block_id,
+        media_hash="1" * 64,
+    )
+    policy = types.SimpleNamespace(evaluate_document=lambda _document, _assets: (decision,))
+    renderer = types.SimpleNamespace(
+        render=lambda _asset: types.SimpleNamespace(rendered_hash="2" * 64, png_bytes=b"synthetic")
+    )
+    monkeypatch.setattr(
+        "rag.parser_platform.office_media.extract_docling_media",
+        lambda _manifest: {media_block.source_item_id: object()},
+    )
+    pipeline = OfficeMediaOcrPipeline(
+        client=NotReadyMediaClient(), renderer=renderer, policy=policy
+    )
+    with pytest.raises(ParserPlatformError) as error:
+        pipeline.run(
+            manifest=object(),
+            document=document,
+            trace_id="trace-starting",
+        )
+    assert error.value.code == "PARSER_SURYA_NOT_READY"
 
 
 def test_retry_replaces_only_failed_attachment_and_clears_transient_warning() -> None:

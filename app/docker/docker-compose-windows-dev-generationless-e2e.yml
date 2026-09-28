@@ -110,10 +110,10 @@ services:
     pids_limit: 128
     restart: unless-stopped
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3).read()"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/ready', timeout=3).read()"]
       interval: 15s
       timeout: 5s
-      start_period: 60s
+      start_period: 930s
       retries: 20
 
   docling-office-parser:

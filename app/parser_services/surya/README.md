@@ -1,18 +1,22 @@
 # Surya 2 parser
 
-This directory contains the isolated `linux/amd64` CPU parser used by the
-DocMind PDF canary.
+This directory contains the isolated `linux/amd64` Surya parser used by
+DocMind PDF and Office-media OCR.
 
 - `Containerfile.cpu-amd64` installs `surya-ocr==0.22.1` from the frozen lock.
 - The image downloads and verifies the official llama.cpp `b10718` x64 binary.
 - Surya GGUF model files are never copied into Git or the public image. They are
   mounted read-only at `/models` by Compose.
-- `service.py` serves health checks concurrently while a non-blocking admission
-  gate keeps full-page inference concurrency at one. A second parse receives
-  `503 PARSER_SURYA_BUSY` instead of consuming an unbounded worker queue.
+- `service.py` starts the inference backend before admitting OCR requests.
+  `/health` remains responsive during startup and reports `starting`, while
+  `/ready` returns `503 PARSER_SURYA_NOT_READY` until llama.cpp has loaded.
+  Backend readiness does not prove OCR or GPU execution; verify those with a
+  real request. A non-blocking admission gate keeps full-page inference
+  concurrency at one; a second parse receives `503 PARSER_SURYA_BUSY`.
 - PDF parsing uses direct Surya full-page recognition. It does not invoke
   Docling, DeepDoc or PaddleOCR.
-- Office-media OCR caps the upstream full-page decoder at 1,024 tokens without
+- The backend has a separate 900-second startup timeout, outside the OCR media
+  watchdog. Office-media OCR caps the upstream full-page decoder at 1,024 tokens without
   changing the 12,288-token PDF setting. Inside the engine lock, media calls
   also temporarily use a 600-second inference timeout and restore the PDF
   setting afterward. The Compose defaults layer the media service watchdog at

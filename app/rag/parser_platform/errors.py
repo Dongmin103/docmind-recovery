@@ -109,6 +109,11 @@ ERRORS = {
         "Surya PDF 분석 서비스에 연결할 수 없습니다.",
         True,
     ),
+    "PARSER_SURYA_NOT_READY": ParserPlatformErrorInfo(
+        "PARSER_SURYA_NOT_READY",
+        "Surya 모델이 시작 중입니다. 잠시 후 다시 처리합니다.",
+        True,
+    ),
     "PARSER_SURYA_TIMEOUT": ParserPlatformErrorInfo(
         "PARSER_SURYA_TIMEOUT",
         "Surya PDF 분석 시간이 제한을 초과했습니다.",

@@ -462,6 +462,15 @@ def test_http_client_validates_contract_and_maps_timeout() -> None:
         timeout_client.parse_pdf(request)
     assert captured.value.code == "PARSER_SURYA_TIMEOUT"
 
+    not_ready_client = SuryaClient(
+        "http://surya:8091",
+        timeout_seconds=1,
+        session=FakeSession(FakeResponse({"code": "PARSER_SURYA_NOT_READY"}, status_code=503)),
+    )
+    with pytest.raises(ParserPlatformError) as not_ready:
+        not_ready_client.parse_pdf(request)
+    assert not_ready.value.code == "PARSER_SURYA_NOT_READY"
+
 
 def test_isolated_service_is_direct_full_page_surya_only() -> None:
     source = (Path(__file__).parents[4] / "parser_services" / "surya" / "service.py").read_text(encoding="utf-8")

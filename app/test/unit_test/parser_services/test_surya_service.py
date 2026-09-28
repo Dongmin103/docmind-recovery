@@ -268,6 +268,7 @@ def test_gpu_health_rejects_zero_offload_or_stale_log(monkeypatch, tmp_path) -> 
 
 def test_health_stays_responsive_and_second_parse_is_rejected(monkeypatch, tmp_path) -> None:
     service = _load_service(monkeypatch, tmp_path)
+    service.ENGINE.inference_ready.set()
     parse_started = threading.Event()
     release_parse = threading.Event()
 
@@ -329,6 +330,58 @@ def test_health_stays_responsive_and_second_parse_is_rejected(monkeypatch, tmp_p
         server_thread.join(timeout=5)
 
     assert first_response["status"] == 200
+
+
+def test_startup_has_separate_readiness_and_rejects_parse_until_model_starts(monkeypatch, tmp_path) -> None:
+    service = _load_service(monkeypatch, tmp_path)
+    startup_started = threading.Event()
+    release_startup = threading.Event()
+
+    def start_model() -> None:
+        startup_started.set()
+        assert release_startup.wait(timeout=5)
+
+    service.ENGINE.manager = types.SimpleNamespace(start=start_model)
+    server = service.ThreadingHTTPServer(("127.0.0.1", 0), service.Handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    startup_thread = threading.Thread(target=service.ENGINE.start_inference)
+    startup_thread.start()
+    port = server.server_address[1]
+
+    def request(method: str, path: str, body: str | None = None) -> tuple[int, dict]:
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        connection.request(method, path, body, {"Content-Type": "application/json"} if body else {})
+        response = connection.getresponse()
+        result = response.status, json.loads(response.read())
+        connection.close()
+        return result
+
+    try:
+        assert startup_started.wait(timeout=5)
+        health_status, health = request("GET", "/health")
+        assert health_status == 200
+        assert health["status"] == "starting"
+        ready_status, ready = request("GET", "/ready")
+        assert ready_status == 503
+        assert ready["code"] == "PARSER_SURYA_NOT_READY"
+        parse_status, parse = request(
+            "POST", "/v1/parse-media", json.dumps({"task_kind": "office_media_parse"})
+        )
+        assert parse_status == 503
+        assert parse["code"] == "PARSER_SURYA_NOT_READY"
+        release_startup.set()
+        startup_thread.join(timeout=5)
+        assert not startup_thread.is_alive()
+        ready_status, ready = request("GET", "/ready")
+        assert ready_status == 200
+        assert ready["status"] == "ready"
+    finally:
+        release_startup.set()
+        startup_thread.join(timeout=5)
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
 
 
 def test_office_media_token_cap_is_restored_after_predictor_failure(monkeypatch, tmp_path) -> None:
