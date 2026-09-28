@@ -10,6 +10,7 @@ import {
 import type { ChunkDocType, IChunk } from '@/interfaces/database/dataset';
 import { cn } from '@/lib/utils';
 import { sanitizeHtmlWithImagesAsText } from '@/utils/dom-util';
+import { getSourceLocations } from '@/utils/source-location';
 import { CheckedState } from '@radix-ui/react-checkbox';
 import classNames from 'classnames';
 import { useEffect, useState } from 'react';
@@ -81,16 +82,7 @@ const ChunkCard = ({
     ((item.doc_type_kwd &&
       String(item.doc_type_kwd)?.toLowerCase()) as ChunkDocType) || 'text';
   const parser = item.parser_platform;
-  const locator = item.office_locator;
-  const locatorLabel = locator
-    ? locator.kind === 'docx'
-      ? locator.heading_path?.join(' > ') || locator.item_locator
-      : locator.kind === 'xlsx'
-        ? `${locator.sheet}${locator.cell_range ? `!${locator.cell_range}` : ''}`
-        : `슬라이드 ${locator.slide}`
-    : item.positions?.[0]?.[0]
-      ? `p. ${item.positions[0][0]}`
-      : undefined;
+  const locatorLabel = getSourceLocations(item);
 
   return (
     <Card

@@ -1,4 +1,5 @@
 import DocumentPreview from '@/components/document-preview';
+import TemporaryOriginalPreview from '@/components/document-preview/temporary-original-preview';
 import DocumentHeader from '@/components/document-preview/document-header';
 import { Segmented, type SegmentedValue } from '@/components/ui/segmented';
 import Representation, {
@@ -24,6 +25,11 @@ interface DocumentViewSwitchProps {
   highlights: IHighlight[];
   setWidthAndHeight: (width: number, height: number) => void;
   url: string;
+  documentId?: string;
+  sourceVersionId?: string;
+  chunkSetId?: string;
+  temporaryOriginal?: boolean;
+  onChunkSetChanged?: () => void;
   onChunkIdsChange?: (chunkIds: string[]) => void;
 }
 
@@ -33,6 +39,11 @@ export default function DocumentViewSwitch({
   highlights,
   setWidthAndHeight,
   url,
+  documentId,
+  sourceVersionId,
+  chunkSetId,
+  temporaryOriginal,
+  onChunkSetChanged,
   onChunkIdsChange,
 }: DocumentViewSwitchProps) {
   const { t } = useTranslation();
@@ -93,7 +104,25 @@ export default function DocumentViewSwitch({
       </DocumentHeader>
 
       <div className="flex-1 h-0 min-h-0 overflow-hidden p-5 pt-2.5 [&>section]:h-full [&>section]:min-h-0">
-        {viewMode === ViewMode.Preview ? (
+        {temporaryOriginal && documentId ? (
+          <>
+            <div hidden={viewMode !== ViewMode.Preview} className="h-full min-h-0">
+            <TemporaryOriginalPreview
+              key={`${documentId}:${sourceVersionId ?? ''}`}
+              documentId={documentId}
+              sourceVersionId={sourceVersionId}
+              chunkSetId={chunkSetId}
+              onChunkSetChanged={onChunkSetChanged}
+              className="h-full min-h-0 overflow-auto [&_img]:max-w-full [&_img]:h-auto"
+              highlights={highlights}
+              setWidthAndHeight={setWidthAndHeight}
+            />
+            </div>
+            {viewMode === ViewMode.Representations && (
+              <Representation onNodeClick={handleNodeClick} />
+            )}
+          </>
+        ) : viewMode === ViewMode.Preview ? (
           <DocumentPreview
             className="h-full min-h-0 overflow-auto [&_img]:max-w-full [&_img]:h-auto"
             fileType={fileType}

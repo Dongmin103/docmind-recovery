@@ -121,6 +121,8 @@ export interface IKnowledgeFileParserConfig {
 }
 
 export interface IKnowledgeFile {
+  source_version_id?: string;
+  chunk_set_id?: string;
   chunk_num: number;
   create_date: string;
   create_time: number;
@@ -156,6 +158,7 @@ export interface ITenantInfo {
 export type ChunkDocType = 'image' | 'table' | 'text';
 
 export interface IChunk {
+  source_version_id?: string;
   available_int: number; // Whether to enable, 0: not enabled, 1: enabled
   chunk_id: string;
   content_with_weight: string;
@@ -201,6 +204,7 @@ export interface IChunk {
 }
 
 export interface ITestingChunk {
+  source_version_id?: string;
   chunk_id: string;
   content_ltks: string;
   content_with_weight: string;

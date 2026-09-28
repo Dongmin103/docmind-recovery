@@ -15,6 +15,8 @@ export interface DocMindDocumentOption {
   name: string;
   folder_id: string;
   relative_path: string;
+  source_version_id?: string;
+  chunk_set_id?: string;
 }
 
 export interface DocMindFolderCatalog {

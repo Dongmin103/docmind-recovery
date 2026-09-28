@@ -1,12 +1,9 @@
-import DocumentPreview from '@/components/document-preview';
+import TemporaryOriginalPreview from '@/components/document-preview/temporary-original-preview';
 import HighLightMarkdown from '@/components/highlight-markdown';
 import { FileIcon } from '@/components/icon-font';
 import { Input } from '@/components/originui/input';
 import { Modal } from '@/components/ui/modal/modal';
-import {
-  useGetChunkHighlights,
-  useGetDocumentUrl,
-} from '@/hooks/use-document-request';
+import { useGetChunkHighlights } from '@/hooks/use-document-request';
 import type { ITestingChunk } from '@/interfaces/database/dataset';
 import type {
   DocMindFolderCatalog,
@@ -32,6 +29,7 @@ import {
   parseDocMindView,
   type DocMindSection,
 } from '@/utils/docmind-workspace';
+import { getSourceLocations } from '@/utils/source-location';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ChevronDown, Search, X } from 'lucide-react';
 import * as React from 'react';
@@ -64,35 +62,6 @@ function WorkspaceViewError() {
       주세요.
     </p>
   );
-}
-
-function getChunkLocation(chunk: ITestingChunk): string {
-  const hwpLocator = chunk.hwp_locator;
-  if (hwpLocator) {
-    const section = `섹션 ${hwpLocator.section_index + 1}`;
-    if (hwpLocator.table) {
-      return `${section} > 표 ${hwpLocator.table.row + 1}행 ${hwpLocator.table.column + 1}열`;
-    }
-    return hwpLocator.paragraph_index === undefined
-      ? `${section} > ${hwpLocator.block_locator}`
-      : `${section} > 문단 ${hwpLocator.paragraph_index + 1}`;
-  }
-  const locator = (chunk as ITestingChunk & { office_locator?: any })
-    .office_locator;
-  if (locator?.kind === 'docx') {
-    const path = Array.isArray(locator.heading_path)
-      ? locator.heading_path.join(' > ')
-      : '';
-    return path || locator.item_locator || 'DOCX 구조 위치';
-  }
-  if (locator?.kind === 'xlsx') {
-    return `${locator.sheet}${locator.cell_range ? `!${locator.cell_range}` : ''}`;
-  }
-  if (locator?.kind === 'pptx') return `슬라이드 ${locator.slide}`;
-  const position = chunk.positions?.find(
-    (value) => Array.isArray(value) && Number.isFinite(value[0]),
-  );
-  return position?.[0] ? `p. ${position[0]}` : '문서 위치';
 }
 
 function InspectionLink({
@@ -144,12 +113,13 @@ function DocumentModal({
   chunk,
   datasetId,
   onClose,
+  onChunkSetChanged,
 }: {
   chunk?: ITestingChunk;
   datasetId?: string;
   onClose: () => void;
+  onChunkSetChanged: () => void;
 }) {
-  const getDocumentUrl = useGetDocumentUrl(chunk?.doc_id);
   const { highlights, setWidthAndHeight } = useGetChunkHighlights(
     (chunk ?? {}) as any,
   );
@@ -166,12 +136,15 @@ function DocumentModal({
           <div className="mb-3 flex justify-end">
             <InspectionLink datasetId={datasetId} documentId={chunk.doc_id} />
           </div>
-          <DocumentPreview
+          <TemporaryOriginalPreview
+            key={`${chunk.doc_id}:${chunk.source_version_id ?? ''}`}
+            documentId={chunk.doc_id}
+            sourceVersionId={chunk.source_version_id}
+            chunkSetId={chunk.chunk_set_id}
+            onChunkSetChanged={onChunkSetChanged}
             className="docmind-document-preview !h-[calc(100dvh-300px)] overflow-auto border-none p-0"
-            fileType={name.split('.').pop()?.toLowerCase() || ''}
             highlights={highlights}
             setWidthAndHeight={setWidthAndHeight}
-            url={getDocumentUrl()}
           />
         </div>
       )}
@@ -191,7 +164,7 @@ function RankedResult({
   onOpen: () => void;
 }) {
   const name = chunk.docnm_kwd || chunk.doc_name;
-  const location = getChunkLocation(chunk);
+  const location = getSourceLocations(chunk);
   const relativePath = chunk.document_relative_path
     ?.trim()
     .replace(/\\/g, '/')
@@ -465,6 +438,9 @@ export default function DocMind() {
       projectId: folderCatalog.data?.project_id,
       scope: currentScope,
     });
+  };
+  const refreshSearchAfterChunkChange = () => {
+    if (retrieval.variables) retrieval.mutate(retrieval.variables);
   };
   const toggle = (
     id: string,
@@ -891,6 +867,7 @@ export default function DocMind() {
           }
           datasetId={retrieval.data?.dataset_id}
           onClose={() => setSelectedChunk(undefined)}
+          onChunkSetChanged={refreshSearchAfterChunkChange}
         />
       </WorkspaceShell>
     </InspectionNavigation.Provider>

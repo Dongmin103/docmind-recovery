@@ -314,6 +314,11 @@ function Chunk({ embedded = false, readOnly = false, onBack }: ChunkProps) {
                 <article className="@container h-full min-w-0 flex flex-col">
                   <DocumentViewSwitch
                     documentInfo={documentInfo}
+                    sourceVersionId={documentInfo?.source_version_id}
+                    chunkSetId={documentInfo?.chunk_set_id}
+                    documentId={documentInfo?.id}
+                    temporaryOriginal={readOnly && inspectionSource === InspectionSource.DocMind}
+                    onChunkSetChanged={retryInspection}
                     fileType={fileType}
                     highlights={highlights}
                     setWidthAndHeight={setWidthAndHeight}
