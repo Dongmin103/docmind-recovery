@@ -72,6 +72,10 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def _queue_cutoff_ms() -> int:
+    return current_timestamp() - int(QUEUE_TTL.total_seconds() * 1000)
+
+
 def _updates() -> dict:
     return {"update_time": current_timestamp(), "update_date": _now()}
 
@@ -132,11 +136,11 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def _source(document_id: str, tenant_id: str):
+def _source(document_id: str, tenant_id: str, *, check_access: bool = True):
     project = DocmindProject.get_or_none(
         (DocmindProject.tenant_id == tenant_id) & (DocmindProject.catalog_source_mode == "database")
     )
-    if project is None or not KnowledgebaseService.accessible(project.dataset_id, tenant_id):
+    if project is None or (check_access and not KnowledgebaseService.accessible(project.dataset_id, tenant_id)):
         raise PreviewError("PREVIEW_FORBIDDEN", 403)
     mapping = DocmindSourceDocument.get_or_none(
         (DocmindSourceDocument.project_id == project.id)
@@ -167,6 +171,20 @@ def _source(document_id: str, tenant_id: str):
     return project, mapping, version, document
 
 
+def _source_matches_session(session: DocmindPreviewSession, *, check_access: bool) -> tuple:
+    project, mapping, version, document = _source(
+        session.document_id, session.owner_id, check_access=check_access
+    )
+    if (
+        project.id != session.project_id
+        or mapping.id != session.source_document_id
+        or mapping.source_id != session.source_id
+        or version.id != session.version_id
+    ):
+        raise PreviewError("SOURCE_VERSION_CHANGED")
+    return project, mapping, version, document
+
+
 def _authorized(session_id: str, tenant_id: str, token: str, *, allow_terminal: bool = False) -> tuple[DocmindPreviewSession, str]:
     _require_enabled()
     session = DocmindPreviewSession.get_or_none(DocmindPreviewSession.id == _id(session_id))
@@ -183,18 +201,10 @@ def _authorized(session_id: str, tenant_id: str, token: str, *, allow_terminal: 
     if session.lifecycle_state in TERMINAL and not allow_terminal:
         raise PreviewError(f"PREVIEW_{session.lifecycle_state}", 410)
     try:
-        project, mapping, version, document = _source(session.document_id, tenant_id)
+        _, _, _, document = _source_matches_session(session, check_access=True)
     except PreviewError:
         _end(session, "EXPIRED")
         raise
-    if (
-        project.id != session.project_id
-        or mapping.id != session.source_document_id
-        or mapping.source_id != session.source_id
-        or version.id != session.version_id
-    ):
-        _end(session, "EXPIRED")
-        raise PreviewError("SOURCE_VERSION_CHANGED")
     return session, document.active_chunk_set_id or ""
 
 
@@ -235,6 +245,15 @@ def create(document_id: str, tenant_id: str, *, source_version_id: str, chunk_se
     with database.atomic():
         # The project row serializes admission across web workers.
         _for_update(DocmindProject.select().where(DocmindProject.id == project.id)).get()
+        _, current_mapping, current_version, current_document = _source(
+            document_id, tenant_id, check_access=False
+        )
+        if (
+            current_mapping.id != mapping.id or current_version.id != version.id
+            or current_version.chunk_set_id != chunk_set_id
+            or current_document.active_chunk_set_id != chunk_set_id
+        ):
+            raise PreviewError("SOURCE_VERSION_CHANGED")
         existing = DocmindPreviewSession.get_or_none(DocmindPreviewSession.idempotency_hash == idem_hash)
         if existing is not None:
             if existing.lifecycle_state in TERMINAL or _now() >= existing.expires_at:
@@ -330,7 +349,7 @@ def reap() -> None:
     now = _now()
     for session in DocmindPreviewSession.select().where(
         (DocmindPreviewSession.lifecycle_state == "QUEUED")
-        & (DocmindPreviewSession.create_date <= now - QUEUE_TTL)
+        & (DocmindPreviewSession.create_time <= _queue_cutoff_ms())
     ):
         DocmindPreviewSession.update(error_code="PREVIEW_QUEUE_TIMEOUT").where(
             DocmindPreviewSession.id == session.id
@@ -373,21 +392,29 @@ def claim(worker_id: str, lease_seconds: int = 300) -> dict | None:
         raise PreviewError("PREVIEW_LEASE_INVALID", 400)
     now = _now()
     database = DocmindPreviewSession._meta.database
+    candidate = DocmindPreviewSession.select().where(
+        (DocmindPreviewSession.lifecycle_state == "QUEUED")
+        & (DocmindPreviewSession.expires_at > now)
+        & (DocmindPreviewSession.create_time > _queue_cutoff_ms())
+    ).order_by(DocmindPreviewSession.create_time.asc()).first()
+    if candidate is None:
+        return None
+    try:
+        _source_matches_session(candidate, check_access=True)
+    except PreviewError:
+        _end(candidate, "EXPIRED")
+        return None
     with database.atomic():
-        candidate = DocmindPreviewSession.select().where(
-            (DocmindPreviewSession.lifecycle_state == "QUEUED")
-            & (DocmindPreviewSession.expires_at > now)
-            & (DocmindPreviewSession.create_date > now - QUEUE_TTL)
-        ).order_by(DocmindPreviewSession.create_time.asc()).first()
-        if candidate is None:
+        candidate = _for_update(DocmindPreviewSession.select().where(
+            DocmindPreviewSession.id == candidate.id
+        )).first()
+        if (
+            candidate is None or candidate.lifecycle_state != "QUEUED"
+            or candidate.expires_at <= _now()
+            or candidate.create_time <= _queue_cutoff_ms()
+        ):
             return None
-        try:
-            _, mapping_now, version_now, _ = _source(candidate.document_id, candidate.owner_id)
-            if mapping_now.id != candidate.source_document_id or version_now.id != candidate.version_id:
-                raise PreviewError("SOURCE_VERSION_CHANGED")
-        except PreviewError:
-            _end(candidate, "EXPIRED")
-            return None
+        _, mapping, version, _ = _source_matches_session(candidate, check_access=False)
         expires = now + timedelta(seconds=lease_seconds)
         fence = candidate.fencing_token + 1
         changed = DocmindPreviewSession.update(
@@ -401,8 +428,6 @@ def claim(worker_id: str, lease_seconds: int = 300) -> dict | None:
         ).execute()
         if changed != 1:
             raise PreviewError("PREVIEW_CLAIM_CONFLICT")
-        mapping = DocmindSourceDocument.get_by_id(candidate.source_document_id)
-        version = DocmindSourceVersion.get_by_id(candidate.version_id)
         return {
             "id": candidate.id, "job_id": candidate.id,
             "source_id": candidate.source_id, "document_id": candidate.document_id,
@@ -538,19 +563,18 @@ def _process_session(session_id: str, fencing_token: int) -> None:
             actual_size = sum(p.stat().st_size for p in directory.iterdir() if p.is_file())
             if actual_size > INPUT_LIMIT + DERIVED_LIMIT:
                 raise PreviewError("PREVIEW_DERIVED_TOO_LARGE", 413)
+            _source_matches_session(session, check_access=True)
             with database.atomic():
                 locked = _for_update(DocmindPreviewSession.select().where(
                     DocmindPreviewSession.id == session.id
                 )).get()
-                _, current_mapping, current_version, _ = _source(session.document_id, session.owner_id)
+                _source_matches_session(locked, check_access=False)
                 if (
                     locked.lifecycle_state != "PROCESSING"
                     or locked.fencing_token != fencing_token
                     or locked.expires_at <= _now()
                     or locked.lease_expires_at is None
                     or locked.lease_expires_at <= _now()
-                    or current_mapping.id != locked.source_document_id
-                    or current_version.id != locked.version_id
                 ):
                     raise PreviewError("PREVIEW_STALE_WORKER_RESULT")
                 live_reserved = sum(item.reserved_bytes for item in DocmindPreviewSession.select().where(
@@ -580,6 +604,15 @@ def worker_status(session_id: str, *, worker_id: str, version_id: str, fencing_t
                   status: str, error_code: str | None) -> dict:
     if status not in {"CLEANED", "CLEANUP_FAILED", "FAILED", "ACTION_REQUIRED"}:
         raise PreviewError("PREVIEW_WORKER_STATUS_INVALID", 400)
+    authorized_for_ready = False
+    if status == "CLEANED":
+        preliminary = DocmindPreviewSession.get_or_none(DocmindPreviewSession.id == _id(session_id))
+        if preliminary is not None and preliminary.lifecycle_state == "PROCESSING" and preliminary.display_format:
+            try:
+                _source_matches_session(preliminary, check_access=True)
+                authorized_for_ready = True
+            except PreviewError:
+                pass
     database = DocmindPreviewSession._meta.database
     with database.atomic():
         session = _for_update(DocmindPreviewSession.select().where(
@@ -603,8 +636,10 @@ def worker_status(session_id: str, *, worker_id: str, version_id: str, fencing_t
             host_cleanup = "COMPLETE"
             if session.lifecycle_state == "PROCESSING" and session.display_format:
                 try:
-                    _, mapping, version, _ = _source(session.document_id, session.owner_id)
-                    valid = mapping.id == session.source_document_id and version.id == session.version_id
+                    if not authorized_for_ready:
+                        raise PreviewError("SOURCE_VERSION_CHANGED")
+                    _source_matches_session(session, check_access=False)
+                    valid = True
                 except PreviewError:
                     valid = False
                 state = "READY" if (
@@ -693,6 +728,7 @@ def _page_lock(session_id: str):
 
 
 def acquire_file(session_id: str, tenant_id: str, token: str, page: int | None = None):
+    _authorized(session_id, tenant_id, token)
     database = DocmindPreviewSession._meta.database
     with database.atomic():
         session = _for_update(DocmindPreviewSession.select().where(
@@ -700,7 +736,11 @@ def acquire_file(session_id: str, tenant_id: str, token: str, page: int | None =
         )).first()
         if session is None:
             raise PreviewError("PREVIEW_NOT_FOUND", 404)
-        _authorized(session_id, tenant_id, token)
+        if session.owner_id != tenant_id or not hmac.compare_digest(session.token_hash, _token_hash(token)):
+            raise PreviewError("PREVIEW_TOKEN_INVALID", 403)
+        _source_matches_session(session, check_access=False)
+        if session.expires_at <= _now() or session.hard_expires_at <= _now():
+            raise PreviewError("PREVIEW_EXPIRED", 410)
         if session.lifecycle_state != "READY":
             raise PreviewError("PREVIEW_NOT_READY", 202)
         DocmindPreviewSession.update(

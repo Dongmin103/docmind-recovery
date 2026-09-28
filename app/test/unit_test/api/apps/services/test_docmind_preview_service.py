@@ -120,10 +120,15 @@ def test_source_change_revokes_each_request(preview_db):
 def test_queue_timeout_even_with_heartbeat_and_cleanup_receipt(preview_db):
     created = _create()
     row = DocmindPreviewSession.get_by_id(created["preview_id"])
-    DocmindPreviewSession.update(create_date=service._now() - timedelta(seconds=121)).where(
+    # BaseModel stores create_date in host-local time; queue age must use epoch milliseconds.
+    DocmindPreviewSession.update(
+        create_time=service.current_timestamp() - 121_000,
+        create_date=service._now() + timedelta(hours=9),
+    ).where(
         DocmindPreviewSession.id == row.id
     ).execute()
     service.heartbeat(row.id, "owner-1", created["preview_token"])
+    assert service.claim("worker-1") is None
     service.reap()
     row = DocmindPreviewSession.get_by_id(row.id)
     assert row.lifecycle_state == "FAILED"
@@ -317,6 +322,50 @@ def test_stale_worker_artifact_and_status_cannot_publish(preview_db):
         )
     assert not (preview_db[1] / created["preview_id"]).exists()
     assert DocmindPreviewSession.get_by_id(created["preview_id"]).lifecycle_state == "DECRYPTING"
+
+
+def test_decorated_access_check_never_closes_preview_transaction(preview_db, monkeypatch):
+    database, _ = preview_db
+    access_during_transaction = []
+
+    @database.connection_context()
+    def decorated_accessible(_dataset_id, _owner_id):
+        access_during_transaction.append(database.in_transaction())
+        return True
+
+    monkeypatch.setattr(service.KnowledgebaseService, "accessible", decorated_accessible)
+    monkeypatch.setattr(service, "_processor", lambda _endpoint, payload, timeout: {
+        "display_format": "pdf", "viewer_kind": "pdf", "page_count": None,
+        "content_path": payload["input_path"],
+    })
+    created = _create()
+    job = service.claim("worker-1")
+    assert job is not None
+    body = b"%PDF-1.4\npreview"
+    service.accept_artifact(
+        created["preview_id"], worker_id="worker-1", version_id="version-1",
+        fencing_token=job["fencing_token"], plaintext=body,
+        plaintext_sha256=hashlib.sha256(body).hexdigest(), plaintext_size=len(body),
+    )
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if DocmindPreviewSession.get_by_id(created["preview_id"]).display_format:
+            break
+        time.sleep(0.02)
+    assert DocmindPreviewSession.get_by_id(created["preview_id"]).display_format == "pdf"
+    service.worker_status(
+        created["preview_id"], worker_id="worker-1", version_id="version-1",
+        fencing_token=job["fencing_token"], status="CLEANED", error_code=None,
+    )
+    source, display_format = service.acquire_file(
+        created["preview_id"], "owner-1", created["preview_token"]
+    )
+    assert display_format == "pdf"
+    assert source.read() == body
+    source.close()
+    service.release_file(created["preview_id"])
+    assert len(access_during_transaction) >= 4
+    assert not any(access_during_transaction)
 
 
 def test_reaper_releases_stale_reader_after_restart(preview_db):
