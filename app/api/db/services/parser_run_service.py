@@ -204,6 +204,7 @@ class ParserRunService:
         source_format: SourceFormat,
         parser_name: str,
         expected_page_count: int,
+        force_new: bool = False,
     ) -> PreparedParserRun:
         initial = coordinator.prepare(base_request)
         matches = list(
@@ -217,7 +218,7 @@ class ParserRunService:
             .order_by(ParserRun.create_time.asc())
         )
         for existing in matches:
-            if existing.lifecycle in REUSABLE_LIFECYCLES:
+            if not force_new and existing.lifecycle in REUSABLE_LIFECYCLES:
                 return replace(
                     initial,
                     parse_run_id=existing.id,
@@ -257,6 +258,7 @@ class ParserRunService:
         source_bytes: bytes,
         expected_page_count: int,
         config: ParserPlatformConfig | None = None,
+        force_new: bool = False,
     ) -> PreparedParserRun:
         runtime = config or ParserPlatformConfig.from_env()
         runtime.require_queue_ready()
@@ -291,6 +293,7 @@ class ParserRunService:
             source_format=SourceFormat.PDF,
             parser_name=selection.engine,
             expected_page_count=expected_page_count,
+            force_new=force_new,
         )
 
     @classmethod
@@ -302,6 +305,7 @@ class ParserRunService:
         source_bytes: bytes,
         source_format: SourceFormat,
         config: ParserPlatformConfig | None = None,
+        force_new: bool = False,
     ) -> PreparedParserRun:
         if source_format not in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
             raise ValueError("prepare_office_run requires DOC, DOCX, XLSX, or PPTX")
@@ -335,6 +339,7 @@ class ParserRunService:
             source_format=source_format,
             parser_name="docling",
             expected_page_count=0,
+            force_new=force_new,
         )
 
     @classmethod
@@ -346,6 +351,7 @@ class ParserRunService:
         source_bytes: bytes,
         source_format: SourceFormat,
         config: ParserPlatformConfig | None = None,
+        force_new: bool = False,
     ) -> PreparedParserRun:
         if source_format not in {SourceFormat.HWP, SourceFormat.HWPX}:
             raise ValueError("prepare_hangul_run requires HWP or HWPX")
@@ -375,4 +381,5 @@ class ParserRunService:
             source_format=source_format,
             parser_name="rhwp",
             expected_page_count=0,
+            force_new=force_new,
         )

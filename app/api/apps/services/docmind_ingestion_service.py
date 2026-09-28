@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+import requests
 from peewee import IntegrityError
 
 from api.db.db_models import (
@@ -23,6 +24,7 @@ from api.db.db_models import (
     DocmindSource,
     DocmindSourceDocument,
     DocmindSourceVersion,
+    Document,
 )
 from common.docmind_source_path import (
     logical_path_identity,
@@ -589,38 +591,203 @@ def observe_source_version_from_worker(**observation) -> dict:
     return observe_source_version(project.tenant_id, project_id=project.id, **observation)
 
 
-def claim_next(worker_id: str, *, lease_seconds: int = 300) -> WorkerDecryptRequest | None:
-    worker_id = _valid_identifier(worker_id, max_length=128)
-    if lease_seconds < 30 or lease_seconds > 1800:
-        raise DocmindIngestionError("DOCMIND_INGESTION_LEASE_INVALID")
-    now = _now()
+def request_cloud_source_reprocess(
+    tenant_id: str,
+    *,
+    project_id: str,
+    source_id: str,
+    document_id: str,
+    expected_active_version_id: str,
+    expected_active_chunk_set_id: str,
+    expected_fencing_token: int,
+    expected_ciphertext_sha256: str,
+    expected_ciphertext_size: int,
+    expected_source_mtime_ns: int,
+) -> dict[str, str | int]:
+    """Explicit operator request to reparse a completed cloud source in place.
+
+    The caller must use the current fence. A repeated request with the same
+    fence is stale even before a worker claims the reset job.
+    """
+
+    tenant_id = _valid_identifier(tenant_id, max_length=32)
+    project_id = _valid_identifier(project_id, max_length=32)
+    source_id = _valid_identifier(source_id, max_length=64)
+    document_id = _valid_identifier(document_id, max_length=32)
+    expected_active_version_id = _valid_identifier(expected_active_version_id, max_length=32)
+    expected_active_chunk_set_id = _valid_identifier(expected_active_chunk_set_id, max_length=32)
+    expected_ciphertext_sha256 = _valid_sha256(expected_ciphertext_sha256)
+    if (
+        not isinstance(expected_fencing_token, int)
+        or expected_fencing_token < 0
+        or not isinstance(expected_ciphertext_size, int)
+        or expected_ciphertext_size < 0
+        or not isinstance(expected_source_mtime_ns, int)
+        or expected_source_mtime_ns < 0
+    ):
+        raise DocmindIngestionError("DOCMIND_INGESTION_REPROCESS_PRECONDITION_FAILED")
     database = DocmindIngestionJob._meta.database
     with database.atomic():
-        job = (
-            DocmindIngestionJob.select()
-            .join(
-                DocmindSourceDocument,
-                on=(DocmindIngestionJob.source_document_id == DocmindSourceDocument.id),
-            )
-            .where(
-                (DocmindSourceDocument.deleted_at.is_null(True))
-                & (
-                    (
-                        DocmindIngestionJob.lifecycle_state.in_(CLAIMABLE_STATES)
-                        & (
-                            DocmindIngestionJob.retry_not_before.is_null(True)
-                            | (DocmindIngestionJob.retry_not_before <= now)
-                        )
+        project = DocmindProject.get_or_none(
+            (DocmindProject.id == project_id) & (DocmindProject.tenant_id == tenant_id)
+        )
+        source = DocmindSource.get_or_none(
+            (DocmindSource.id == source_id)
+            & (DocmindSource.project_id == project_id)
+            & (DocmindSource.enabled == True)
+        )
+        if project is None or source is None:
+            raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_UNAUTHORIZED")
+        query = DocmindSourceDocument.select().where(
+            (DocmindSourceDocument.project_id == project_id)
+            & (DocmindSourceDocument.source_id == source_id)
+            & (DocmindSourceDocument.document_id == document_id)
+        )
+        if "sqlite" not in database.__class__.__name__.lower():
+            query = query.for_update()
+        mapping = query.first()
+        version = DocmindSourceVersion.get_or_none(DocmindSourceVersion.id == expected_active_version_id)
+        job = DocmindIngestionJob.get_or_none(DocmindIngestionJob.version_id == expected_active_version_id)
+        document = Document.get_or_none(Document.id == document_id)
+        if (
+            mapping is None
+            or mapping.deleted_at is not None
+            or mapping.active_source_version_id != expected_active_version_id
+            or mapping.observed_ciphertext_sha256 != expected_ciphertext_sha256
+            or mapping.observed_size != expected_ciphertext_size
+            or mapping.observed_mtime_ns != expected_source_mtime_ns
+            or version is None
+            or version.source_document_id != mapping.id
+            or version.document_id != document_id
+            or version.lifecycle_state != "ACTIVE"
+            or version.ciphertext_sha256 != expected_ciphertext_sha256
+            or version.ciphertext_size != expected_ciphertext_size
+            or version.source_mtime_ns != expected_source_mtime_ns
+            or version.chunk_set_id != expected_active_chunk_set_id
+            or document is None
+            or document.active_chunk_set_id != expected_active_chunk_set_id
+            or job is None
+            or job.source_document_id != mapping.id
+            or job.project_id != project_id
+            or job.source_id != source_id
+            or job.document_id != document_id
+            or job.lifecycle_state != "COMPLETE"
+            or job.cleanup_state != "COMPLETE"
+            or job.host_cleanup_state != "COMPLETE"
+            or job.fencing_token != expected_fencing_token
+            or DocmindIngestionJob.select().where(
+                (DocmindIngestionJob.source_document_id == mapping.id)
+                & (~DocmindIngestionJob.lifecycle_state.in_(TERMINAL_STATES))
+            ).exists()
+        ):
+            raise DocmindIngestionError("DOCMIND_INGESTION_REPROCESS_PRECONDITION_FAILED")
+        changed = DocmindSourceDocument.update(
+            generation=mapping.generation + 1,
+            **_updates(),
+        ).where(
+            (DocmindSourceDocument.id == mapping.id)
+            & (DocmindSourceDocument.generation == mapping.generation)
+            & (DocmindSourceDocument.deleted_at.is_null(True))
+            & (DocmindSourceDocument.active_source_version_id == expected_active_version_id)
+            & (DocmindSourceDocument.observed_ciphertext_sha256 == expected_ciphertext_sha256)
+            & (DocmindSourceDocument.observed_size == expected_ciphertext_size)
+            & (DocmindSourceDocument.observed_mtime_ns == expected_source_mtime_ns)
+        ).execute()
+        if changed != 1:
+            raise DocmindIngestionError("DOCMIND_INGESTION_REPROCESS_PRECONDITION_FAILED")
+        new_fence = expected_fencing_token + 1
+        changed = DocmindIngestionJob.update(
+            lifecycle_state="DISCOVERED",
+            fencing_token=new_fence,
+            lease_owner=None,
+            lease_expires_at=None,
+            retry_not_before=None,
+            parser_input_token_hash=None,
+            plaintext_sha256=None,
+            plaintext_size=None,
+            parser_run_id=None,
+            chunk_set_id=None,
+            host_cleanup_state="NOT_STARTED",
+            cleanup_state="NOT_STARTED",
+            error_code=None,
+            error_message=None,
+            **_updates(),
+        ).where(
+            (DocmindIngestionJob.id == job.id)
+            & (DocmindIngestionJob.lifecycle_state == "COMPLETE")
+            & (DocmindIngestionJob.fencing_token == expected_fencing_token)
+            & (DocmindIngestionJob.cleanup_state == "COMPLETE")
+            & (DocmindIngestionJob.host_cleanup_state == "COMPLETE")
+        ).execute()
+        if changed != 1:
+            raise DocmindIngestionError("DOCMIND_INGESTION_REPROCESS_PRECONDITION_FAILED")
+    return {"job_id": job.id, "version_id": version.id, "fencing_token": new_fence}
+
+
+def _claimable_jobs(now: datetime):
+    return (
+        DocmindIngestionJob.select()
+        .join(DocmindSourceDocument, on=(DocmindIngestionJob.source_document_id == DocmindSourceDocument.id))
+        .switch(DocmindIngestionJob)
+        .join(DocmindSource, on=(DocmindIngestionJob.source_id == DocmindSource.id))
+        .where(
+            DocmindSourceDocument.deleted_at.is_null(True)
+            & (DocmindSource.enabled == True)
+            & (DocmindSource.project_id == DocmindIngestionJob.project_id)
+            & (
+                (
+                    DocmindIngestionJob.lifecycle_state.in_(CLAIMABLE_STATES)
+                    & (
+                        DocmindIngestionJob.retry_not_before.is_null(True)
+                        | (DocmindIngestionJob.retry_not_before <= now)
                     )
+                )
                 | (
                     (DocmindIngestionJob.lifecycle_state == "DECRYPTING")
                     & (DocmindIngestionJob.lease_expires_at < now)
                 )
-                )
             )
-            .order_by(DocmindIngestionJob.create_time.asc())
-            .first()
         )
+    )
+
+
+def _surya_required_before_claim(relative_path: str) -> bool:
+    from rag.parser_platform.config import ParserPlatformConfig
+
+    config = ParserPlatformConfig.from_env()
+    if not config.enabled or not config.integration_ready:
+        return False
+    suffix = Path(relative_path).suffix.lower()
+    return (suffix == ".pdf" and config.pdf_enabled) or (
+        suffix in {".doc", ".docx", ".xlsx", ".pptx"} and config.office_enabled
+    )
+
+
+def _surya_ready_before_claim() -> bool:
+    from rag.parser_platform.config import ParserPlatformConfig
+
+    url = ParserPlatformConfig.from_env().surya_service_url
+    try:
+        response = requests.get(f"{url}/ready", timeout=2)
+        return response.status_code == 200 and response.json().get("status") == "ready"
+    except (requests.RequestException, ValueError, AttributeError):
+        return False
+
+
+def claim_next(worker_id: str, *, lease_seconds: int = 300) -> WorkerDecryptRequest | None:
+    worker_id = _valid_identifier(worker_id, max_length=128)
+    if lease_seconds < 30 or lease_seconds > 1800:
+        raise DocmindIngestionError("DOCMIND_INGESTION_LEASE_INVALID")
+    candidate = _claimable_jobs(_now()).order_by(DocmindIngestionJob.create_time.asc()).first()
+    if candidate is None:
+        return None
+    source_document = DocmindSourceDocument.get_by_id(candidate.source_document_id)
+    if _surya_required_before_claim(source_document.relative_path) and not _surya_ready_before_claim():
+        return None
+    database = DocmindIngestionJob._meta.database
+    now = _now()
+    with database.atomic():
+        job = _claimable_jobs(now).where(DocmindIngestionJob.id == candidate.id).first()
         if job is None:
             return None
         next_fence = job.fencing_token + 1

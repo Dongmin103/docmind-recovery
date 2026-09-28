@@ -15,6 +15,7 @@ from api.db.db_models import (
     DocmindSource,
     DocmindSourceDocument,
     DocmindSourceVersion,
+    Document,
 )
 
 SERVICE_PATH = Path(__file__).resolve().parents[5] / "api" / "apps" / "services" / "docmind_ingestion_service.py"
@@ -25,6 +26,7 @@ sys.modules[SPEC.name] = service
 SPEC.loader.exec_module(service)
 
 MODELS = [
+    Document,
     DocmindProject,
     DocmindFolder,
     DocmindSource,
@@ -188,6 +190,152 @@ def test_claim_respects_retry_not_before_and_never_claims_deleted_source(ingesti
     DocmindSourceDocument.update(deleted_at=service._now()).execute()
 
     assert service.claim_next("windows-worker-1", lease_seconds=300) is None
+
+
+@pytest.mark.parametrize("suffix", ["pdf", "doc"])
+def test_claim_waits_for_surya_before_consuming_lease(ingestion_db, monkeypatch, suffix):
+    monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "true")
+    monkeypatch.setenv("PARSER_PLATFORM_INTEGRATION_READY", "true")
+    monkeypatch.setenv("PARSER_PLATFORM_SURYA_URL", "http://surya-test:8091")
+    path = f"reports/document.{suffix}"
+    DocmindSourceDocument.update(relative_path=path).execute()
+    _observe(relative_path=path)
+    discovered = _observe(relative_path=path)
+    probes = []
+
+    def not_ready(url, *, timeout):
+        probes.append((url, timeout, ingestion_db.in_transaction()))
+        return SimpleNamespace(status_code=503, json=lambda: {"status": "starting"})
+
+    monkeypatch.setattr(service.requests, "get", not_ready)
+    assert service.claim_next("windows-worker-1", lease_seconds=1800) is None
+    job = DocmindIngestionJob.get_by_id(discovered["job_id"])
+    assert (job.lifecycle_state, job.attempt, job.fencing_token, job.lease_owner, job.lease_expires_at) == (
+        "DISCOVERED", 0, 0, None, None,
+    )
+    assert probes == [("http://surya-test:8091/ready", 2, False)]
+
+    monkeypatch.setattr(
+        service.requests,
+        "get",
+        lambda url, *, timeout: SimpleNamespace(status_code=200, json=lambda: {"status": "ready"}),
+    )
+    claim = service.claim_next("windows-worker-1", lease_seconds=1800)
+    assert claim is not None and claim.job_id == discovered["job_id"]
+    assert DocmindIngestionJob.get_by_id(claim.job_id).attempt == 1
+
+
+def test_claim_treats_unreachable_surya_as_not_ready(ingestion_db, monkeypatch):
+    monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "true")
+    monkeypatch.setenv("PARSER_PLATFORM_INTEGRATION_READY", "true")
+    _observe()
+    discovered = _observe()
+
+    def unavailable(*args, **kwargs):
+        raise service.requests.ConnectionError("unavailable")
+
+    monkeypatch.setattr(service.requests, "get", unavailable)
+    assert service.claim_next("windows-worker-1", lease_seconds=1800) is None
+    assert DocmindIngestionJob.get_by_id(discovered["job_id"]).attempt == 0
+
+
+def test_claim_does_not_probe_surya_when_parser_platform_disabled(ingestion_db, monkeypatch):
+    monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "false")
+    _observe()
+    discovered = _observe()
+    monkeypatch.setattr(service.requests, "get", lambda *args, **kwargs: pytest.fail("unexpected probe"))
+
+    claim = service.claim_next("windows-worker-1", lease_seconds=300)
+
+    assert claim is not None and claim.job_id == discovered["job_id"]
+
+
+def test_claim_does_not_decrypt_job_from_disabled_source(ingestion_db, monkeypatch):
+    _observe()
+    discovered = _observe()
+    DocmindSource.update(enabled=False).execute()
+    monkeypatch.setattr(service.requests, "get", lambda *args, **kwargs: pytest.fail("unexpected probe"))
+
+    assert service.claim_next("windows-worker-1", lease_seconds=300) is None
+    assert DocmindIngestionJob.get_by_id(discovered["job_id"]).attempt == 0
+
+
+def test_explicit_reprocess_preserves_active_chunks_and_fences_replay(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    Document.create(
+        id="document-1",
+        kb_id="dataset-1",
+        parser_id="naive",
+        type="pdf",
+        created_by="tenant-1",
+        suffix="pdf",
+        active_chunk_set_id="chunk-old",
+    )
+    DocmindSourceDocument.update(active_source_version_id=claim.version_id).execute()
+    DocmindSourceVersion.update(lifecycle_state="ACTIVE", chunk_set_id="chunk-old").execute()
+    DocmindIngestionJob.update(
+        lifecycle_state="COMPLETE",
+        cleanup_state="COMPLETE",
+        host_cleanup_state="COMPLETE",
+        parser_run_id="run-old",
+        chunk_set_id="chunk-old",
+    ).execute()
+    request = {
+        "project_id": "project-1",
+        "source_id": "home-test1",
+        "document_id": "document-1",
+        "expected_active_version_id": claim.version_id,
+        "expected_active_chunk_set_id": "chunk-old",
+        "expected_fencing_token": claim.fencing_token,
+        "expected_ciphertext_sha256": "a" * 64,
+        "expected_ciphertext_size": 123,
+        "expected_source_mtime_ns": 456,
+    }
+    result = service.request_cloud_source_reprocess("tenant-1", **request)
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert result == {"job_id": claim.job_id, "version_id": claim.version_id, "fencing_token": 2}
+    assert (job.lifecycle_state, job.attempt, job.fencing_token) == ("DISCOVERED", 1, 2)
+    assert (job.lease_owner, job.lease_expires_at, job.parser_run_id, job.chunk_set_id) == (
+        None, None, None, None,
+    )
+    assert Document.get_by_id("document-1").active_chunk_set_id == "chunk-old"
+    assert DocmindSourceDocument.get().active_source_version_id == claim.version_id
+    assert DocmindSourceVersion.get().lifecycle_state == "ACTIVE"
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_REPROCESS_PRECONDITION_FAILED"):
+        service.request_cloud_source_reprocess("tenant-1", **request)
+    next_claim = service.claim_next("windows-worker-2", lease_seconds=300)
+    assert next_claim is not None and next_claim.fencing_token == 3
+
+
+@pytest.mark.parametrize("change", ["disabled", "source_changed", "cleanup_pending", "chunk_changed"])
+def test_reprocess_rejects_invalid_preconditions(ingestion_db, change):
+    _, claim = _enqueue_and_claim()
+    Document.create(
+        id="document-1", kb_id="dataset-1", parser_id="naive", type="pdf",
+        created_by="tenant-1", suffix="pdf", active_chunk_set_id="chunk-old",
+    )
+    DocmindSourceDocument.update(active_source_version_id=claim.version_id).execute()
+    DocmindSourceVersion.update(lifecycle_state="ACTIVE", chunk_set_id="chunk-old").execute()
+    DocmindIngestionJob.update(
+        lifecycle_state="COMPLETE", cleanup_state="COMPLETE", host_cleanup_state="COMPLETE",
+    ).execute()
+    if change == "disabled":
+        DocmindSource.update(enabled=False).execute()
+    elif change == "source_changed":
+        DocmindSourceDocument.update(observed_ciphertext_sha256="b" * 64).execute()
+    elif change == "cleanup_pending":
+        DocmindIngestionJob.update(host_cleanup_state="PENDING").execute()
+    else:
+        Document.update(active_chunk_set_id="chunk-new").execute()
+    with pytest.raises(service.DocmindIngestionError):
+        service.request_cloud_source_reprocess(
+            "tenant-1", project_id="project-1", source_id="home-test1", document_id="document-1",
+            expected_active_version_id=claim.version_id,
+            expected_active_chunk_set_id="chunk-old", expected_fencing_token=claim.fencing_token,
+            expected_ciphertext_sha256="a" * 64, expected_ciphertext_size=123,
+            expected_source_mtime_ns=456,
+        )
+    assert DocmindIngestionJob.get_by_id(claim.job_id).lifecycle_state == "COMPLETE"
 
 
 def test_artifact_integrity_and_parser_handoff_do_not_persist_plaintext_or_token(ingestion_db):

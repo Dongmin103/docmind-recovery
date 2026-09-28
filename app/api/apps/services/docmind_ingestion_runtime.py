@@ -275,6 +275,7 @@ class ProductionTemporaryParserInputRunner:
                 source_bytes=normalized,
                 expected_page_count=count_pdf_pages(normalized),
                 config=config,
+                force_new=True,
             )
         if source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
             return ParserRunService.prepare_office_run(
@@ -282,12 +283,14 @@ class ProductionTemporaryParserInputRunner:
                 source_bytes=source_bytes,
                 source_format=source_format,
                 config=config,
+                force_new=True,
             )
         return ParserRunService.prepare_hangul_run(
             document=document,
             source_bytes=source_bytes,
             source_format=source_format,
             config=config,
+            force_new=True,
         )
 
     @staticmethod

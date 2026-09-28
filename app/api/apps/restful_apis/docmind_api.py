@@ -15,10 +15,17 @@ from api.apps.services import (
     docmind_shared_workspace_service,
     docmind_worker_auth,
 )
+from api.db.db_models import DocmindIngestionJob
 from api.db.services.document_service import DocmindProtectedEvidenceError
 from api.utils.api_utils import add_tenant_id_to_kwargs, get_error_argument_result, get_error_data_result, get_result
 
 logger = logging.getLogger(__name__)
+
+
+def _claim_cloud_sync_job_in_thread(worker_id: str, lease_seconds: int):
+    with DocmindIngestionJob._meta.database.connection_context():
+        docmind_ingestion_service.maintain_parser_workspaces()
+        return docmind_ingestion_service.claim_next(worker_id, lease_seconds=lease_seconds)
 
 
 def _worker_path_and_query() -> str:
@@ -139,8 +146,7 @@ async def claim_cloud_sync_job():
         lease_seconds = req.get("lease_seconds", 300)
         if not isinstance(lease_seconds, int):
             raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_LEASE_INVALID")
-        docmind_ingestion_service.maintain_parser_workspaces()
-        job = docmind_ingestion_service.claim_next(worker_id, lease_seconds=lease_seconds)
+        job = await asyncio.to_thread(_claim_cloud_sync_job_in_thread, worker_id, lease_seconds)
         return _signed_worker_response({"job": job.to_dict() if job else None}, key_id)
     except docmind_worker_auth.WorkerAuthenticationError:
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")

@@ -122,3 +122,29 @@ def test_duplicate_inflight_request_reuses_queued_run(monkeypatch) -> None:
 
     assert prepared.parse_run_id == "queued-run"
     assert prepared.chunk_set_id == "queued-set"
+
+
+def test_ephemeral_reparse_creates_new_run_even_when_old_run_is_queued(monkeypatch) -> None:
+    existing = SimpleNamespace(
+        id="queued-run",
+        chunk_set_id="queued-set",
+        idempotency_key="queued-key",
+        lifecycle="QUEUED",
+    )
+    created = {}
+    monkeypatch.setattr(parser_run_service.ParserRun, "select", lambda: FixedQuery([existing]))
+    monkeypatch.setattr(parser_run_service.ParserRun, "create", lambda **values: created.update(values))
+    source_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1synthetic-word"
+
+    prepared = parser_run_service.ParserRunService.prepare_office_run.__wrapped__(
+        parser_run_service.ParserRunService,
+        document={"id": "doc-office", "name": "synthetic.doc"},
+        source_bytes=source_bytes,
+        source_format=SourceFormat.DOC,
+        config=ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0"),
+        force_new=True,
+    )
+
+    assert prepared.attempt == 1
+    assert prepared.parse_run_id != existing.id
+    assert created["id"] == prepared.parse_run_id
