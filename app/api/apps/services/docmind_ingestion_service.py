@@ -25,6 +25,7 @@ from api.db.db_models import (
     DocmindSourceDocument,
     DocmindSourceVersion,
     Document,
+    ParserRun,
 )
 from common.docmind_source_path import (
     logical_path_identity,
@@ -166,6 +167,55 @@ def _cleanup_recovery_target(
     return "COMPLETE" if activated else "FAILED"
 
 
+def _certify_active_version_after_cleanup(job_id: str, fencing_token: int) -> None:
+    """Persist proof for the active run only after both cleanup acknowledgements."""
+
+    job = DocmindIngestionJob.get_or_none(
+        (DocmindIngestionJob.id == job_id)
+        & (DocmindIngestionJob.fencing_token == fencing_token)
+        & (DocmindIngestionJob.lifecycle_state == "COMPLETE")
+        & (DocmindIngestionJob.cleanup_state == "COMPLETE")
+        & (DocmindIngestionJob.host_cleanup_state == "COMPLETE")
+    )
+    if job is None or not job.parser_run_id or not job.chunk_set_id:
+        return
+    version = DocmindSourceVersion.get_or_none(DocmindSourceVersion.id == job.version_id)
+    mapping = DocmindSourceDocument.get_or_none(DocmindSourceDocument.id == job.source_document_id)
+    document = Document.get_or_none(Document.id == job.document_id)
+    run = ParserRun.get_or_none(ParserRun.id == job.parser_run_id)
+    if (
+        version is None
+        or version.lifecycle_state != "ACTIVE"
+        or version.source_document_id != job.source_document_id
+        or version.document_id != job.document_id
+        or version.parser_run_id != job.parser_run_id
+        or version.chunk_set_id != job.chunk_set_id
+        or mapping is None
+        or mapping.deleted_at is not None
+        or mapping.project_id != job.project_id
+        or mapping.source_id != job.source_id
+        or mapping.document_id != job.document_id
+        or mapping.active_source_version_id != version.id
+        or document is None
+        or document.active_chunk_set_id != version.chunk_set_id
+        or str(document.status) != "1"
+        or run is None
+        or run.doc_id != job.document_id
+        or run.chunk_set_id != version.chunk_set_id
+        or run.lifecycle not in {"READY", "READY_WITH_WARNING"}
+        or run.raw_artifact_ref is not None
+        or int(run.staged_chunk_count or 0) <= 0
+    ):
+        return
+    DocmindSourceVersion.update(search_cleanup_complete=True, **_updates()).where(
+        (DocmindSourceVersion.id == version.id)
+        & (DocmindSourceVersion.lifecycle_state == "ACTIVE")
+        & (DocmindSourceVersion.parser_run_id == job.parser_run_id)
+        & (DocmindSourceVersion.chunk_set_id == job.chunk_set_id)
+        & (DocmindSourceVersion.search_cleanup_complete == False)
+    ).execute()
+
+
 def maintain_parser_workspaces(*, force: bool = False) -> None:
     """Rate-limited orphan cleanup guarded by the current DB lease/fence."""
 
@@ -289,23 +339,27 @@ class DocmindCleanupRecorder:
             )
         else:
             target = job.lifecycle_state
-        changed = (
-            DocmindIngestionJob.update(
-                lifecycle_state=target,
-                cleanup_state=states[record.state],
-                error_code=error_code if record.state == "CLEANUP_FAILED" else job.error_code,
-                error_message=None,
-                **_updates(),
+        with DocmindIngestionJob._meta.database.atomic():
+            changed = (
+                DocmindIngestionJob.update(
+                    lifecycle_state=target,
+                    cleanup_state=states[record.state],
+                    error_code=error_code if record.state == "CLEANUP_FAILED" else job.error_code,
+                    error_message=None,
+                    **_updates(),
+                )
+                .where(
+                    (DocmindIngestionJob.id == job.id)
+                    & (DocmindIngestionJob.version_id == job.version_id)
+                    & (DocmindIngestionJob.fencing_token == job.fencing_token)
+                    & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
+                )
+                .execute()
             )
-            .where(
-                (DocmindIngestionJob.id == job.id)
-                & (DocmindIngestionJob.version_id == job.version_id)
-                & (DocmindIngestionJob.fencing_token == job.fencing_token)
-            )
-            .execute()
-        )
-        if changed != 1:
-            raise DocmindIngestionError("DOCMIND_INGESTION_STALE_CLEANUP")
+            if changed != 1:
+                raise DocmindIngestionError("DOCMIND_INGESTION_STALE_CLEANUP")
+            if target == "COMPLETE":
+                _certify_active_version_after_cleanup(job.id, job.fencing_token)
 
 
 class DocmindLeaseCleanupGuard:
@@ -1017,7 +1071,7 @@ def process_decrypted_artifact(
             & (~DocmindIngestionJob.lifecycle_state.in_(TERMINAL_STATES))
         ).execute()
         raise DocmindIngestionError(code) from error
-    record_parser_cleanup(job_id, succeeded=True)
+    record_parser_cleanup(job_id, fencing_token=fencing_token, succeeded=True)
     return ack
 
 
@@ -1076,6 +1130,7 @@ def activate_indexed_version(
             content_sha256=job.plaintext_sha256,
             parser_run_id=result.parser_run_id,
             chunk_set_id=result.chunk_set_id,
+            search_cleanup_complete=False,
             activated_at=now,
             **_updates(),
         ).where(DocmindSourceVersion.id == version.id).execute()
@@ -1147,16 +1202,22 @@ def record_worker_status(
         host_cleanup_state = "PENDING"
     else:
         raise DocmindIngestionError("DOCMIND_INGESTION_STATUS_INVALID")
-    DocmindIngestionJob.update(
-        lifecycle_state=target,
-        host_cleanup_state=host_cleanup_state,
-        error_code=error_code,
-        error_message=None,
-        **_updates(),
-    ).where(
-        (DocmindIngestionJob.id == job.id)
-        & (DocmindIngestionJob.fencing_token == fencing_token)
-    ).execute()
+    with DocmindIngestionJob._meta.database.atomic():
+        changed = DocmindIngestionJob.update(
+            lifecycle_state=target,
+            host_cleanup_state=host_cleanup_state,
+            error_code=error_code,
+            error_message=None,
+            **_updates(),
+        ).where(
+            (DocmindIngestionJob.id == job.id)
+            & (DocmindIngestionJob.fencing_token == fencing_token)
+            & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
+        ).execute()
+        if changed != 1:
+            raise DocmindIngestionError("DOCMIND_INGESTION_STALE_RESULT")
+        if target == "COMPLETE":
+            _certify_active_version_after_cleanup(job.id, fencing_token)
     return {
         "accepted": True,
         "job_id": job.id,
@@ -1166,13 +1227,17 @@ def record_worker_status(
     }
 
 
-def record_parser_cleanup(job_id: str, *, succeeded: bool, error_code: str | None = None) -> None:
+def record_parser_cleanup(
+    job_id: str, *, fencing_token: int, succeeded: bool, error_code: str | None = None
+) -> None:
     """Finish only after both host output and Docker parser artifacts are gone."""
 
     job = DocmindIngestionJob.get_or_none(
         DocmindIngestionJob.id == _valid_identifier(job_id, max_length=32)
     )
-    if job is None or job.lifecycle_state not in {"CLEANUP", "CLEANUP_FAILED"}:
+    if job is None or job.fencing_token != fencing_token:
+        raise DocmindIngestionError("DOCMIND_INGESTION_STALE_CLEANUP")
+    if job.lifecycle_state not in {"CLEANUP", "CLEANUP_FAILED"}:
         raise DocmindIngestionError("DOCMIND_INGESTION_CLEANUP_STATE_INVALID")
     if not succeeded:
         target = "CLEANUP_FAILED"
@@ -1191,14 +1256,19 @@ def record_parser_cleanup(job_id: str, *, succeeded: bool, error_code: str | Non
     else:
         target = "CLEANUP"
         cleanup_state = "COMPLETE"
-    DocmindIngestionJob.update(
-        lifecycle_state=target,
-        cleanup_state=cleanup_state,
-        error_code=error_code,
-        error_message=None,
-        **_updates(),
-    ).where(
-        (DocmindIngestionJob.id == job.id)
-        & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
-        & (DocmindIngestionJob.fencing_token == job.fencing_token)
-    ).execute()
+    with DocmindIngestionJob._meta.database.atomic():
+        changed = DocmindIngestionJob.update(
+            lifecycle_state=target,
+            cleanup_state=cleanup_state,
+            error_code=error_code,
+            error_message=None,
+            **_updates(),
+        ).where(
+            (DocmindIngestionJob.id == job.id)
+            & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
+            & (DocmindIngestionJob.fencing_token == job.fencing_token)
+        ).execute()
+        if changed != 1:
+            raise DocmindIngestionError("DOCMIND_INGESTION_STALE_CLEANUP")
+        if target == "COMPLETE":
+            _certify_active_version_after_cleanup(job.id, job.fencing_token)

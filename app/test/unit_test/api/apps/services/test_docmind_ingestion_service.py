@@ -16,6 +16,7 @@ from api.db.db_models import (
     DocmindSourceDocument,
     DocmindSourceVersion,
     Document,
+    ParserRun,
 )
 
 SERVICE_PATH = Path(__file__).resolve().parents[5] / "api" / "apps" / "services" / "docmind_ingestion_service.py"
@@ -27,6 +28,7 @@ SPEC.loader.exec_module(service)
 
 MODELS = [
     Document,
+    ParserRun,
     DocmindProject,
     DocmindFolder,
     DocmindSource,
@@ -501,7 +503,7 @@ def test_worker_cleanup_ack_is_required_for_complete(ingestion_db):
     assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP"
     assert DocmindIngestionJob.get().host_cleanup_state == "COMPLETE"
 
-    service.record_parser_cleanup(claim.job_id, succeeded=True)
+    service.record_parser_cleanup(claim.job_id, fencing_token=claim.fencing_token, succeeded=True)
 
     assert DocmindIngestionJob.get().lifecycle_state == "COMPLETE"
     assert DocmindIngestionJob.get().cleanup_state == "COMPLETE"

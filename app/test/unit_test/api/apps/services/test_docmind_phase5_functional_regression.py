@@ -28,6 +28,8 @@ from api.db.db_models import (
     DocmindSourceScanBatch,
     DocmindSourceScanEntry,
     DocmindSourceVersion,
+    Document,
+    ParserRun,
 )
 
 APP_ROOT = Path(__file__).resolve().parents[5]
@@ -58,6 +60,8 @@ ephemeral = _load_module(
 
 
 MODELS = [
+    Document,
+    ParserRun,
     DocmindProject,
     DocmindFolder,
     DocmindSource,
@@ -111,6 +115,10 @@ class _IsolatedIndex:
         del parser_run_id
         assert self.active.get(document_id) == expected_active_chunk_set_id
         assert chunk_set_id in self.staged
+        assert Document.update(active_chunk_set_id=chunk_set_id).where(
+            (Document.id == document_id)
+            & (Document.active_chunk_set_id == expected_active_chunk_set_id)
+        ).execute() == 1
         self.active[document_id] = chunk_set_id
 
     def discard_staging(self, *, document_id: str, parser_run_id: str, chunk_set_id: str) -> None:
@@ -176,6 +184,10 @@ def phase5_environment(tmp_path: Path):
                 folder_id=folder,
                 relative_path=path,
             )
+            Document.create(
+                id=f"document-{name}", kb_id="dataset-phase5", parser_id="naive",
+                type="pdf", created_by="tenant-phase5", suffix="pdf", status="1",
+            )
         yield SimpleNamespace(
             database=database,
             database_path=database_path,
@@ -236,6 +248,14 @@ def _process_claim(environment, *, plaintext: bytes, suffix: str) -> object:
                 document_id=document_id,
                 chunk_set_id=chunk_set_id,
                 text=plaintext.decode("utf-8") + ("가" * 2500),
+            )
+            ParserRun.create(
+                id=f"parser-run-{suffix}", doc_id=document_id, chunk_set_id=chunk_set_id,
+                idempotency_key=f"parser-key-{suffix}", source_hash="a" * 64,
+                source_format="PDF", source_fingerprint="b" * 64,
+                config_fingerprint="c" * 64, parser_fingerprint="d" * 64,
+                parser_name="synthetic", parser_version="1", backend="synthetic",
+                schema_version="1", lifecycle="READY", staged_chunk_count=1,
             )
             return ingestion.ParserStageResult(
                 index=ingestion.IndexReadyResult(

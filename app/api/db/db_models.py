@@ -1836,6 +1836,7 @@ class DocmindSourceVersion(DataBaseModel):
     chunk_set_id = CharField(max_length=32, null=True, index=True)
     lifecycle_state = CharField(max_length=32, null=False, index=True)
     activated_at = DateTimeField(null=True, index=True)
+    search_cleanup_complete = BooleanField(default=False, null=False)
 
     class Meta:
         db_table = "docmind_source_version"
@@ -2952,6 +2953,53 @@ def _update_tenant_llm_to_id_primary_key_gaussdb_catalog():
             DB.execute_sql("ALTER TABLE tenant_llm DROP COLUMN temp_id")
 
 
+def backfill_docmind_search_cleanup_complete():
+    """Record only active versions whose previous job and parser cleanup finished."""
+
+    completed = (
+        DocmindIngestionJob.select(DocmindIngestionJob.id)
+        .join(
+            DocmindSourceDocument,
+            on=(DocmindIngestionJob.source_document_id == DocmindSourceDocument.id),
+        )
+        .switch(DocmindIngestionJob)
+        .join(Document, on=(DocmindIngestionJob.document_id == Document.id))
+        .switch(DocmindIngestionJob)
+        .join(ParserRun, on=(DocmindIngestionJob.parser_run_id == ParserRun.id))
+        .where(
+            (DocmindIngestionJob.version_id == DocmindSourceVersion.id)
+            & (DocmindIngestionJob.lifecycle_state == "COMPLETE")
+            & (DocmindIngestionJob.cleanup_state == "COMPLETE")
+            & (DocmindIngestionJob.host_cleanup_state == "COMPLETE")
+            & (DocmindIngestionJob.project_id == DocmindSourceDocument.project_id)
+            & (DocmindIngestionJob.source_id == DocmindSourceDocument.source_id)
+            & (DocmindIngestionJob.document_id == DocmindSourceDocument.document_id)
+            & (DocmindSourceDocument.deleted_at.is_null(True))
+            & (DocmindSourceDocument.active_source_version_id == DocmindSourceVersion.id)
+            & (DocmindSourceVersion.source_document_id == DocmindSourceDocument.id)
+            & (DocmindSourceVersion.document_id == Document.id)
+            & (DocmindIngestionJob.parser_run_id == DocmindSourceVersion.parser_run_id)
+            & (DocmindIngestionJob.chunk_set_id == DocmindSourceVersion.chunk_set_id)
+            & (ParserRun.doc_id == Document.id)
+            & (ParserRun.chunk_set_id == DocmindSourceVersion.chunk_set_id)
+            & (ParserRun.lifecycle.in_(("READY", "READY_WITH_WARNING")))
+            & (ParserRun.raw_artifact_ref.is_null(True))
+            & (ParserRun.staged_chunk_count > 0)
+            & (Document.active_chunk_set_id == DocmindSourceVersion.chunk_set_id)
+            & (Document.status == "1")
+        )
+    )
+    return (
+        DocmindSourceVersion.update(search_cleanup_complete=True)
+        .where(
+            (~DocmindSourceVersion.search_cleanup_complete)
+            & (DocmindSourceVersion.lifecycle_state == "ACTIVE")
+            & (fn.EXISTS(completed))
+        )
+        .execute()
+    )
+
+
 def migrate_db():
     logging.disable(logging.ERROR)
     migrator = DatabaseMigrator[settings.DATABASE_TYPE.upper()].value(DB)
@@ -3093,6 +3141,13 @@ def migrate_db():
         "retry_not_before",
         DateTimeField(null=True, index=True),
     )
+    alter_db_add_column(
+        migrator,
+        "docmind_source_version",
+        "search_cleanup_complete",
+        BooleanField(default=False, null=False),
+    )
+    backfill_docmind_search_cleanup_complete()
     alter_db_add_column(
         migrator,
         "docmind_source_document",

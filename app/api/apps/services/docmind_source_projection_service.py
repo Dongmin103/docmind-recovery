@@ -65,17 +65,13 @@ def _searchable(mapping, version, job, run, document, project_id: str) -> bool:
         and version.lifecycle_state == "ACTIVE"
         and version.parser_run_id
         and version.chunk_set_id
+        and version.search_cleanup_complete
         and job is not None
         and job.project_id == project_id
         and job.source_id == mapping.source_id
         and job.source_document_id == mapping.id
         and job.document_id == mapping.document_id
         and job.version_id == version.id
-        and job.lifecycle_state == "COMPLETE"
-        and job.cleanup_state == "COMPLETE"
-        and job.host_cleanup_state == "COMPLETE"
-        and job.parser_run_id == version.parser_run_id
-        and job.chunk_set_id == version.chunk_set_id
         and run is not None
         and run.id == version.parser_run_id
         and run.doc_id == mapping.document_id

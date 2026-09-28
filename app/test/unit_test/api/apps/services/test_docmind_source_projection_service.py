@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from peewee import SqliteDatabase
@@ -16,6 +17,7 @@ from api.db.db_models import (
     DocmindSourceVersion,
     Document,
     ParserRun,
+    backfill_docmind_search_cleanup_complete,
 )
 
 SERVICE_PATH = Path(__file__).resolve().parents[5] / "api" / "apps" / "services" / "docmind_source_projection_service.py"
@@ -88,6 +90,7 @@ def _mapping(source_id: str, document_id: str, path: str, *, complete: bool):
         parser_run_id=run_id,
         chunk_set_id=chunk_set_id,
         lifecycle_state="ACTIVE",
+        search_cleanup_complete=True,
     )
     DocmindIngestionJob.create(
         id=f"job-{document_id}",
@@ -176,6 +179,7 @@ def test_tombstone_disabled_source_and_failed_cleanup_are_excluded(source_db):
     mapping = _mapping("home", "doc-a", "Manuals/guide.doc", complete=True)
     _mapping("dept", "doc-b", "Manuals/guide.doc", complete=True)
     DocmindIngestionJob.update(cleanup_state="FAILED").where(DocmindIngestionJob.document_id == "doc-b").execute()
+    DocmindSourceVersion.update(search_cleanup_complete=False).where(DocmindSourceVersion.document_id == "doc-b").execute()
     assert set(projection.load("tenant-1").document_paths) == {"doc-a"}
 
     DocmindSourceDocument.update(deleted_at="2026-09-23 00:00:00").where(DocmindSourceDocument.id == mapping.id).execute()
@@ -219,6 +223,118 @@ def test_failed_new_version_keeps_prior_active_version_searchable(source_db):
     )
     tree = projection.load("tenant-1")
     assert tree.document_version_ids == {"doc-a": "version-doc-a"}
+
+
+def test_reprocess_keeps_old_run_searchable_until_new_activation_and_cleanup(source_db):
+    mapping = _mapping("home", "doc-a", "guide.doc", complete=True)
+    DocmindSourceDocument.update(
+        observed_ciphertext_sha256="a" * 64, observed_size=42, observed_mtime_ns=1,
+    ).where(DocmindSourceDocument.id == mapping.id).execute()
+    request = {
+        "project_id": "project-1", "source_id": "home", "document_id": "doc-a",
+        "expected_active_version_id": "version-doc-a", "expected_active_chunk_set_id": "chunk-doc-a",
+        "expected_fencing_token": 0, "expected_ciphertext_sha256": "a" * 64,
+        "expected_ciphertext_size": 42, "expected_source_mtime_ns": 1,
+    }
+    ingestion.request_cloud_source_reprocess("tenant-1", **request)
+    assert set(projection.load("tenant-1").document_paths) == {"doc-a"}
+    claim = ingestion.claim_next("worker-2", lease_seconds=300)
+    assert claim is not None and claim.fencing_token == 2
+    DocmindIngestionJob.update(
+        lifecycle_state="PARSING", cleanup_state="PENDING", host_cleanup_state="PENDING",
+    ).where(DocmindIngestionJob.id == claim.job_id).execute()
+    assert set(projection.load("tenant-1").document_paths) == {"doc-a"}
+
+    ParserRun.create(
+        id="run-reprocess", doc_id="doc-a", chunk_set_id="chunk-reprocess",
+        idempotency_key="parser-key-reprocess", source_hash="b" * 64,
+        source_format="DOC", source_fingerprint="c" * 64,
+        config_fingerprint="d" * 64, parser_fingerprint="e" * 64,
+        parser_name="synthetic", parser_version="1", backend="synthetic",
+        schema_version="1", lifecycle="READY", staged_chunk_count=1,
+    )
+
+    class Activator:
+        def activate(self, *, document_id, parser_run_id, chunk_set_id, expected_active_chunk_set_id):
+            assert (document_id, parser_run_id, chunk_set_id, expected_active_chunk_set_id) == (
+                "doc-a", "run-reprocess", "chunk-reprocess", "chunk-doc-a",
+            )
+            assert Document.update(active_chunk_set_id=chunk_set_id).where(
+                (Document.id == document_id)
+                & (Document.active_chunk_set_id == expected_active_chunk_set_id)
+            ).execute() == 1
+
+    ingestion.activate_indexed_version(
+        claim.job_id, fencing_token=claim.fencing_token,
+        result=ingestion.IndexReadyResult("run-reprocess", "chunk-reprocess"),
+        expected_active_chunk_set_id="chunk-doc-a", activator=Activator(),
+    )
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is False
+    assert projection.load("tenant-1").document_paths == {}
+    with pytest.raises(ingestion.DocmindIngestionError, match="DOCMIND_INGESTION_STALE_RESULT"):
+        ingestion.record_worker_status(
+            claim.job_id, worker_id="worker-2", version_id=claim.version_id,
+            fencing_token=0, status="CLEANED",
+        )
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is False
+    with pytest.raises(ingestion.DocmindIngestionError, match="DOCMIND_INGESTION_STALE_CLEANUP"):
+        ingestion.record_parser_cleanup(claim.job_id, fencing_token=0, succeeded=True)
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is False
+
+    ingestion.record_worker_status(
+        claim.job_id, worker_id="worker-2", version_id=claim.version_id,
+        fencing_token=claim.fencing_token, status="CLEANED",
+    )
+    assert projection.load("tenant-1").document_paths == {}
+    ingestion.record_parser_cleanup(claim.job_id, fencing_token=claim.fencing_token, succeeded=True)
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is True
+    assert set(projection.load("tenant-1").document_paths) == {"doc-a"}
+
+
+def test_cleanup_proof_backfill_requires_completed_matching_run(source_db):
+    _mapping("home", "doc-a", "guide.doc", complete=True)
+    _mapping("dept", "doc-b", "guide.doc", complete=True)
+    DocmindSourceVersion.update(search_cleanup_complete=False).execute()
+    DocmindIngestionJob.update(host_cleanup_state="PENDING").where(
+        DocmindIngestionJob.document_id == "doc-b"
+    ).execute()
+    assert backfill_docmind_search_cleanup_complete() == 1
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is True
+    assert DocmindSourceVersion.get_by_id("version-doc-b").search_cleanup_complete is False
+    DocmindIngestionJob.update(host_cleanup_state="COMPLETE").where(
+        DocmindIngestionJob.document_id == "doc-b"
+    ).execute()
+    ParserRun.update(raw_artifact_ref="artifact://still-present").where(ParserRun.id == "run-doc-b").execute()
+    assert backfill_docmind_search_cleanup_complete() == 0
+    assert DocmindSourceVersion.get_by_id("version-doc-b").search_cleanup_complete is False
+    ParserRun.update(raw_artifact_ref=None).where(ParserRun.id == "run-doc-b").execute()
+    DocmindIngestionJob.update(parser_run_id="wrong-run").where(
+        DocmindIngestionJob.document_id == "doc-b"
+    ).execute()
+    assert backfill_docmind_search_cleanup_complete() == 0
+    assert DocmindSourceVersion.get_by_id("version-doc-b").search_cleanup_complete is False
+
+
+def test_recovered_cleanup_certifies_only_matching_active_run(source_db):
+    _mapping("home", "doc-a", "guide.doc", complete=True)
+    DocmindSourceVersion.update(search_cleanup_complete=False).execute()
+    DocmindIngestionJob.update(
+        lifecycle_state="CLEANUP_FAILED", cleanup_state="FAILED", host_cleanup_state="COMPLETE",
+    ).execute()
+    record = SimpleNamespace(
+        job_id="job-doc-a", version_id="version-doc-a", fencing_token=0,
+        state="COMPLETE", error_code=None,
+    )
+    ingestion.DocmindCleanupRecorder().record_cleanup(record)
+    assert DocmindIngestionJob.get_by_id("job-doc-a").lifecycle_state == "COMPLETE"
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is True
+
+    DocmindSourceVersion.update(search_cleanup_complete=False, parser_run_id="different-run").execute()
+    DocmindIngestionJob.update(
+        lifecycle_state="CLEANUP_FAILED", cleanup_state="FAILED", host_cleanup_state="COMPLETE",
+    ).execute()
+    ingestion.DocmindCleanupRecorder().record_cleanup(record)
+    assert DocmindSourceVersion.get_by_id("version-doc-a").search_cleanup_complete is False
 
 
 def test_other_tenant_cannot_read_source_projection(source_db):
@@ -405,7 +521,7 @@ def test_ingestion_activation_and_both_cleanup_acks_publish_to_search_without_ca
         status="CLEANED",
     )
     assert api.list_folders("tenant-1")["documents"] == []
-    ingestion.record_parser_cleanup("job-new", succeeded=True)
+    ingestion.record_parser_cleanup("job-new", fencing_token=1, succeeded=True)
     assert DocmindIngestionJob.get_by_id("job-new").lifecycle_state == "COMPLETE"
     listing = api.list_folders("tenant-1")
     assert [row["id"] for row in listing["documents"]] == ["doc-new"]
