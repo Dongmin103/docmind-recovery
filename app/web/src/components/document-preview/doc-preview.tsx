@@ -261,7 +261,7 @@ export const DocPreviewer: React.FC<DocPreviewerProps> = ({
   return (
     <div
       className={classNames(
-        'relative w-full h-full flex flex-col bg-background-paper border border-border-normal rounded-md overflow-hidden',
+        'relative w-full h-full min-h-0 flex flex-col bg-background-paper border border-border-normal rounded-md overflow-hidden',
         className,
       )}
     >
@@ -298,7 +298,7 @@ export const DocPreviewer: React.FC<DocPreviewerProps> = ({
       {/* Viewer / Error area */}
       <div
         ref={setContainerRef}
-        className="relative flex-1 overflow-auto bg-background-paper"
+        className="relative min-h-0 flex-1 overflow-auto bg-background-paper"
       >
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center">

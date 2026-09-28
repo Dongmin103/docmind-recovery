@@ -378,13 +378,15 @@ export default function TemporaryOriginalPreview({
           ) : session.viewer_kind === 'hwp' ? (
             <HwpPageViewer key={session.preview_id} session={session} token={session.preview_token} />
           ) : (
-            <DocumentPreview
-              className={className}
-              fileType={displayFormat}
-              highlights={safeHighlights}
-              setWidthAndHeight={setWidthAndHeight}
-              url={contentUrl}
-            />
+            <div className="min-h-0 flex-1 overflow-hidden [&>section]:h-full [&>section]:min-h-0">
+              <DocumentPreview
+                className={className}
+                fileType={displayFormat}
+                highlights={safeHighlights}
+                setWidthAndHeight={setWidthAndHeight}
+                url={contentUrl}
+              />
+            </div>
           )}
         </>
       )}

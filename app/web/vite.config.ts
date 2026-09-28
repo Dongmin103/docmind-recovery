@@ -235,42 +235,6 @@ export default defineConfig(({ mode }) => {
           warn(warning);
         },
         output: {
-          manualChunks(id) {
-            // if (id.includes('src/components')) {
-            //   return 'components';
-            // }
-
-            if (id.includes('src/locales/') && id.endsWith('.ts')) {
-              const match = id.match(/src\/locales\/([^/]+)\.ts$/);
-              if (match) {
-                return `locale-${match[1]}`;
-              }
-            }
-
-            if (id.includes('node_modules')) {
-              if (id.includes('node_modules/d3')) {
-                return 'd3';
-              }
-              if (id.includes('node_modules/ajv')) {
-                return 'ajv';
-              }
-              if (id.includes('node_modules/@antv')) {
-                return 'antv';
-              }
-              const name = id
-                .toString()
-                .split('node_modules/')[1]
-                .split('/')[0]
-                .toString();
-              if (['lodash', 'dayjs', 'date-fns', 'axios'].includes(name)) {
-                return 'utils';
-              }
-              if (['@xmldom', 'xmlbuilder '].includes(name)) {
-                return 'xml-js';
-              }
-              return name;
-            }
-          },
           chunkFileNames: 'chunk/js/[name]-[hash].js',
           entryFileNames: 'entry/js/[name]-[hash].js',
           assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
