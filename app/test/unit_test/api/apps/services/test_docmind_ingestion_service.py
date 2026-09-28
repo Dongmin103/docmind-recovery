@@ -274,6 +274,67 @@ def test_index_activation_uses_cas_adapter_then_switches_source_version(ingestio
     assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP"
 
 
+def test_distinct_content_replacement_keeps_old_version_until_new_activation(ingestion_db):
+    _, first = _enqueue_and_claim()
+    first_plaintext = b"synthetic version A"
+    service.accept_decrypted_artifact(
+        first.job_id,
+        worker_id="windows-worker-1",
+        version_id=first.version_id,
+        fencing_token=first.fencing_token,
+        plaintext=first_plaintext,
+        plaintext_sha256=hashlib.sha256(first_plaintext).hexdigest(),
+        plaintext_size=len(first_plaintext),
+        adapter=SimpleNamespace(accept=lambda **_kwargs: service.ParserInputReceipt("ephemeral-a")),
+    )
+    activations = []
+    activator = SimpleNamespace(activate=lambda **kwargs: activations.append(kwargs))
+    service.activate_indexed_version(
+        first.job_id,
+        fencing_token=first.fencing_token,
+        result=service.IndexReadyResult("parser-a", "chunks-a"),
+        expected_active_chunk_set_id=None,
+        activator=activator,
+    )
+
+    second_observation = {"ciphertext_sha256": "b" * 64, "ciphertext_size": 124, "source_mtime_ns": 789}
+    assert _observe(**second_observation)["state"] == "WAITING_SOURCE_STABLE"
+    second_result = _observe(**second_observation)
+    second = service.claim_next("windows-worker-2", lease_seconds=300)
+    assert second is not None
+    assert second.version_id == second_result["version_id"]
+    source_document = DocmindSourceDocument.get()
+    assert source_document.active_source_version_id == first.version_id
+    assert DocmindSourceVersion.get_by_id(first.version_id).lifecycle_state == "ACTIVE"
+
+    second_plaintext = b"synthetic version B has different content"
+    service.accept_decrypted_artifact(
+        second.job_id,
+        worker_id="windows-worker-2",
+        version_id=second.version_id,
+        fencing_token=second.fencing_token,
+        plaintext=second_plaintext,
+        plaintext_sha256=hashlib.sha256(second_plaintext).hexdigest(),
+        plaintext_size=len(second_plaintext),
+        adapter=SimpleNamespace(accept=lambda **_kwargs: service.ParserInputReceipt("ephemeral-b")),
+    )
+    assert DocmindSourceDocument.get().active_source_version_id == first.version_id
+    service.activate_indexed_version(
+        second.job_id,
+        fencing_token=second.fencing_token,
+        result=service.IndexReadyResult("parser-b", "chunks-b"),
+        expected_active_chunk_set_id="chunks-a",
+        activator=activator,
+    )
+
+    versions = {version.id: version for version in DocmindSourceVersion.select()}
+    assert versions[first.version_id].lifecycle_state == "RETAINED"
+    assert versions[second.version_id].lifecycle_state == "ACTIVE"
+    assert versions[first.version_id].content_sha256 != versions[second.version_id].content_sha256
+    assert DocmindSourceDocument.get().active_source_version_id == second.version_id
+    assert activations[-1]["expected_active_chunk_set_id"] == "chunks-a"
+
+
 def test_worker_cleanup_ack_is_required_for_complete(ingestion_db):
     _, claim = _enqueue_and_claim()
     DocmindIngestionJob.update(lifecycle_state="CLEANUP", cleanup_state="PENDING").where(

@@ -69,6 +69,21 @@ try {
     Assert-True (Test-DocMindConfirmedSourceFileAbsence -Root $sourceRoot -RelativePath 'folder/missing.enc') 'Accessible, absent source file was not confirmed deleted.'
     Assert-True (Test-DocMindConfirmedSourceFileAbsence -Root $sourceRoot -RelativePath 'removed-folder/missing.enc') 'Missing subtree under an accessible root was not confirmed deleted.'
     Assert-Throws { Test-DocMindConfirmedSourceFileAbsence -Root $sourceRoot -RelativePath '../outside.enc' } 'Traversal deletion proof was accepted.'
+    $configuredSources = @(
+        [pscustomobject]@{ source_id = 'approved-one' },
+        [pscustomobject]@{ source_id = 'unapproved-many' }
+    )
+    Assert-True (@(Select-DocMindConfiguredSources -Sources $configuredSources -SourceId 'approved-one').Count -eq 1) 'Source-limited watcher selected more than one root.'
+    Assert-True ((@(Select-DocMindConfiguredSources -Sources $configuredSources -SourceId 'approved-one')[0]).source_id -eq 'approved-one') 'Source-limited watcher selected the wrong root.'
+    Assert-Throws { Select-DocMindConfiguredSources -Sources $configuredSources -SourceId 'missing' } 'Unknown source ID was accepted.'
+    $readFailure = Get-DocMindSourceReadFailureCode -LiteralPath 'C:\\private\\document.doc' -ErrorRecord ([System.Management.Automation.ErrorRecord]::new([IO.IOException]::new('synthetic'), 'SYNTHETIC', [System.Management.Automation.ErrorCategory]::ReadError, $null))
+    Assert-True ($readFailure -match '^SOURCE_FILE_READ_FAILED_DOC_[0-9A-F]{8}$') 'Source scan failure code did not classify a DOC without its path.'
+    Assert-True (-not $readFailure.Contains('private')) 'Source scan failure code leaked the physical path.'
+    $retryStarted = [DateTimeOffset]::Parse('2026-09-28T00:00:00Z')
+    $retryAllowedAt = $retryStarted.AddSeconds(300)
+    Assert-True (-not (Test-DocMindDiscoveryScanDue -Now $retryStarted.AddSeconds(5) -EventDue $true -FallbackDue $true -FailureNotBefore $retryAllowedAt)) 'Discovery event bypassed failure backoff.'
+    Assert-True (Test-DocMindDiscoveryScanDue -Now $retryAllowedAt -EventDue $true -FallbackDue $false -FailureNotBefore $retryAllowedAt) 'Discovery did not resume at failure backoff deadline.'
+    Assert-True (Test-DocMindDiscoveryScanDue -Now $retryStarted -EventDue $false -FallbackDue $true) 'Healthy discovery fallback was blocked.'
 
     $scanScript = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1') -Raw
     Assert-True $scanScript.Contains("'/api/v1/cloud-sync/host-worker/scans/events'") 'Full-scan endpoint contract is missing.'
@@ -85,6 +100,7 @@ try {
     Assert-True $watchScript.Contains('Get-Content -LiteralPath $configFile -Raw -Encoding UTF8') 'Watch config must decode UTF-8 source paths on Windows PowerShell.'
     Assert-True $watchScript.Contains('FileSystemWatcher') 'Discovery event watcher is missing.'
     Assert-True $watchScript.Contains('DiscoveryFallbackSeconds') 'Discovery fallback scan is missing.'
+    Assert-True $watchScript.Contains('DiscoveryFailureRetrySeconds') 'Discovery failure backoff is missing.'
     $planConfig = Join-Path $testRoot 'schedule-config.json'
     [IO.File]::WriteAllText($planConfig, (@{
         daily_reconciliation_timezone = 'Asia/Seoul'

@@ -906,6 +906,7 @@ def activate_indexed_version(
         ).execute()
         DocmindSourceVersion.update(
             lifecycle_state="ACTIVE",
+            content_sha256=job.plaintext_sha256,
             parser_run_id=result.parser_run_id,
             chunk_set_id=result.chunk_set_id,
             activated_at=now,

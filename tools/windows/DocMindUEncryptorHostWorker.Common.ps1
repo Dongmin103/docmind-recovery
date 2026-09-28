@@ -155,6 +155,42 @@ function Test-DocMindConfirmedSourceFileAbsence {
     return $true
 }
 
+function Select-DocMindConfiguredSources {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Sources,
+        [string]$SourceId
+    )
+    if ([string]::IsNullOrWhiteSpace($SourceId)) { return $Sources }
+    Assert-DocMindIdentifier -Value $SourceId -Name 'source_id'
+    $selected = @($Sources | Where-Object { [string]$_.source_id -eq $SourceId })
+    if ($selected.Count -ne 1) { throw 'Exactly one configured source must match -SourceId.' }
+    return $selected
+}
+
+function Get-DocMindSourceReadFailureCode {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath, [Parameter(Mandatory = $true)]$ErrorRecord)
+    $kind = switch ([IO.Path]::GetExtension($LiteralPath).ToLowerInvariant()) {
+        '.doc' { 'DOC' }
+        '.db' { 'DB' }
+        '.leo_drive_usage' { 'USAGE' }
+        default { 'OTHER' }
+    }
+    $exception = $ErrorRecord.Exception
+    while ($null -ne $exception.InnerException) { $exception = $exception.InnerException }
+    return ('SOURCE_FILE_READ_FAILED_{0}_{1:X8}' -f $kind, [uint32]($exception.HResult -band 0xffffffffL))
+}
+
+function Test-DocMindDiscoveryScanDue {
+    param(
+        [Parameter(Mandatory = $true)][DateTimeOffset]$Now,
+        [bool]$EventDue,
+        [bool]$FallbackDue,
+        $FailureNotBefore
+    )
+    if (-not $EventDue -and -not $FallbackDue) { return $false }
+    return $null -eq $FailureNotBefore -or $Now -ge [DateTimeOffset]$FailureNotBefore
+}
+
 function Get-DocMindSourceSnapshotEntries {
     param([Parameter(Mandatory = $true)][string]$Root)
     $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -177,10 +213,10 @@ function Get-DocMindSourceSnapshotEntries {
             $relativePath = $child.FullName.Substring($rootPrefix.Length).Replace('\', '/')
             $beforeLength = [Int64]$child.Length
             $beforeTicks = [Int64]$child.LastWriteTimeUtc.Ticks
-            try { $hashBefore = Get-DocMindFileSha256 -LiteralPath $child.FullName } catch { throw 'SOURCE_FILE_READ_FAILED' }
+            try { $hashBefore = Get-DocMindFileSha256 -LiteralPath $child.FullName } catch { throw (Get-DocMindSourceReadFailureCode -LiteralPath $child.FullName -ErrorRecord $_) }
             try { $after = Get-Item -LiteralPath $child.FullName -Force -ErrorAction Stop } catch { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
             if ($after.PSIsContainer -or [Int64]$after.Length -ne $beforeLength -or [Int64]$after.LastWriteTimeUtc.Ticks -ne $beforeTicks) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
-            try { $hashAfter = Get-DocMindFileSha256 -LiteralPath $child.FullName } catch { throw 'SOURCE_FILE_READ_FAILED' }
+            try { $hashAfter = Get-DocMindFileSha256 -LiteralPath $child.FullName } catch { throw (Get-DocMindSourceReadFailureCode -LiteralPath $child.FullName -ErrorRecord $_) }
             if (-not (Test-DocMindFixedTimeHexEqual $hashBefore $hashAfter)) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
             [pscustomobject][ordered]@{
                 relative_path = $relativePath

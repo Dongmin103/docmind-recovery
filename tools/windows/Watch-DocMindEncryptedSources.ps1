@@ -3,8 +3,10 @@ param(
     [string]$ConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG,
     [switch]$Once,
     [ValidateRange(2, 3600)][int]$PollSeconds = 10,
+    [string]$SourceId,
     [switch]$EnableDiscovery,
     [ValidateRange(2, 300)][int]$DiscoverySettleSeconds = 10,
+    [ValidateRange(30, 3600)][int]$DiscoveryFailureRetrySeconds = 300,
     [ValidateRange(60, 86400)][int]$DiscoveryFallbackSeconds = 3600
 )
 
@@ -30,7 +32,7 @@ $responseNonces = @{}
 $reportedDeletions = @{}
 $registrations = @()
 $sourceRoots = @{}
-foreach ($source in @($config.sources)) {
+foreach ($source in @(Select-DocMindConfiguredSources -Sources @($config.sources) -SourceId $SourceId)) {
     Assert-DocMindIdentifier -Value ([string]$source.source_id) -Name 'source_id'
     $root = [IO.Path]::GetFullPath([string]$source.root).TrimEnd('\', '/')
     if ($sourceRoots.ContainsKey([string]$source.source_id)) { throw 'Duplicate source_id in host config.' }
@@ -52,6 +54,7 @@ if ($registrations.Count -eq 0 -and -not $EnableDiscovery) { throw 'No registere
 $discoveryWatchers = @{}
 $discoveryDue = @{}
 $discoveryLastAttempt = @{}
+$discoveryFailureNotBefore = @{}
 $discoveryVerificationPending = @{}
 $discoveryEventPrefix = 'DocMindSource-' + [Guid]::NewGuid().ToString('n') + '-'
 
@@ -109,18 +112,21 @@ function Invoke-DueDiscoveryScans {
         if (-not $discoveryWatchers.ContainsKey($sourceId)) { continue }
         $fallbackDue = -not $discoveryLastAttempt.ContainsKey($sourceId) -or $now -ge $discoveryLastAttempt[$sourceId].AddSeconds($DiscoveryFallbackSeconds)
         $eventDue = $discoveryDue.ContainsKey($sourceId) -and $now -ge $discoveryDue[$sourceId]
-        if (-not $fallbackDue -and -not $eventDue) { continue }
+        $failureNotBefore = if ($discoveryFailureNotBefore.ContainsKey($sourceId)) { $discoveryFailureNotBefore[$sourceId] } else { $null }
+        if (-not (Test-DocMindDiscoveryScanDue -Now $now -EventDue $eventDue -FallbackDue $fallbackDue -FailureNotBefore $failureNotBefore)) { continue }
         if ($fallbackDue) { $discoveryVerificationPending[$sourceId] = $true }
         [void]$discoveryDue.Remove($sourceId)
         try {
             & (Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1') -ConfigPath $configFile -Reason manual -SourceId $sourceId
+            [void]$discoveryFailureNotBefore.Remove($sourceId)
             if ($discoveryVerificationPending.ContainsKey($sourceId)) {
                 [void]$discoveryVerificationPending.Remove($sourceId)
                 $discoveryDue[$sourceId] = [DateTimeOffset]::UtcNow.AddSeconds($DiscoverySettleSeconds)
             }
         } catch {
             # A partial scan cannot authorize deletions. Retry after a quiet interval.
-            $discoveryDue[$sourceId] = [DateTimeOffset]::UtcNow.AddSeconds($DiscoverySettleSeconds)
+            $discoveryFailureNotBefore[$sourceId] = [DateTimeOffset]::UtcNow.AddSeconds($DiscoveryFailureRetrySeconds)
+            $discoveryDue[$sourceId] = $discoveryFailureNotBefore[$sourceId]
             Write-Warning 'Source discovery scan failed; retry is pending.'
         } finally {
             $discoveryLastAttempt[$sourceId] = [DateTimeOffset]::UtcNow
