@@ -49,7 +49,7 @@ def _merge_source_chunks(chunks: list[dict], text: str) -> dict:
 
 
 class OfficeChunker:
-    """Apply existing Word and Excel boundaries to normalized Docling blocks."""
+    """Apply format-specific Office boundaries to normalized Docling blocks."""
 
     def chunk(self, document: ParsedDocument, *, parser_config: dict, source_bytes: bytes) -> list[dict]:
         blocks = [
@@ -60,6 +60,8 @@ class OfficeChunker:
         by_block_id = {chunk["metadata"]["parser_platform"]["stable_block_id"]: chunk for chunk in source_chunks}
         if document.source_format in {SourceFormat.DOC, SourceFormat.DOCX}:
             return self._word_chunks(blocks, by_block_id, parser_config)
+        if document.source_format == SourceFormat.PPTX:
+            return self._slide_chunks(blocks, by_block_id, parser_config)
         if document.source_format == SourceFormat.XLSX:
             attachments_by_parent: dict[str, list[str]] = {}
             for block in document.blocks:
@@ -70,35 +72,47 @@ class OfficeChunker:
 
     @staticmethod
     def _word_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict) -> list[dict]:
+        return OfficeChunker._text_chunks(blocks, by_block_id, parser_config, by_slide=False)
+
+    @staticmethod
+    def _slide_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict) -> list[dict]:
+        return OfficeChunker._text_chunks(blocks, by_block_id, parser_config, by_slide=True)
+
+    @staticmethod
+    def _text_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict, *, by_slide: bool) -> list[dict]:
         budget = int(parser_config.get("chunk_token_num", 128))
         delimiter = parser_config.get("delimiter", "\n!?。；！？")
         output: list[dict] = []
         pending: list[dict] = []
         source_for_index: list[dict] = []
         custom_delimiter = False
-        heading_path: tuple[str, ...] | None = None
+        boundary_key: tuple[str, ...] | int | None = None
 
         def flush() -> None:
-            nonlocal pending, source_for_index, custom_delimiter, heading_path
+            nonlocal pending, source_for_index, custom_delimiter, boundary_key
             if not pending:
                 return
             for group in _merge_cks(pending, budget, custom_delimiter)[0]:
                 indices = _unique(group["source_indices"])
                 sources = [source_for_index[index] for index in indices]
                 output.append(_merge_source_chunks(sources, group["text"]))
-            pending, source_for_index, custom_delimiter, heading_path = [], [], False, None
+            pending, source_for_index, custom_delimiter, boundary_key = [], [], False, None
 
         for block in blocks:
             chunk = by_block_id.get(block.stable_block_id)
             if chunk is None:
                 continue
-            block_heading_path = tuple(getattr(block.provenance[0], "heading_path", ()))
-            if pending and (block.block_type == BlockType.HEADING or block_heading_path != heading_path):
+            key = (getattr(block.provenance[0], "slide", None) if by_slide
+                   else tuple(getattr(block.provenance[0], "heading_path", ())))
+            if pending and (key != boundary_key or (not by_slide and block.block_type == BlockType.HEADING)):
                 flush()
-            heading_path = block_heading_path
+            boundary_key = key
             index = len(source_for_index)
             source_for_index.append(chunk)
-            if block.block_type not in {BlockType.HEADING, BlockType.TEXT, BlockType.LIST} or chunk["doc_type_kwd"] != "text":
+            text_types = {BlockType.HEADING, BlockType.TEXT, BlockType.LIST}
+            if by_slide:
+                text_types.add(BlockType.CAPTION)
+            if block.block_type not in text_types or chunk["doc_type_kwd"] != "text":
                 pending.append({
                     "text": chunk["content_with_weight"],
                     "ck_type": chunk["doc_type_kwd"] if chunk["doc_type_kwd"] != "text" else "caption",
