@@ -19,7 +19,10 @@ export async function parseDocument(payload) {
   if (hash !== payload.source_hash) {
     throw new Error('source hash mismatch');
   }
-  const result = await parse(source, { images: false, ocr: false });
+  const result = await parse(source, {
+    images: false, ocr: false,
+    ...(payload.source_format === 'pdf' ? { removeHeaderFooter: false } : {}),
+  });
   if (!result.success) {
     throw new Error(`parse failed: ${result.code || 'unknown'}`);
   }

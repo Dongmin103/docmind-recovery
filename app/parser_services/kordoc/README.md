@@ -7,6 +7,7 @@
 - 이미지 bytes와 OCR은 이 시험에서 제외한다. 입력 한도는 64 MiB, 동시 파싱은 1건이다.
 - `rag.parser_platform.kordoc_pilot`은 Node 파싱 결과를 기존 `parser_services.common.hwp_chunker.HwpHybridChunker`에 전달한다. 새 경로에 `rhwp-python`은 필요하지 않다. 기존 rhwp 서비스의 자체 파싱과 상태 확인에는 `rhwp-python`이 계속 필요하다.
 - `rag.parser_platform.kordoc_office_pilot`은 DOCX와 텍스트 PDF의 구조 블록을 기존 Word/PDF 청커에 연결한다. 원본에 이미지가 있으면 OCR 누락을 막기 위해 이 경로를 거부한다.
+- PDF의 자동 머리글·바닥글 제거는 끈다. 반복 머리글로 본문 첫 줄이 잘못 제거되는 사례를 합성 20쪽 문서에서 확인했다.
 - XLSX는 파싱 결과 비교까지만 진행한다. kordoc 4.15.7 IR은 빈 행·열과 병합 셀의 원본 좌표를 보존하지 않아 기존 Excel 행 청커에 안전하게 전달할 수 없다.
 - 실행 예산 2 vCPU/2 GiB는 초기 검증 값이다. 실문서의 처리 시간과 최고 RAM은 아직 측정하지 않았다.
 

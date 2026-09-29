@@ -62,3 +62,18 @@ for (const format of ['docx', 'pdf', 'xlsx']) {
     }
   });
 }
+
+test('PDF pilot keeps the first body line on every repeated page', async () => {
+  const source = readFileSync(new URL('./fixtures/repeated-header.pdf', import.meta.url));
+  const result = await parseDocument({
+    source_base64: source.toString('base64'),
+    source_hash: createHash('sha256').update(source).digest('hex'),
+    source_format: 'pdf',
+  });
+  const content = result.blocks.map(block => block.text || '').join('\n');
+  const records = new Set([...content.matchAll(/Record (\d{4})/g)].map(match => Number(match[1])));
+  assert.equal(records.size, 400);
+  assert.ok(content.includes('Synthetic page 1'));
+  assert.ok(content.includes('Record 0000'));
+  assert.ok(content.includes('Record 0380'));
+});
