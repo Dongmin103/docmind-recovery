@@ -57,6 +57,30 @@ def test_kordoc_ir_runs_through_existing_hwp_chunker() -> None:
     assert chunking["summary"]["unique_source_locators"] == len(blocks_for_hwp_chunker(ir))
 
 
+def test_hwp_pilot_reuses_chunker_between_documents(monkeypatch) -> None:
+    import parser_services.common.hwp_chunker as shared
+
+    calls = {"construct": 0, "chunk": 0}
+
+    class CountingChunker:
+        def __init__(self, *, tokenizer_path):
+            calls["construct"] += 1
+
+        def chunk(self, blocks):
+            calls["chunk"] += 1
+            return {"chunks": [{"source_locators": [block["locator"] for block in blocks]}]}
+
+    monkeypatch.setattr(shared, "HwpHybridChunker", CountingChunker)
+    pilot._cached_hwp_chunker.cache_clear()
+    result = {"parser_name": "kordoc", "source_format": "hwpx", "blocks": [{"type": "paragraph", "text": "본문"}]}
+    try:
+        pilot.chunk_hwp_pilot(result)
+        pilot.chunk_hwp_pilot(result)
+        assert calls == {"construct": 1, "chunk": 2}
+    finally:
+        pilot._cached_hwp_chunker.cache_clear()
+
+
 def test_kordoc_ir_rejects_table_group_mismatch() -> None:
     from parser_services.common.hwp_chunker import _table_key
 

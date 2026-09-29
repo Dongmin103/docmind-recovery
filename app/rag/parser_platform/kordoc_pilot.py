@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -145,15 +146,20 @@ def parse_hwp_pilot_service(
     return result
 
 
-def chunk_hwp_pilot(result: dict[str, Any], *, tokenizer_path: str | Path | None = None) -> dict[str, Any]:
-    """Call the same HWP chunker class used by the existing rhwp service."""
+@lru_cache(maxsize=4)
+def _cached_hwp_chunker(tokenizer_path: str):
     from parser_services.common.hwp_chunker import HwpHybridChunker
 
+    return HwpHybridChunker(tokenizer_path=tokenizer_path)
+
+
+def chunk_hwp_pilot(result: dict[str, Any], *, tokenizer_path: str | Path | None = None) -> dict[str, Any]:
+    """Call the same HWP chunker class used by the existing rhwp service."""
     if result.get("parser_name") != "kordoc" or result.get("source_format") not in {"hwp", "hwpx"}:
         raise ValueError("invalid kordoc HWP result")
     tokenizer = tokenizer_path or Path(__file__).resolve().parents[2] / "parser_services" / "rhwp" / "tokenizer"
     blocks = blocks_for_hwp_chunker(result["blocks"])
-    chunking = HwpHybridChunker(tokenizer_path=tokenizer).chunk(blocks)
+    chunking = _cached_hwp_chunker(str(Path(tokenizer).resolve())).chunk(blocks)
     source_locators = {block["locator"] for block in blocks}
     chunk_locators = {locator for chunk in chunking["chunks"] for locator in chunk["source_locators"]}
     if source_locators != chunk_locators:
