@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 from rag.parser_platform.active_scope import ActiveScopeCache
 from rag.parser_platform.errors import ParserPlatformError, parser_error
 from rag.parser_platform.schemas import FrozenModel
+from rag.utils.chunk_id import make_chunk_id
 
 
 class ChunkSetFinalizationRequest(FrozenModel):
@@ -57,23 +58,30 @@ class ChunkSetFinalizationRequest(FrozenModel):
 
 class StagingChunkTagger:
     @staticmethod
-    def tag(chunks: list[dict], *, document_id: str, parse_run_id: str, chunk_set_id: str) -> list[dict]:
+    def tag(chunks: list[dict], *, document_id: str, parse_run_id: str, chunk_set_id: str,
+            isolate_ids: bool = False) -> list[dict]:
         tagged: list[dict] = []
-        for chunk in chunks:
+        for ordinal, chunk in enumerate(chunks):
             if chunk.get("doc_id") not in {None, document_id}:
                 raise parser_error("CHUNK_SET_STAGING_IDENTITY_MISMATCH", detail="doc_id")
             if chunk.get("parse_run_id") not in {None, parse_run_id}:
                 raise parser_error("CHUNK_SET_STAGING_IDENTITY_MISMATCH", detail="parse_run_id")
             if chunk.get("chunk_set_id") not in {None, chunk_set_id}:
                 raise parser_error("CHUNK_SET_STAGING_IDENTITY_MISMATCH", detail="chunk_set_id")
-            tagged.append(
-                {
-                    **chunk,
-                    "doc_id": document_id,
-                    "parse_run_id": parse_run_id,
-                    "chunk_set_id": chunk_set_id,
-                }
-            )
+            tagged_chunk = {
+                **chunk,
+                "doc_id": document_id,
+                "parse_run_id": parse_run_id,
+                "chunk_set_id": chunk_set_id,
+            }
+            if isolate_ids:
+                tagged_chunk["id"] = make_chunk_id(
+                    "cloud_chunk_set", document_id,
+                    source_chunk_uid=chunk.get("id"),
+                    chunk_order_int=ordinal,
+                    extra={"chunk_set_id": chunk_set_id},
+                )
+            tagged.append(tagged_chunk)
         return tagged
 
 

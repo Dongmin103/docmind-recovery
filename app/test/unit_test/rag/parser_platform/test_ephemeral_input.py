@@ -9,6 +9,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from common import settings
+from common.storage_attempt_audit import StorageAttemptAudit
+import json
 
 _MODULE_PATH = Path(__file__).parents[4] / "rag" / "parser_platform" / "ephemeral_input.py"
 _SPEC = importlib.util.spec_from_file_location("docmind_ephemeral_input", _MODULE_PATH)
@@ -86,6 +89,18 @@ def test_accept_and_consume_keep_all_plaintext_job_scoped_then_remove(tmp_path: 
         ("IN_PROGRESS", "SUCCESS"),
         ("COMPLETE", "SUCCESS"),
     ]
+
+
+def test_consume_audits_container_cleanup_duration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audited = StorageAttemptAudit(object(), tmp_path)
+    monkeypatch.setattr(settings, "STORAGE_IMPL", audited, raising=False)
+    adapter = EphemeralParserInputAdapter(tmp_path / "ephemeral", recorder=Recorder())
+    receipt = _accept(adapter, job_id="a" * 32)
+    with audited.attempt("a" * 32, 1):
+        adapter.consume(receipt, lambda _workspace: None)
+    report = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert [stage["name"] for stage in report["stages"]] == ["container_cleanup"]
+    assert report["stages"][0]["job_id"] == "a" * 32
 
 
 @pytest.mark.parametrize(

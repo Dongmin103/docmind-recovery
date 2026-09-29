@@ -27,6 +27,7 @@ def test_failed_chunk_checkpoint_rolls_back_index_without_cloud_storage_delete(
 
     inserted = []
     deleted = []
+    rollback_order = []
     storage_calls = []
 
     async def insert(chunks, index_name, dataset_id, refresh=False):
@@ -34,12 +35,17 @@ def test_failed_chunk_checkpoint_rolls_back_index_without_cloud_storage_delete(
         return None
 
     async def delete(condition, index_name, dataset_id):
+        rollback_order.append("delete")
         deleted.extend(condition["id"])
 
     monkeypatch.setattr(service, "_intercept_doc_store_insert", insert)
     monkeypatch.setattr(service, "_intercept_doc_store_delete", delete)
     monkeypatch.setattr(service, "_update_task_chunk_ids", AsyncMock(return_value=False))
     from rag.svr.task_executor_refactor import chunk_service
+    monkeypatch.setattr(
+        chunk_service.settings, "docStoreConn",
+        SimpleNamespace(refresh_idx=lambda _index: rollback_order.append("refresh")), raising=False,
+    )
 
     monkeypatch.setattr(
         chunk_service.settings,
@@ -55,6 +61,7 @@ def test_failed_chunk_checkpoint_rolls_back_index_without_cloud_storage_delete(
     assert result is False
     assert inserted == ["chunk-1"]
     assert deleted == ["chunk-1"]
+    assert rollback_order == (["refresh", "delete"] if ephemeral else ["delete"])
     assert storage_calls == expected_storage_calls
 
 
@@ -74,3 +81,13 @@ def test_kordoc_chunk_boundary_records_its_own_duration(tmp_path, monkeypatch):
     assert chunks == expected
     assert [(stage["name"], stage["parse_run_id"]) for stage in report["stages"]] == [("chunk", "d" * 32)]
     assert report["stages"][0]["duration_ns"] >= 0
+
+
+def test_cloud_mother_ids_are_isolated_by_chunk_set():
+    first_chunks = [{"id": "child", "doc_id": "doc", "mom": "synthetic summary"}]
+    second_chunks = [{"id": "child", "doc_id": "doc", "mom": "synthetic summary"}]
+    first = ChunkService._create_mother_chunks(first_chunks, chunk_set_id="set-1")
+    second = ChunkService._create_mother_chunks(second_chunks, chunk_set_id="set-2")
+    assert first[0]["id"] != second[0]["id"]
+    assert first_chunks[0]["mom_id"] == first[0]["id"]
+    assert second_chunks[0]["mom_id"] == second[0]["id"]

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from common.storage_attempt_audit import StorageAttemptAudit
+from common.storage_attempt_audit import StorageAttemptAudit, job_stage_scope
 
 
 class Storage:
@@ -67,3 +67,14 @@ def test_stage_timer_records_failed_partial_duration(tmp_path):
     assert all(stage["parse_run_id"] == "d" * 32 for stage in report["stages"])
     assert sum(stage["duration_ns"] for stage in report["stages"]) <= report["duration_ns"]
     assert report["started_utc"] <= report["finished_utc"]
+
+
+def test_job_stage_timer_records_cleanup_without_parse_run(tmp_path):
+    audited = StorageAttemptAudit(Storage(), tmp_path)
+    with audited.attempt("e" * 32, 6):
+        with job_stage_scope(audited, "container_cleanup", "e" * 32):
+            pass
+    report = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert report["stages"][0]["job_id"] == "e" * 32
+    assert report["stages"][0]["name"] == "container_cleanup"
+    assert report["stages"][0]["duration_ns"] >= 0

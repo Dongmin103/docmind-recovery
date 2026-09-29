@@ -218,10 +218,14 @@ def test_raw_artifact_file_reference_must_exist_inside_workspace(runtime_module,
 def test_failed_staging_delete_is_scoped_and_error_is_sanitized(runtime_module, monkeypatch):
     module = runtime_module
     deletes = []
+    cleanup_order = []
     failures = []
     persisted = []
     module.settings.docStoreConn = SimpleNamespace(
-        delete=lambda condition, index_name, kb_id: deletes.append((condition, index_name, kb_id))
+        refresh_idx=lambda index_name: cleanup_order.append(("refresh", index_name)),
+        delete=lambda condition, index_name, kb_id: (
+            cleanup_order.append(("delete", index_name)), deletes.append((condition, index_name, kb_id))
+        ),
     )
     monkeypatch.setattr(module, "_index_name", lambda tenant_id: f"idx-{tenant_id}")
     monkeypatch.setattr(
@@ -265,6 +269,7 @@ def test_failed_staging_delete_is_scoped_and_error_is_sanitized(runtime_module, 
             "kb",
         )
     ]
+    assert cleanup_order == [("refresh", "idx-tenant"), ("delete", "idx-tenant")]
     assert failures[0][1]["error_message"] == "ephemeral parser run failed"
     assert persisted == [
         {

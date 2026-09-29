@@ -23,6 +23,7 @@ for handling document processing tasks with refactored, testable methods.
 import asyncio
 import logging
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime
 
 # Wiki / artifact compilation pipeline lives in
@@ -50,6 +51,7 @@ from common.constants import LLMType
 from common.exceptions import TaskCanceledException
 from common.connection_utils import timeout
 from common.misc_utils import thread_pool_exec
+from common.storage_attempt_audit import stage_scope
 from rag.nlp import search
 from rag.utils.chunk_id import make_chunk_id
 from rag.svr.task_executor_refactor.constants import CANVAS_DEBUG_DOC_ID
@@ -593,6 +595,14 @@ class TaskHandler:
         # Cloud-source ingestion supplies a job-scoped plaintext workspace and
         # must never fall back to the durable object store.
         ephemeral_workspace = getattr(ctx, "_docmind_ephemeral_workspace", None)
+
+        def cloud_stage(name: str):
+            return (
+                stage_scope(getattr(settings, "STORAGE_IMPL", None), name, ctx.parse_run_id)
+                if ephemeral_workspace is not None and ctx.parse_run_id
+                else nullcontext()
+            )
+
         if ephemeral_workspace is not None:
             binary = await asyncio.to_thread(ephemeral_workspace.input_path.read_bytes)
         else:
@@ -664,7 +674,8 @@ class TaskHandler:
         start_ts = timer()
         embedding_service = EmbeddingService(ctx=ctx)
         try:
-            token_count, vector_size = await embedding_service.embed_chunks(chunks, embedding_model, ctx.parser_config)
+            with cloud_stage("embedding"):
+                token_count, vector_size = await embedding_service.embed_chunks(chunks, embedding_model, ctx.parser_config)
         except TaskCanceledException:
             raise
         except Exception as e:
@@ -696,14 +707,14 @@ class TaskHandler:
             ctx.progress_cb(-1, msg="Task has been canceled.")
             return
 
-        insert_result = await chunk_service.insert_chunks(task_id, task_tenant_id, task_dataset_id, chunks)
-
-        if not insert_result:
-            ctx.recording_context.record("insertion_result", "failed")
-            if ctx.parse_run_id:
-                raise RuntimeError("parser-platform staging chunk insertion failed")
-            abort_doc_chunking_counter(task_doc_id)
-            return
+        with cloud_stage("index_staging"):
+            insert_result = await chunk_service.insert_chunks(task_id, task_tenant_id, task_dataset_id, chunks)
+            if not insert_result:
+                ctx.recording_context.record("insertion_result", "failed")
+                if ctx.parse_run_id:
+                    raise RuntimeError("parser-platform staging chunk insertion failed")
+                abort_doc_chunking_counter(task_doc_id)
+                return
         ctx.recording_context.record("insertion_result", "success")
 
         # Post-processing

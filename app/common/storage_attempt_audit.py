@@ -78,8 +78,14 @@ class StorageAttemptAudit:
                 stream.write("\n")
 
     @contextmanager
-    def stage(self, name: str, parse_run_id: str):
-        if not re.fullmatch(r"[a-z_]{1,32}", name) or not re.fullmatch(r"[0-9a-f]{32}", parse_run_id):
+    def stage(self, name: str, parse_run_id: str | None = None, *, job_id: str | None = None):
+        identifier = parse_run_id if job_id is None else job_id
+        if (
+            not re.fullmatch(r"[a-z_]{1,32}", name)
+            or (parse_run_id is None) == (job_id is None)
+            or not isinstance(identifier, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", identifier)
+        ):
             raise ValueError("storage audit stage requires safe identifiers")
         state = self._active.get()
         if state is None:
@@ -95,7 +101,7 @@ class StorageAttemptAudit:
         finally:
             stage = {
                 "name": name,
-                "parse_run_id": parse_run_id,
+                "job_id" if job_id is not None else "parse_run_id": identifier,
                 "duration_ns": perf_counter_ns() - started_ns,
                 "status": status,
             }
@@ -106,4 +112,10 @@ class StorageAttemptAudit:
 def stage_scope(storage, name: str, parse_run_id: str):
     if isinstance(storage, StorageAttemptAudit):
         return storage.stage(name, parse_run_id)
+    return nullcontext()
+
+
+def job_stage_scope(storage, name: str, job_id: str):
+    if isinstance(storage, StorageAttemptAudit):
+        return storage.stage(name, job_id=job_id)
     return nullcontext()
