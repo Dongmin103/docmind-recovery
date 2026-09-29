@@ -22,7 +22,10 @@ function Get-DocMindBytesSha256 {
 
 function Get-DocMindFileSha256 {
     param([Parameter(Mandatory = $true)][string]$LiteralPath)
-    return (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stream = [IO.File]::OpenRead($LiteralPath)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ConvertTo-DocMindHex -Bytes ($sha.ComputeHash($stream)) }
+    finally { $sha.Dispose(); $stream.Dispose() }
 }
 
 function Get-DocMindHmacSignature {
@@ -191,6 +194,50 @@ function Test-DocMindDiscoveryScanDue {
     return $null -eq $FailureNotBefore -or $Now -ge [DateTimeOffset]$FailureNotBefore
 }
 
+function Get-DocMindHostFileIdentity {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    if (-not ('DocMindFileIdentity' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public static class DocMindFileIdentity {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime { public uint Low; public uint High; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileInformation {
+        public uint Attributes;
+        public FileTime Creation;
+        public FileTime Access;
+        public FileTime Write;
+        public uint VolumeSerial;
+        public uint SizeHigh;
+        public uint SizeLow;
+        public uint LinkCount;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(IntPtr handle, out FileInformation info);
+    public static string Read(string path) {
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                   FileShare.ReadWrite | FileShare.Delete)) {
+            FileInformation info;
+            if (!GetFileInformationByHandle(stream.SafeFileHandle.DangerousGetHandle(), out info))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            if (info.LinkCount != 1) return null;
+            return info.VolumeSerial.ToString("x8") + ":" +
+                   info.FileIndexHigh.ToString("x8") + info.FileIndexLow.ToString("x8") + ":" +
+                   info.Creation.High.ToString("x8") + info.Creation.Low.ToString("x8");
+        }
+    }
+}
+'@
+    }
+    try { return [DocMindFileIdentity]::Read($LiteralPath) }
+    catch { return $null }
+}
+
 function Get-DocMindSourceSnapshotEntries {
     param([Parameter(Mandatory = $true)][string]$Root)
     $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
@@ -214,15 +261,19 @@ function Get-DocMindSourceSnapshotEntries {
             $beforeLength = [Int64]$child.Length
             $beforeTicks = [Int64]$child.LastWriteTimeUtc.Ticks
             try { $hashBefore = Get-DocMindFileSha256 -LiteralPath $child.FullName } catch { throw (Get-DocMindSourceReadFailureCode -LiteralPath $child.FullName -ErrorRecord $_) }
+            $identityBefore = Get-DocMindHostFileIdentity -LiteralPath $child.FullName
             try { $after = Get-Item -LiteralPath $child.FullName -Force -ErrorAction Stop } catch { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
             if ($after.PSIsContainer -or [Int64]$after.Length -ne $beforeLength -or [Int64]$after.LastWriteTimeUtc.Ticks -ne $beforeTicks) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
             try { $hashAfter = Get-DocMindFileSha256 -LiteralPath $child.FullName } catch { throw (Get-DocMindSourceReadFailureCode -LiteralPath $child.FullName -ErrorRecord $_) }
+            $identityAfter = Get-DocMindHostFileIdentity -LiteralPath $child.FullName
             if (-not (Test-DocMindFixedTimeHexEqual $hashBefore $hashAfter)) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
+            if ($identityBefore -ne $identityAfter) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
             [pscustomobject][ordered]@{
                 relative_path = $relativePath
                 ciphertext_sha256 = $hashAfter
                 size = [Int64]$after.Length
                 mtime_ns = ([Int64]$after.LastWriteTimeUtc.Ticks - 621355968000000000L) * 100L
+                host_file_id = $identityAfter
             }
         }
     }
@@ -334,6 +385,20 @@ function Protect-DocMindJobDirectory {
         [void]$acl.AddAccessRule($rule)
     }
     Set-Acl -LiteralPath $LiteralPath -AclObject $acl
+}
+
+function Write-JobState {
+    param([string]$JobDirectory, $Lease, [string]$State)
+    $stateRecord = [ordered]@{
+        schema_version = 1
+        job_id = [string]$Lease.job_id
+        version_id = [string]$Lease.version_id
+        fencing_token = [string]$Lease.fencing_token
+        lease_expires_at = (ConvertTo-DocMindDateTimeOffset -Value $Lease.lease_expires_at -Name 'lease_expires_at').ToString('o')
+        state = $State
+        updated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
+    }
+    [IO.File]::WriteAllText((Join-Path $JobDirectory 'job-state.json'), ($stateRecord | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
 }
 
 function Write-DocMindCleanupReceiptAtomic {

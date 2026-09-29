@@ -71,7 +71,7 @@ export interface DocMindParserRun {
   chunk_set_id: string;
   active_chunk_set_id?: string;
   active: boolean;
-  source_format: 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'hwp' | 'hwpx';
+  source_format: 'pdf' | 'doc' | 'docx' | 'xls' | 'xlsx' | 'pptx' | 'hwp' | 'hwpx';
   selection_reason: string;
   parser_name: string;
   parser_version: string;
@@ -127,7 +127,18 @@ export interface DocMindHierarchyNode {
   source_enabled?: boolean;
   document_id?: string;
   document_exists: boolean;
-  index_state?: 'INDEXED' | 'PENDING';
+  index_state?:
+    | 'INDEXED'
+    | 'PENDING'
+    | 'PROCESSING'
+    | 'FAILED'
+    | 'CLEANUP'
+    | 'CLEANUP_FAILED'
+    | 'RETRY_WAIT'
+    | 'ACTION_REQUIRED';
+  index_cleanup_state?: 'PENDING' | 'FAILED' | 'COMPLETE' | null;
+  index_error_code?: string | null;
+  searchable?: boolean;
   semantic_folder_id?: string;
   mutation_capabilities?: {
     can_create_child: boolean;

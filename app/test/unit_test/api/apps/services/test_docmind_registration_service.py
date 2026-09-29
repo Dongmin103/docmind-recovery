@@ -149,34 +149,8 @@ async def test_registration_rejects_sixth_file_before_upload(registration_db, mo
 
 
 @pytest.mark.asyncio
-async def test_hwp_canary_one_click_fails_before_upload_and_guides_upload_only_bootstrap(
-    registration_db,
-    monkeypatch,
-):
-    monkeypatch.setenv("PARSER_PLATFORM_HWP_REGISTRATION_MODE", "canary")
-    monkeypatch.setenv("PARSER_PLATFORM_HWP_CANARY_FORMAT", "hwp")
-    monkeypatch.setenv("PARSER_PLATFORM_HWP_CANARY_DOCUMENT_IDS", "a" * 32)
-    monkeypatch.setattr(service.FileService, "upload_document", lambda *_args, **_kwargs: pytest.fail("upload called"))
-    monkeypatch.setattr(service.DocumentService, "run", lambda *_args, **_kwargs: pytest.fail("parse called"))
-    monkeypatch.setattr(service.DocumentService, "get_by_id", lambda _document_id: (False, None))
-
-    result = await service.register_documents(
-        "owner-1",
-        "quality-risk-management",
-        [_file("ordinary.hwp")],
-    )
-
-    item = result["results"][0]
-    assert item["state"] == "FAILED"
-    assert item["error_code"] == "PARSER_PLATFORM_HWP_CANARY_BOOTSTRAP_REQUIRED"
-    assert item["error_message"] == (
-        "먼저 RAGFlow upload-only로 문서를 등록해 ID를 확인한 뒤 canary 설정을 적용하고 "
-        "수동 분석을 시작하세요."
-    )
-
-
-@pytest.mark.asyncio
-async def test_successful_upload_stops_at_index_queued_and_never_changes_membership(registration_db, monkeypatch):
+@pytest.mark.parametrize("filename", ["document.pdf", "ordinary.hwp"])
+async def test_successful_upload_stops_at_index_queued_and_never_changes_membership(registration_db, monkeypatch, filename):
     kb = SimpleNamespace(id="dataset-1")
     uploaded_documents = {}
 
@@ -211,7 +185,7 @@ async def test_successful_upload_stops_at_index_queued_and_never_changes_members
     result = await service.register_documents(
         "owner-1",
         "quality-risk-management",
-        [_file()],
+        [_file(filename)],
     )
 
     assert result["folder_id"] == "quality-risk-management"

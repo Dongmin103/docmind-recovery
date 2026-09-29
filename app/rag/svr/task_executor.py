@@ -1938,9 +1938,6 @@ async def main():
     logging.info(f"RAGFlow ingestion version: {get_ragflow_version()}")
     show_configs()
     settings.init_settings()
-    from rag.parser_platform.config import validate_hwp_global_startup
-
-    validate_hwp_global_startup()
     settings.check_and_install_torch()
     logging.info(f"default embedding config: {settings.EMBEDDING_CFG}")
     settings.print_rag_settings()

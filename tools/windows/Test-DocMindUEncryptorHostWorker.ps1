@@ -16,6 +16,53 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
 }
 
 try {
+    $stateRoot = Join-Path $testRoot 'state-test'
+    [IO.Directory]::CreateDirectory($stateRoot) | Out-Null
+    Write-JobState -JobDirectory $stateRoot -Lease ([pscustomobject]@{
+        job_id = 'job-test'; version_id = 'version-test'; fencing_token = 2
+        lease_expires_at = '2026-09-22T01:00:00Z'
+    }) -State 'DELIVERING'
+    $savedState = Get-Content -LiteralPath (Join-Path $stateRoot 'job-state.json') -Raw | ConvertFrom-Json
+    Assert-True ($savedState.job_id -eq 'job-test' -and $savedState.state -eq 'DELIVERING' -and $savedState.fencing_token -eq '2') 'Job state was not saved as a JSON object.'
+
+    $startWorkerPath = Join-Path $PSScriptRoot 'Start-DocMindUEncryptorHostWorker.ps1'
+    $parseTokens = $null
+    $parseErrors = $null
+    $startAst = [Management.Automation.Language.Parser]::ParseFile($startWorkerPath, [ref]$parseTokens, [ref]$parseErrors)
+    Assert-True ($parseErrors.Count -eq 0) 'Host worker script did not parse.'
+    $cleanupFunction = $startAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-TargetHostCleanup' }, $false)
+    Assert-True ($null -ne $cleanupFunction) 'Target cleanup function is missing.'
+    Invoke-Expression $cleanupFunction.Extent.Text
+    $CleanupJobId = 'cleanup-test'
+    $CleanupVersionId = 'cleanup-version'
+    $CleanupFencingToken = 3L
+    $CleanupPlaintextExtension = '.pdf'
+    $AllowMalformedManifest = $false
+    $workRoot = Join-Path $testRoot 'target-cleanup-work'
+    $receiptRoot = Join-Path $testRoot 'target-cleanup-receipts'
+    $jobsPath = '/api/v1/cloud-sync/host-worker/jobs'
+    $config = [pscustomobject]@{ worker_id = 'host-test' }
+    [IO.Directory]::CreateDirectory($workRoot) | Out-Null
+    [IO.Directory]::CreateDirectory($receiptRoot) | Out-Null
+    $targetDir = Join-Path $workRoot ($CleanupJobId + '-' + [Guid]::NewGuid().ToString('n'))
+    [IO.Directory]::CreateDirectory($targetDir) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $targetDir 'job-state.json'), '"System.Collections.Specialized.OrderedDictionary"', [Text.Encoding]::UTF8)
+    [IO.File]::WriteAllBytes((Join-Path $targetDir 'plaintext.pdf'), [byte[]](1, 2, 3, 4))
+    $prepared = [ordered]@{
+        job_id = $CleanupJobId; version_id = $CleanupVersionId; fencing_token = $CleanupFencingToken
+        lease_expires_at = [DateTimeOffset]::UtcNow.AddMinutes(-1).ToString('o'); plaintext_size = 4
+    }
+    function Invoke-SignedJsonRequest { param($Method, $RelativeUri, $Body) return [pscustomobject]@{ Body = [Text.Encoding]::UTF8.GetBytes(($prepared | ConvertTo-Json -Compress)) } }
+    $script:cleanupAcknowledged = $false
+    function Send-CleanupReceipt { param($Receipt) $script:cleanupAcknowledged = ($Receipt.final_state -eq 'CLEANED') }
+    Assert-Throws { Invoke-TargetHostCleanup } 'Malformed cleanup manifest was accepted without the explicit switch.'
+    Assert-True (Test-Path -LiteralPath $targetDir) 'Rejected cleanup removed the target directory.'
+    $AllowMalformedManifest = $true
+    Invoke-TargetHostCleanup | Out-Null
+    Assert-True (-not (Test-Path -LiteralPath $targetDir)) 'Acknowledged target cleanup left a plaintext directory.'
+    Assert-True $script:cleanupAcknowledged 'Target cleanup did not send the signed receipt.'
+    Assert-True (@(Get-ChildItem -LiteralPath $receiptRoot -File).Count -eq 0) 'Acknowledged target cleanup left a receipt.'
+
     $key = [byte[]]::new(32)
     for ($index = 0; $index -lt $key.Length; $index++) { $key[$index] = [byte]($index + 1) }
     $body = [Text.Encoding]::UTF8.GetBytes('{"worker_id":"host-test","protocol_version":1}')
@@ -58,6 +105,16 @@ try {
     Assert-True ($snapshot.Count -eq 1) 'Full source snapshot did not enumerate exactly the synthetic file.'
     Assert-True ($snapshot[0].relative_path -eq 'folder/sample.enc') 'Snapshot exposed or changed the logical relative path.'
     Assert-True ($snapshot[0].ciphertext_sha256 -eq (Get-DocMindFileSha256 -LiteralPath $resolved)) 'Snapshot fingerprint changed.'
+    Assert-True ($snapshot[0].host_file_id -match '^[0-9a-f]{8}:[0-9a-f]{16}:[0-9a-f]{16}$') 'Snapshot did not include a scoped NTFS identity.'
+    $oldIdentity = $snapshot[0].host_file_id
+    $movedPath = Join-Path $sourceRoot 'sample-moved.enc'
+    Move-Item -LiteralPath $resolved -Destination $movedPath
+    Assert-True ((Get-DocMindHostFileIdentity -LiteralPath $movedPath) -eq $oldIdentity) 'Same-volume move changed the file identity.'
+    $copiedPath = Join-Path $sourceRoot 'sample-copy.enc'
+    Copy-Item -LiteralPath $movedPath -Destination $copiedPath
+    Assert-True ((Get-DocMindHostFileIdentity -LiteralPath $copiedPath) -ne $oldIdentity) 'Copy reused the source file identity.'
+    Move-Item -LiteralPath $movedPath -Destination $resolved
+    Remove-Item -LiteralPath $copiedPath
     Assert-True ($snapshot[0].PSObject.Properties.Name -notcontains 'root') 'Snapshot exposed the physical source root.'
     $unicodeName = ([string][char]0xD55C) + ([string][char]0xAE00) + '.doc'
     [IO.File]::WriteAllBytes((Join-Path $sourceRoot $unicodeName), [byte[]](5, 6, 7))

@@ -1,15 +1,14 @@
-"""Chunk Docling Office blocks while retaining every source locator."""
+"""Chunk normalized Office blocks while retaining every source locator."""
 
 from __future__ import annotations
 
 from copy import deepcopy
-from io import BytesIO
 from typing import Any
 
 from common.token_utils import num_tokens_from_string
 from rag.nlp import _build_cks, _merge_cks
 from rag.parser_platform.schemas import BlockType, ParsedDocument, SourceFormat
-from rag.parser_platform.standard_bridge import CommonToStandardChunkAdapter
+from rag.parser_platform.chunk_adapter import CommonToStandardChunkAdapter
 
 
 def _unique(values: list[Any]) -> list[Any]:
@@ -49,26 +48,84 @@ def _merge_source_chunks(chunks: list[dict], text: str) -> dict:
 
 
 class OfficeChunker:
-    """Apply format-specific Office boundaries to normalized Docling blocks."""
+    """Apply format-specific Office boundaries to normalized blocks."""
 
     def chunk(self, document: ParsedDocument, *, parser_config: dict, source_bytes: bytes) -> list[dict]:
+        if document.parser_name != "kordoc":
+            raise ValueError("OfficeChunker requires a Kordoc normalized document")
         blocks = [
             block for block in document.blocks
             if block.block_type not in {BlockType.GROUP, BlockType.OCR_ATTACHMENT} and block.searchable
         ]
         source_chunks = CommonToStandardChunkAdapter().adapt(document)
         by_block_id = {chunk["metadata"]["parser_platform"]["stable_block_id"]: chunk for chunk in source_chunks}
-        if document.source_format in {SourceFormat.DOC, SourceFormat.DOCX}:
+        if document.source_format in {SourceFormat.HWP, SourceFormat.HWPX, SourceFormat.DOC, SourceFormat.DOCX}:
             return self._word_chunks(blocks, by_block_id, parser_config)
+        if document.source_format == SourceFormat.PDF:
+            return self._text_chunks(blocks, by_block_id, parser_config, by_slide=False, by_pdf=True)
         if document.source_format == SourceFormat.PPTX:
             return self._slide_chunks(blocks, by_block_id, parser_config)
-        if document.source_format == SourceFormat.XLSX:
-            attachments_by_parent: dict[str, list[str]] = {}
-            for block in document.blocks:
-                if block.block_type == BlockType.OCR_ATTACHMENT and block.parent_id and block.text:
-                    attachments_by_parent.setdefault(block.parent_id, []).append(block.text)
-            return self._excel_chunks(blocks, by_block_id, parser_config, source_bytes, attachments_by_parent)
+        if document.source_format in {SourceFormat.XLS, SourceFormat.XLSX}:
+            return self._kordoc_excel_chunks(blocks, by_block_id, parser_config)
         return source_chunks
+
+    @staticmethod
+    def _kordoc_excel_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict) -> list[dict]:
+        from rag.parser_platform.kordoc_office_pilot import _table_content
+
+        budget = int(parser_config.get("excel_chunk_token_num", parser_config.get("chunk_token_num", 128)))
+        if budget <= 0:
+            raise ValueError("Excel chunk token budget must be positive")
+        output: list[dict] = []
+        for block in blocks:
+            source = by_block_id[block.stable_block_id]
+            table = block.diagnostics.get("kordoc_table") or {}
+            rows = table.get("cells") or []
+            row_texts = block.diagnostics.get("kordoc_row_texts")
+            if not isinstance(row_texts, list) or len(row_texts) != len(rows):
+                raise ValueError("kordoc workbook row text is incomplete")
+            sheet = block.provenance[0].sheet
+            intervals: list[tuple[int, int]] = []
+            start = 0
+            while start < len(rows):
+                end = start + 1
+                cursor = start
+                while cursor < end:
+                    for cell in rows[cursor]:
+                        if cell:
+                            end = max(end, cursor + cell.get("rowSpan", 1))
+                    cursor += 1
+                intervals.append((start, end))
+                start = end
+
+            def group_text(start_row: int, end_row: int) -> str:
+                return "\n".join(row_texts[start_row:end_row])
+
+            groups: list[tuple[int, int]] = []
+            for interval_start, interval_end in intervals:
+                if groups:
+                    group_start, _ = groups[-1]
+                    candidate = f"[{sheet}]\n{group_text(group_start, interval_end)}"
+                    if num_tokens_from_string(candidate) <= budget:
+                        groups[-1] = (group_start, interval_end)
+                        continue
+                groups.append((interval_start, interval_end))
+            for start, end in groups:
+                sliced = {**table, "rows": end - start, "cells": rows[start:end]}
+                _, table_html = _table_content(sliced, collect_text=False)
+                text = group_text(start, end)
+                chunk = _merge_source_chunks([source], f"[{sheet}]\n{text}")
+                meta = chunk["metadata"]["parser_platform"]
+                meta["display_html"] = table_html
+                meta["display_html_only"] = True
+                meta["kordoc_row_range"] = [start + 1, end]
+                if num_tokens_from_string(chunk["content_with_weight"]) > budget:
+                    meta["warning_codes"] = _unique((meta.get("warning_codes") or [])
+                                                    + ["KORDOC_EXCEL_OVERSIZE_ATOMIC_INTERVAL"])
+                meta["chunk_token_count"] = num_tokens_from_string(chunk["content_with_weight"])
+                chunk["chunk_order_int"] = len(output)
+                output.append(chunk)
+        return output
 
     @staticmethod
     def _word_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict) -> list[dict]:
@@ -79,7 +136,8 @@ class OfficeChunker:
         return OfficeChunker._text_chunks(blocks, by_block_id, parser_config, by_slide=True)
 
     @staticmethod
-    def _text_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict, *, by_slide: bool) -> list[dict]:
+    def _text_chunks(blocks: list, by_block_id: dict[str, dict], parser_config: dict, *,
+                     by_slide: bool, by_pdf: bool = False) -> list[dict]:
         budget = int(parser_config.get("chunk_token_num", 128))
         delimiter = parser_config.get("delimiter", "\n!?。；！？")
         output: list[dict] = []
@@ -102,8 +160,9 @@ class OfficeChunker:
             chunk = by_block_id.get(block.stable_block_id)
             if chunk is None:
                 continue
-            key = (getattr(block.provenance[0], "slide", None) if by_slide
-                   else tuple(getattr(block.provenance[0], "heading_path", ())))
+            key = (getattr(block.provenance[0], "slide", None) if by_slide else
+                   getattr(block.provenance[0], "page", None) if by_pdf else
+                   tuple(getattr(block.provenance[0], "heading_path", ())))
             if pending and (key != boundary_key or (not by_slide and block.block_type == BlockType.HEADING)):
                 flush()
             boundary_key = key
@@ -126,93 +185,6 @@ class OfficeChunker:
                 item["source_indices"] = [index]
                 pending.append(item)
         flush()
-        for order, chunk in enumerate(output):
-            chunk["chunk_order_int"] = order
-        return output
-
-    @staticmethod
-    def _excel_chunks(
-        blocks: list,
-        by_block_id: dict[str, dict],
-        parser_config: dict,
-        source_bytes: bytes,
-        attachments_by_parent: dict[str, list[str]],
-    ) -> list[dict]:
-        from openpyxl.utils.cell import range_boundaries
-
-        from deepdoc.parser.excel_parser import RAGFlowExcelParser
-        from rag.app.excel_chunker import (
-            chunk_excel_record_groups,
-            excel_embedding_counter,
-            load_excel_canonical_grid,
-            render_excel_display_html,
-        )
-
-        budget = int(parser_config.get("excel_chunk_token_num", parser_config.get("chunk_token_num", 128)))
-        policy = parser_config.get("excel_table_chunking_policy")
-        if policy is None:
-            count_tokens = num_tokens_from_string
-            whole_table_rows = False
-        elif policy == "whole_table_complete_rows_v1":
-            budget, count_tokens = excel_embedding_counter(parser_config)
-            whole_table_rows = True
-        else:
-            raise ValueError(f"Unsupported excel_table_chunking_policy: {policy!r}")
-
-        workbook = RAGFlowExcelParser._load_excel_to_workbook(BytesIO(source_bytes))
-        try:
-            records_by_sheet = {name: RAGFlowExcelParser._worksheet_records(workbook[name]) for name in workbook.sheetnames}
-        finally:
-            workbook.close()
-        grid = load_excel_canonical_grid(source_bytes, "source.xlsx")
-        output: list[dict] = []
-        for block in blocks:
-            source = by_block_id.get(block.stable_block_id)
-            if source is None:
-                continue
-            if block.block_type != BlockType.TABLE:
-                output.append(_merge_source_chunks([source], source["content_with_weight"]))
-                continue
-            locator = source["metadata"]["parser_platform"].get("office_locator") or {}
-            sheet, cell_range = locator.get("sheet"), locator.get("cell_range")
-            if sheet not in records_by_sheet or not cell_range:
-                output.append(_merge_source_chunks([source], source["content_with_weight"]))
-                continue
-            min_col, min_row, max_col, max_row = range_boundaries(cell_range)
-            records = []
-            for record in records_by_sheet[sheet]:
-                if not min_row <= record["row"] <= max_row:
-                    continue
-                cells = [cell for cell in record["cells"] if min_col <= cell["column"] <= max_col]
-                if not cells:
-                    continue
-                selected = dict(record)
-                selected["cells"] = cells
-                selected["text"] = f"[{sheet}!{record['row']}] " + "; ".join(
-                    f"{cell['coordinate']} {cell['header'] + '：' if cell['header'] else ''}{cell['value']}" for cell in cells
-                )
-                records.append(selected)
-            if not records:
-                output.append(_merge_source_chunks([source], source["content_with_weight"]))
-                continue
-            for group in chunk_excel_record_groups(records, budget, count_tokens, whole_table_rows=whole_table_rows):
-                chunk = _merge_source_chunks([source], group["text"])
-                meta = chunk["metadata"]["parser_platform"]
-                meta["source_cells"] = group["source_cells"]
-                meta["display_html"] = render_excel_display_html(grid, group["source_cells"])
-                meta["display_html_only"] = True
-                meta["chunk_token_count"] = count_tokens(group["text"])
-                if policy == "whole_table_complete_rows_v1":
-                    meta["chunk_tokenizer"] = "excel-embedding-tokenizer"
-                output.append(chunk)
-            attachment_texts = attachments_by_parent.get(block.stable_block_id, [])
-            if attachment_texts:
-                # Docling's table OCR is not a source workbook cell. Keep it
-                # searchable once with the table locator, outside row groups.
-                ocr_chunk = _merge_source_chunks([source], "\n".join(attachment_texts))
-                ocr_chunk["doc_type_kwd"] = "text"
-                ocr_chunk["metadata"]["parser_platform"]["display_html"] = None
-                output.append(ocr_chunk)
         for order, chunk in enumerate(output):
             chunk["chunk_order_int"] = order
         return output

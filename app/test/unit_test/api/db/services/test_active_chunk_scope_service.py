@@ -53,25 +53,16 @@ def test_read_scope_remains_enforced_when_only_ingestion_is_off(monkeypatch) -> 
     assert expression["match_none"] is False
 
 
-def test_read_scope_remains_enforced_when_only_hwp_schema_is_ready(monkeypatch) -> None:
+def test_read_scope_is_not_applied_until_shared_integration_is_ready(monkeypatch) -> None:
     monkeypatch.setattr(active_chunk_scope_service, "PeeweeDocumentScopeRepository", FakeRepository)
     active_chunk_scope_service.ACTIVE_SCOPE_CACHE.clear()
     result = active_chunk_scope_service.ActiveChunkScopeService.apply_to_condition(
         {"doc_id": ["active-doc"]},
         kb_ids=["kb"],
         requested_doc_ids=["active-doc"],
-        config=ParserPlatformConfig(
-            enabled=False,
-            integration_ready=False,
-            hwp_enabled=False,
-            hwp_integration_ready=True,
-            hwp_registration_mode="off",
-        ),
+        config=ParserPlatformConfig(enabled=False, integration_ready=False),
     )
-    expression = result["_active_chunk_scope"]
-    assert expression["active_chunk_set_ids"] == ["set-active"]
-    assert expression["legacy_doc_ids"] == []
-    assert expression["match_none"] is False
+    assert result == {"doc_id": ["active-doc"]}
 
 
 def test_feature_on_attaches_backend_neutral_scope_and_visibility(monkeypatch) -> None:

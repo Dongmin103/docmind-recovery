@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from rag.parser_platform.canonical import canonical_sha256
 from rag.parser_platform.config import ParserPlatformConfig
@@ -10,12 +11,14 @@ from rag.parser_platform.schemas import ParserRunStatus
 
 ALLOWED_TRANSITIONS = {
     ParserRunStatus.QUEUED: {
+        ParserRunStatus.PARSING_KORDOC,
         ParserRunStatus.PARSING_SURYA,
         ParserRunStatus.PARSING_DOCLING,
         ParserRunStatus.PARSING_RHWP,
         ParserRunStatus.FAILED_RETRYABLE,
         ParserRunStatus.FAILED_TERMINAL,
     },
+    ParserRunStatus.PARSING_KORDOC: {ParserRunStatus.NORMALIZING, ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL},
     ParserRunStatus.PARSING_SURYA: {ParserRunStatus.NORMALIZING, ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL},
     ParserRunStatus.PARSING_DOCLING: {
         ParserRunStatus.PARSING_SURYA,
@@ -56,6 +59,7 @@ class ParserRunRequest:
     model_version: str | None
     backend: str
     attempt: int = 0
+    chunking_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -97,10 +101,14 @@ class ParserCoordinator:
                 "backend": request.backend,
             }
         )
+        config_fingerprint = self.config.run_config_fingerprint(
+            selection.source_format.value, document_id=request.document_id,
+            chunking_config=request.chunking_config,
+        )
         idempotency_key = canonical_sha256(
             {
                 "source_fingerprint": source_fingerprint,
-                "config_fingerprint": self.config.run_config_fingerprint(selection.source_format.value),
+                "config_fingerprint": config_fingerprint,
                 "parser_fingerprint": parser_fingerprint,
                 "attempt": request.attempt,
             }
@@ -110,7 +118,7 @@ class ParserCoordinator:
             chunk_set_id=canonical_sha256({"kind": "chunk-set", "idempotency_key": idempotency_key})[:32],
             idempotency_key=idempotency_key,
             source_fingerprint=source_fingerprint,
-            config_fingerprint=self.config.run_config_fingerprint(selection.source_format.value),
+            config_fingerprint=config_fingerprint,
             parser_fingerprint=parser_fingerprint,
             selection=selection,
             parser_name=selection.engine,

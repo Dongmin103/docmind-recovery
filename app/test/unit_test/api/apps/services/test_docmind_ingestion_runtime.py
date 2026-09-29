@@ -68,6 +68,7 @@ def runtime_module(monkeypatch):
         PDF = "pdf"
         DOC = "doc"
         DOCX = "docx"
+        XLS = "xls"
         XLSX = "xlsx"
         PPTX = "pptx"
         HWP = "hwp"

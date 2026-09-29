@@ -25,7 +25,9 @@ class Base(Model):
 class TinyDocument(Base):
     id = CharField(primary_key=True)
     kb_id = CharField()
+    source_type = CharField(default="local")
     active_chunk_set_id = CharField(null=True)
+    requested_parse_run_id = CharField(null=True)
     chunk_num = IntegerField(default=0)
     token_num = IntegerField(default=0)
     progress = FloatField(default=0)
@@ -145,6 +147,11 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
     TinyDocument.create(id="doc", kb_id="kb", active_chunk_set_id="set-a", chunk_num=1, token_num=10)
     TinyDocument.create(id="doc-legacy", kb_id="kb", active_chunk_set_id=None)
     TinyDocument.create(id="doc-disabled", kb_id="kb", active_chunk_set_id=None, status="0")
+    TinyDocument.create(id="doc-cloud", kb_id="kb", active_chunk_set_id=None, status="0", source_type="docmind_cloud")
+    TinyParserRun.create(
+        id="run-cloud", doc_id="doc-cloud", chunk_set_id="set-cloud",
+        lifecycle="RETAINED", retained_until=_now() - timedelta(seconds=1),
+    )
     TinyParserRun.create(
         id="run-a",
         doc_id="doc",
@@ -216,6 +223,10 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
         target_lifecycle="READY_WITH_WARNING",
     )
 
+    TinyDocument.update(status="0").where(TinyDocument.id == "doc").execute()
+    with pytest.raises(ParserPlatformError):
+        store.activate.__wrapped__(store, request)
+    TinyDocument.update(status="1").where(TinyDocument.id == "doc").execute()
     activated = store.activate.__wrapped__(store, request)
     document = TinyDocument.get_by_id("doc")
     assert activated.prior_active_chunk_set_id == "set-a"
@@ -225,14 +236,20 @@ def test_real_peewee_store_activates_rolls_back_and_cleans_only_non_active(monke
     assert TinyParserRun.get_by_id("run-b").lifecycle == "READY_WITH_WARNING"
     assert TinyParserRun.get_by_id("run-b").raw_artifact_ref is None
 
+    TinyDocument.update(status="0").where(TinyDocument.id == "doc").execute()
+    with pytest.raises(ParserPlatformError):
+        store.rollback.__wrapped__(store, document_id="doc", target_chunk_set_id="set-a")
+    TinyDocument.update(status="1").where(TinyDocument.id == "doc").execute()
     rolled_back = store.rollback.__wrapped__(store, document_id="doc", target_chunk_set_id="set-a")
     assert rolled_back.prior_active_chunk_set_id == "set-b"
     assert TinyDocument.get_by_id("doc").active_chunk_set_id == "set-a"
     assert TinyParserRun.get_by_id("run-a").lifecycle == "READY"
+    assert TinyParserRun.get_by_id("run-cloud").lifecycle == "RETAINED"
     assert TinyParserRun.get_by_id("run-b").lifecycle == "RETAINED"
     assert TinyParserRun.get_by_id("run-b").retained_from_lifecycle == "READY_WITH_WARNING"
 
     TinyParserRun.update(retained_until=_now() - timedelta(seconds=1)).where(TinyParserRun.id == "run-b").execute()
+    monkeypatch.setenv("DOCMIND_RETENTION_PURGE_ENABLED", "1")
     cleaned = store.cleanup_expired.__wrapped__(store, retained_before=_now())
     assert set(cleaned.removed_chunk_set_ids) == {"set-b", "set-failed"}
     assert TinyParserRun.get_or_none(TinyParserRun.id == "run-b") is None
@@ -300,6 +317,42 @@ def test_activation_preserves_caller_owned_outer_transaction(monkeypatch) -> Non
         TinyDocument.update(progress_msg="outer-transaction-alive").where(TinyDocument.id == "doc").execute()
 
     assert TinyDocument.get_by_id("doc").progress_msg == "outer-transaction-alive"
+    database.close()
+
+
+def test_late_run_cannot_activate_after_newer_request(monkeypatch) -> None:
+    database = SqliteDatabase(":memory:")
+    TEST_DB.initialize(database)
+    database.create_tables([TinyDocument, TinyParserRun])
+    TinyDocument.create(id="doc", kb_id="kb", requested_parse_run_id="new-run")
+    for run_id in ("old-run", "new-run"):
+        TinyParserRun.create(
+            id=run_id, doc_id="doc", chunk_set_id=run_id + "-set",
+            lifecycle="ACTIVATING", completed_task_count=1,
+            staged_chunk_count=1, staged_token_count=2,
+        )
+    monkeypatch.setattr(chunk_set_activation_service, "DB", database)
+    monkeypatch.setattr(chunk_set_activation_service, "Document", TinyDocument)
+    monkeypatch.setattr(chunk_set_activation_service, "ParserRun", TinyParserRun)
+    store = chunk_set_activation_service.PeeweeAtomicChunkSetStore(artifact_cleaner=RecordingCleaner())
+
+    def request(run_id):
+        return ChunkSetFinalizationRequest(
+            document_id="doc", kb_id="kb", parse_run_id=run_id,
+            chunk_set_id=run_id + "-set", expected_current_chunk_set_id=None,
+            expected_task_count=1, completed_task_count=1, failed_task_count=0,
+            expected_chunk_count=1, staged_chunk_count=1, indexed_chunk_count=1,
+            staged_token_count=2, raw_artifact_complete=True,
+            normalized_document_valid=True, provenance_complete=True,
+            required_ocr_complete=True, embedding_complete=True,
+            clear_raw_artifact_ref=True,
+        )
+
+    with pytest.raises(ParserPlatformError):
+        store.activate(request("old-run"))
+    assert TinyDocument.get_by_id("doc").active_chunk_set_id is None
+    store.activate(request("new-run"))
+    assert TinyDocument.get_by_id("doc").active_chunk_set_id == "new-run-set"
     database.close()
 
 

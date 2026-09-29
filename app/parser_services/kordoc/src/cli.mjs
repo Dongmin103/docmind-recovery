@@ -15,7 +15,11 @@ async function main() {
   process.stdout.write(JSON.stringify(result));
 }
 
-main().catch(() => {
-  process.stderr.write('Kordoc pilot parse failed\n');
+main().catch(error => {
+  if (error.code === 'PARSER_PAGE_LIMIT_EXCEEDED' && Number.isSafeInteger(error.page_count)) {
+    process.stdout.write(JSON.stringify({ code: error.code, page_count: error.page_count }));
+    return;
+  }
+  process.stderr.write('Kordoc parse failed\n');
   process.exitCode = 1;
 });

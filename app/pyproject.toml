@@ -34,7 +34,6 @@ dependencies = [
     "debugpy>=1.8.13",
     "demjson3==3.0.6",
     "discord-py==2.3.2",
-    "docling-core[chunking]==2.92.0",
     "dropbox==12.0.2",
     "duckduckgo-search>=7.2.0,<8.0.0",
     "elasticsearch-dsl==8.12.0",

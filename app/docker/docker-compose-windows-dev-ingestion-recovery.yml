@@ -1,0 +1,15 @@
+# Opt-in for the Windows cloud-source test deployment only.
+# Verify that no generic RAGFlow connectors are configured before applying:
+# DEPT discovery is performed by the Windows source watcher, not datasync.
+services:
+  ragflow-cpu:
+    command:
+      - --enable-adminserver
+      - --init-model-provider-tables
+      - --disable-datasync
+    environment:
+      DOCMIND_EPHEMERAL_REAPER_INTERVAL_SECONDS: "60"
+    # The existing local source overlay mounts the service modules. Include
+    # the matching workspace-lock implementation in this development rollout.
+    volumes:
+      - ../rag/parser_platform/ephemeral_input.py:/ragflow/rag/parser_platform/ephemeral_input.py:ro

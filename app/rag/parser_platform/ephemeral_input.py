@@ -18,7 +18,7 @@ import stat
 import tempfile
 import threading
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -104,6 +104,7 @@ class _Manifest:
     plaintext_sha256: str
     created_at: str
     touched_at: str
+    consumer_lock_protocol: int = 0
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,7 @@ class EphemeralParserInputAdapter:
                     plaintext_sha256=plaintext_sha256,
                     created_at=now,
                     touched_at=now,
+                    consumer_lock_protocol=1,
                 )
                 self._write_manifest(directory, manifest)
                 _atomic_private_write(input_directory / filename, plaintext)
@@ -241,6 +243,13 @@ class EphemeralParserInputAdapter:
             version_id=manifest.version_id,
             fencing_token=manifest.fencing_token,
         )
+        with self._consumer_lock(directory) as acquired:
+            if not acquired:
+                raise EphemeralInputError("EPHEMERAL_INPUT_ALREADY_CONSUMING")
+            return self._consume_locked(directory, manifest, workspace, consumer)
+
+    def _consume_locked(self, directory, manifest, workspace, consumer):
+        input_path = workspace.input_path
         outcome: CleanupOutcome = "FAILED"
         try:
             if _is_link_or_reparse(input_path) or not input_path.is_file():
@@ -264,10 +273,27 @@ class EphemeralParserInputAdapter:
 
         token = _receipt_token(receipt)
         directory = self._directory_for_token(token)
-        manifest = self._read_manifest(directory)
-        self._cleanup(directory, manifest, outcome)
+        with self._consumer_lock(directory) as acquired:
+            if not acquired:
+                raise EphemeralInputError("EPHEMERAL_INPUT_ALREADY_CONSUMING")
+            manifest = self._read_manifest(directory)
+            self._cleanup(directory, manifest, outcome)
 
-    def reap(self, *, stale_after: timedelta, guard: LeaseCleanupGuard) -> ReapReport:
+    def workspace_is_absent(self, token_hash: str) -> bool:
+        """Confirm one persisted token's workspace vanished, e.g. tmpfs reset.
+
+        Caller must hold its expired terminal job's DB cleanup guard. Missing
+        or substituted roots are not evidence of successful cleanup.
+        """
+        if not _SHA256_RE.fullmatch(token_hash):
+            return False
+        _reject_link_ancestry(self.root)
+        if not self.root.is_dir():
+            return False
+        directory = self.root / f"job-{token_hash[:32]}"
+        return not os.path.lexists(directory)
+
+    def reap(self, *, stale_after: timedelta, guard: LeaseCleanupGuard, terminal_guard=None) -> ReapReport:
         """Remove abandoned workspaces only under an exclusive lease-store claim."""
 
         if stale_after <= timedelta(0):
@@ -293,27 +319,59 @@ class EphemeralParserInputAdapter:
             except (EphemeralInputError, OSError, ValueError, json.JSONDecodeError):
                 counts["invalid"] += 1
                 continue
-            if now - touched < stale_after:
+            recent = now - touched < stale_after
+            if recent and terminal_guard is None:
                 counts["too_recent"] += 1
                 continue
             try:
-                with guard.claim_cleanup(
-                    job_id=manifest.job_id,
-                    version_id=manifest.version_id,
-                    fencing_token=manifest.fencing_token,
-                ) as claimed:
-                    if not claimed:
+                with self._consumer_lock(directory) as unlocked:
+                    if not unlocked:
                         counts["active_or_newer"] += 1
                         continue
-                    try:
-                        self._cleanup(directory, manifest, "REAPED")
-                    except EphemeralInputError:
-                        counts["cleanup_failed"] += 1
-                    else:
-                        counts["removed"] += 1
+                    selected_guard = terminal_guard if recent else guard
+                    arguments = {"job_id": manifest.job_id, "version_id": manifest.version_id, "fencing_token": manifest.fencing_token}
+                    if recent:
+                        arguments["protected_consumer"] = manifest.consumer_lock_protocol == 1
+                    with selected_guard.claim_cleanup(**arguments) as claimed:
+                        if not claimed:
+                            counts["active_or_newer"] += 1
+                            continue
+                        try:
+                            self._cleanup(directory, manifest, "REAPED")
+                        except EphemeralInputError:
+                            counts["cleanup_failed"] += 1
+                        else:
+                            counts["removed"] += 1
             except Exception:  # noqa: BLE001 -- an unavailable lease backend must fail closed
                 counts["active_or_newer"] += 1
         return ReapReport(**counts)
+
+    @contextmanager
+    def _consumer_lock(self, directory: Path):
+        """The Docker parser owns this OS lock for the entire consume lifetime.
+
+        A killed process releases flock, unlike the once-only consume marker.
+        Lock acquisition precedes the DB cleanup claim to avoid deadlocking a
+        consumer that is recording its cleanup under the same row lock.
+        """
+        import fcntl
+
+        lock_path = directory / ".workspace.lock"
+        if _is_link_or_reparse(lock_path):
+            raise EphemeralInputError("EPHEMERAL_INPUT_INVALID")
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
     def _write_derived(self, directory: Path, filename: str, content: bytes) -> Path:
         _validate_filename(filename)

@@ -5,116 +5,36 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_compose_defaults_off_and_parser_network_is_internal() -> None:
+def test_compose_is_kordoc_only_and_enabled_by_default() -> None:
     compose = yaml.safe_load((ROOT / "docker" / "docker-compose-parser-platform.yml").read_text(encoding="utf-8"))
     ragflow = compose["services"]["ragflow-cpu"]
-    assert ragflow["environment"]["PARSER_PLATFORM_ENABLED"].endswith(":-0}")
-    assert ragflow["environment"]["PARSER_PLATFORM_INTEGRATION_READY"].endswith(":-0}")
+    assert set(compose["services"]) == {"ragflow-cpu", "kordoc-parser"}
+    assert ragflow["environment"]["PARSER_PLATFORM_ENABLED"].endswith(":-1}")
+    assert ragflow["environment"]["PARSER_PLATFORM_INTEGRATION_READY"].endswith(":-1}")
     assert ragflow["environment"]["TE_RUN_MODE"].endswith(":-0}")
     assert compose["networks"]["parser_internal"]["internal"] is True
     assert "parser_platform_artifacts" in compose["volumes"]
 
 
-def test_cpu_and_docling_profiles_are_single_concurrency_read_only_and_unpublished() -> None:
+def test_compose_wires_all_formats_and_pdf_cap_to_kordoc() -> None:
     compose = yaml.safe_load((ROOT / "docker" / "docker-compose-parser-platform.yml").read_text(encoding="utf-8"))
-    cpu = compose["services"]["surya-parser-cpu"]
-    docling = compose["services"]["docling-office-parser"]
-    rhwp = compose["services"]["rhwp-parser"]
-    assert cpu["profiles"] == ["parser-platform-cpu"]
-    assert cpu["environment"]["SURYA_INFERENCE_PARALLEL"] == "1"
-    assert cpu["environment"]["SURYA_INFERENCE_TIMEOUT_SECONDS"].endswith(":-600}")
-    assert cpu["environment"]["SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS"].endswith(":-1800}")
-    assert cpu["environment"]["SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS"].endswith(":-660}")
-    assert cpu["environment"]["SURYA_SERVICE_MEDIA_INFERENCE_TIMEOUT_SECONDS"].endswith(":-600}")
-    assert cpu["environment"]["SURYA_SERVICE_MEDIA_MAX_TOKENS"].endswith(":-1024}")
-    assert cpu["environment"]["XDG_CACHE_HOME"] == "/home/parser/.cache"
-    assert cpu["environment"]["SURYA_MODEL_REVISION"] == "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
-    assert len(cpu["environment"]["SURYA_GGUF_MODEL_SHA256"]) == 64
-    assert len(cpu["environment"]["SURYA_GGUF_MMPROJ_SHA256"]) == 64
-    assert cpu["read_only"] is True and cpu["cap_drop"] == ["ALL"]
-    assert cpu["mem_limit"].endswith(":-8g}") and cpu["cpus"].endswith(":-8}")
-    assert "ports" not in cpu and list(cpu["networks"]) == ["parser_internal"]
-    assert any(
-        entry.startswith("/home/parser/.cache:")
-        and "uid=10001" in entry
-        and "gid=10001" in entry
-        and "mode=0700" in entry
-        for entry in cpu["tmpfs"]
-    )
-    assert cpu["platform"] == "linux/amd64"
-    assert docling["profiles"] == ["parser-platform-office"]
-    assert docling["platform"] == "linux/amd64"
-    assert docling["read_only"] is True and docling["cap_drop"] == ["ALL"]
-    assert "ports" not in docling and list(docling["networks"]) == ["parser_internal"]
-    assert rhwp["profiles"] == ["parser-platform-hwp"]
-    assert rhwp["platform"] == "linux/amd64"
-    assert rhwp["read_only"] is True and rhwp["cap_drop"] == ["ALL"]
-
-
-def test_gpu_profile_is_fail_closed_until_pinned_nvidia_runtime_exists() -> None:
-    compose = yaml.safe_load((ROOT / "docker" / "docker-compose-parser-platform.yml").read_text(encoding="utf-8"))
-    gpu = compose["services"]["surya-parser-gpu"]
-    assert gpu["profiles"] == ["parser-platform-gpu"]
-    assert "gpu-runtime-not-configured" in gpu["image"]
-    assert gpu["environment"]["SURYA_INFERENCE_BACKEND"] == "vllm"
-    devices = gpu["deploy"]["resources"]["reservations"]["devices"]
-    assert devices == [{"driver": "nvidia", "count": 1, "capabilities": ["gpu"]}]
-
-
-def test_office_image_keeps_only_real_native_backend_dependencies() -> None:
-    project = (ROOT / "parser_services" / "docling_office" / "pyproject.toml").read_text(encoding="utf-8")
-    service = (ROOT / "parser_services" / "docling_office" / "service.py").read_text(encoding="utf-8")
-    assert "docling-slim[format-office]==2.115.0" in project
-    assert "pypdfium2==5.12.1" in project
-    assert "scipy==1.18.0" in project
-    assert "docling-parse" not in project
-    assert "docling-ibm-models" not in project
-    assert "rtree" not in project
-    assert "DocumentConverter" not in service
-    assert "SimplePipeline" not in service
-    assert "MsWordDocumentBackend" in service
-    assert "MsExcelDocumentBackend" in service
-    assert "MsPowerpointDocumentBackend" in service
-
-
-def test_docmind_image_contains_sandboxed_svg_renderer_and_artifact_directory() -> None:
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "librsvg2-bin" in dockerfile
-    assert "/ragflow/parser-platform-artifacts" in dockerfile
-    assert "/ragflow/scripts" not in dockerfile
-    assert "COPY scripts scripts" in dockerfile
+    app = compose["services"]["ragflow-cpu"]
+    parser = compose["services"]["kordoc-parser"]
+    for format_name in ("PDF", "DOCX", "EXCEL", "PPTX", "HWP"):
+        assert app["environment"][f"PARSER_PLATFORM_KORDOC_{format_name}_ENABLED"].endswith(":-1}")
+    assert app["environment"]["PARSER_PLATFORM_HWP_ENABLED"].endswith(":-1}")
+    assert parser["environment"]["KORDOC_MAX_PDF_PAGES"] == app["environment"]["PARSER_PLATFORM_MAX_PDF_PAGES"]
+    assert parser["environment"]["KORDOC_MAX_SOURCE_BYTES"] == app["environment"]["PARSER_PLATFORM_KORDOC_MAX_SOURCE_BYTES"]
+    assert parser["read_only"] is True and parser["cap_drop"] == ["ALL"]
+    assert "ports" not in parser and list(parser["networks"]) == ["parser_internal"]
+    assert parser["platform"] == "linux/amd64"
+    assert any("/models/kordoc:ro" in volume for volume in parser["volumes"])
 
 
 def test_public_images_do_not_copy_private_evidence_or_model_weights() -> None:
-    dockerfiles = [
-        ROOT / "Dockerfile",
-        ROOT / "parser_services" / "surya" / "Containerfile.cpu-amd64",
-        ROOT / "parser_services" / "docling_office" / "Containerfile",
-        ROOT / "parser_services" / "rhwp" / "Containerfile",
-    ]
+    dockerfiles = [ROOT / "Dockerfile", ROOT / "parser_services" / "kordoc" / "Containerfile"]
     combined = "\n".join(path.read_text(encoding="utf-8") for path in dockerfiles)
     assert "COPY .omx" not in combined
     assert "COPY output" not in combined
     assert "COPY --from=surya_models" not in combined
     assert "docmind-goldset-dev.jsonl" not in combined
-
-
-def test_surya_download_requires_explicit_operator_license_acceptance() -> None:
-    downloader = (ROOT / "scripts" / "download_surya_models.sh").read_text(encoding="utf-8")
-    readme = (ROOT / "parser_services" / "surya" / "README.md").read_text(encoding="utf-8")
-
-    assert "SURYA_MODEL_LICENSE_ACCEPTED:-0" in downloader
-    assert "SURYA_MODEL_LICENSE_ACCEPTED=1 ./scripts/download_surya_models.sh" in readme
-    assert "Downloading or using the weights constitutes acceptance" in readme
-
-
-def test_parser_http_admission_is_bounded_while_surya_health_is_concurrent() -> None:
-    surya = (ROOT / "parser_services" / "surya" / "service.py").read_text(encoding="utf-8")
-    assert "ThreadingHTTPServer((host, port), Handler)" in surya
-    assert "threading.BoundedSemaphore(1)" in surya
-    assert "acquire(blocking=False)" in surya
-
-    for service in ("docling_office", "rhwp"):
-        source = (ROOT / "parser_services" / service / "service.py").read_text(encoding="utf-8")
-        assert "HTTPServer((host, port), Handler)" in source
-        assert "ThreadingHTTPServer" not in source

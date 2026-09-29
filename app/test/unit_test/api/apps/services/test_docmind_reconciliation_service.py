@@ -122,9 +122,9 @@ def reconciliation_db():
     database.close()
 
 
-def _start(scan_id="scan-1"):
+def _start(scan_id="scan-1", source_id="home-test1"):
     return service.begin_scan(
-        source_id="home-test1",
+        source_id=source_id,
         scan_id=scan_id,
         worker_id="worker-1",
         root_access_confirmed=True,
@@ -146,6 +146,226 @@ def _record(**kwargs):
         observation_handler=lambda *_args, **_kwargs: {"state": "WAITING_SOURCE_STABLE"},
         **kwargs,
     )
+
+
+HOST_FILE_ID = "12345678:000000000000abcd:01dc000000000001"
+
+
+def _indexed_source_for_move():
+    DocmindSource.update(default_folder_id="folder-1").where(
+        DocmindSource.id == "home-test1"
+    ).execute()
+    mapping = DocmindSourceDocument.get_by_id("source-document-keep")
+    DocmindSourceDocument.update(
+        host_file_identity=f"worker-1:{HOST_FILE_ID}",
+        observed_ciphertext_sha256="a" * 64,
+        observed_size=123,
+        observed_mtime_ns=456,
+        active_source_version_id="version-keep",
+    ).where(DocmindSourceDocument.id == mapping.id).execute()
+    DocmindSourceVersion.create(
+        id="version-keep", source_document_id=mapping.id,
+        document_id=mapping.document_id, ciphertext_sha256="a" * 64,
+        ciphertext_size=123, source_mtime_ns=456, lifecycle_state="ACTIVE",
+        chunk_set_id="chunks-keep", search_cleanup_complete=True,
+    )
+    Document.create(
+        id=mapping.document_id, kb_id="dataset-1", parser_id="naive",
+        type="pdf", created_by="tenant-1", name="keep.pdf", suffix="pdf",
+        active_chunk_set_id="chunks-keep",
+    )
+    return mapping
+
+
+def _scan_identity(scan_id, documents, *, handler=None, source_id="home-test1"):
+    _start(scan_id, source_id)
+    calls = []
+    def observe(*args, **kwargs):
+        calls.append(kwargs)
+        return {"state": "DISCOVERED"}
+    service.record_scan_batch(
+        source_id=source_id, scan_id=scan_id, worker_id="worker-1",
+        batch_index=0, documents=documents, observation_handler=handler or observe,
+    )
+    result = service.complete_scan(
+        source_id=source_id, scan_id=scan_id, worker_id="worker-1",
+        complete=True, file_count=len(documents), batch_count=1,
+        adapter=RecordingRetentionAdapter(), observation_handler=handler or observe,
+    )
+    return result, calls
+
+
+def test_host_identity_baselines_without_reindexing(reconciliation_db):
+    _indexed_source_for_move()
+    DocmindSourceDocument.update(host_file_identity=None).where(
+        DocmindSourceDocument.id == "source-document-keep"
+    ).execute()
+    _result, calls = _scan_identity("baseline", [_keep_document() | {"host_file_id": HOST_FILE_ID}])
+    mapping = DocmindSourceDocument.get_by_id("source-document-keep")
+    assert mapping.host_file_identity == f"worker-1:{HOST_FILE_ID}"
+    assert mapping.active_source_version_id == "version-keep"
+    assert calls == []
+    assert DocmindIngestionJob.select().count() == 0
+
+
+def test_same_source_move_reuses_document_and_index(reconciliation_db):
+    original = _indexed_source_for_move()
+    moved = _keep_document() | {
+        "relative_path": "archive/renamed.pdf", "mtime_ns": 999,
+        "host_file_id": HOST_FILE_ID,
+    }
+    result, calls = _scan_identity("move", [moved])
+    mapping = DocmindSourceDocument.get_by_id(original.id)
+    assert mapping.relative_path == "archive/renamed.pdf"
+    assert mapping.document_id == original.document_id
+    assert mapping.active_source_version_id == "version-keep"
+    assert DocmindSourceVersion.get_by_id("version-keep").chunk_set_id == "chunks-keep"
+    assert Document.get_by_id(original.document_id).name == "renamed.pdf"
+    assert DocmindSourceDocument.select().where(
+        DocmindSourceDocument.document_id == original.document_id
+    ).count() == 1
+    assert DocmindIngestionJob.select().count() == 0
+    assert result["deleted_document_ids"] != [original.document_id]
+    assert calls == []
+
+
+@pytest.mark.parametrize("source_id", ["dept-1-e2e", "dept-2-e2e", "home-test1-e2e"])
+def test_each_connected_source_uses_only_its_own_move_identity(reconciliation_db, source_id):
+    original = _indexed_source_for_move()
+    DocmindSource.create(
+        id=source_id, project_id="project-1", display_name=source_id,
+        default_folder_id="folder-1",
+    )
+    DocmindSourceDocument.update(source_id=source_id).where(
+        DocmindSourceDocument.id == original.id
+    ).execute()
+    moved = _keep_document() | {
+        "relative_path": "subfolder/keep.pdf", "host_file_id": HOST_FILE_ID,
+    }
+    _scan_identity(f"{source_id}-move", [moved], source_id=source_id)
+    mapping = DocmindSourceDocument.get_by_id(original.id)
+    assert mapping.source_id == source_id
+    assert mapping.relative_path == "subfolder/keep.pdf"
+    assert mapping.active_source_version_id == "version-keep"
+    assert DocmindIngestionJob.select().count() == 0
+
+
+def test_file_identity_does_not_merge_across_sources(reconciliation_db):
+    original = _indexed_source_for_move()
+    DocmindSource.create(
+        id="dept-2-e2e", project_id="project-1", display_name="DEPT_2",
+        default_folder_id="folder-1",
+    )
+    incoming = _keep_document() | {
+        "relative_path": "reports/keep.pdf", "host_file_id": HOST_FILE_ID,
+    }
+    _scan_identity("other-source", [incoming], source_id="dept-2-e2e")
+    assert DocmindSourceDocument.get_by_id(original.id).relative_path == "reports/keep.pdf"
+    other = DocmindSourceDocument.get(
+        (DocmindSourceDocument.source_id == "dept-2-e2e")
+        & (DocmindSourceDocument.relative_path == "reports/keep.pdf")
+    )
+    assert other.document_id != original.document_id
+
+
+def test_folder_move_resolves_files_across_scan_batches(reconciliation_db):
+    first = _indexed_source_for_move()
+    second_id = "12345678:000000000000abce:01dc000000000002"
+    second = DocmindSourceDocument.get_by_id("source-document-missing")
+    DocmindSourceDocument.update(
+        relative_path="reports/second.pdf",
+        relative_path_hash=service.logical_path_identity_hash("reports/second.pdf"),
+        host_file_identity=f"worker-1:{second_id}",
+        observed_ciphertext_sha256="b" * 64, observed_size=25,
+        observed_mtime_ns=456, active_source_version_id="version-second",
+    ).where(DocmindSourceDocument.id == second.id).execute()
+    DocmindSourceVersion.create(
+        id="version-second", source_document_id=second.id,
+        document_id=second.document_id, ciphertext_sha256="b" * 64,
+        ciphertext_size=25, source_mtime_ns=456, lifecycle_state="ACTIVE",
+        chunk_set_id="chunks-second", search_cleanup_complete=True,
+    )
+    Document.create(
+        id=second.document_id, kb_id="dataset-1", parser_id="naive",
+        type="pdf", created_by="tenant-1", name="second.pdf", suffix="pdf",
+        active_chunk_set_id="chunks-second",
+    )
+    _start("folder-move")
+    for index, item in enumerate([
+        _keep_document() | {"relative_path": "archive/keep.pdf", "host_file_id": HOST_FILE_ID},
+        {"relative_path": "archive/second.pdf", "host_file_id": second_id,
+         "ciphertext_sha256": "b" * 64, "size": 25, "mtime_ns": 456},
+    ]):
+        _record(source_id="home-test1", scan_id="folder-move", worker_id="worker-1",
+                batch_index=index, documents=[item])
+    result = service.complete_scan(
+        source_id="home-test1", scan_id="folder-move", worker_id="worker-1",
+        complete=True, file_count=2, batch_count=2,
+        adapter=RecordingRetentionAdapter(),
+    )
+    assert DocmindSourceDocument.get_by_id(first.id).relative_path == "archive/keep.pdf"
+    assert DocmindSourceDocument.get_by_id(second.id).relative_path == "archive/second.pdf"
+    assert DocmindSourceDocument.get_by_id(second.id).active_source_version_id == "version-second"
+    assert result["deleted_document_ids"] == []
+    assert DocmindIngestionJob.select().count() == 0
+
+
+def test_modified_file_moved_with_same_identity_is_reindexed(reconciliation_db):
+    ingestion_path = SERVICE_PATH.with_name("docmind_ingestion_service.py")
+    ingestion_spec = importlib.util.spec_from_file_location("docmind_move_ingestion_under_test", ingestion_path)
+    assert ingestion_spec and ingestion_spec.loader
+    docmind_ingestion_service = importlib.util.module_from_spec(ingestion_spec)
+    sys.modules[ingestion_spec.name] = docmind_ingestion_service
+    ingestion_spec.loader.exec_module(docmind_ingestion_service)
+
+    original = _indexed_source_for_move()
+    moved = _keep_document() | {
+        "relative_path": "archive/changed.pdf", "ciphertext_sha256": "b" * 64,
+        "mtime_ns": 999, "host_file_id": HOST_FILE_ID,
+    }
+    _scan_identity("changed-move", [moved], handler=docmind_ingestion_service.observe_source_version)
+    assert DocmindSourceDocument.get_by_id(original.id).relative_path == "archive/changed.pdf"
+    _scan_identity("changed-stable", [moved], handler=docmind_ingestion_service.observe_source_version)
+    jobs = list(DocmindIngestionJob.select())
+    assert len(jobs) == 1
+    assert jobs[0].document_id == original.document_id
+    assert jobs[0].lifecycle_state == "DISCOVERED"
+    assert DocmindSourceVersion.get_by_id(jobs[0].version_id).ciphertext_sha256 == "b" * 64
+
+
+@pytest.mark.parametrize("copy_file_id", [
+    "12345678:000000000000abce:01dc000000000002", HOST_FILE_ID,
+])
+def test_copy_with_equal_hash_gets_separate_document(reconciliation_db, copy_file_id):
+    original = _indexed_source_for_move()
+    copied = _keep_document() | {
+        "relative_path": "archive/copy.pdf",
+        "host_file_id": copy_file_id,
+    }
+    _scan_identity("copy", [_keep_document() | {"host_file_id": HOST_FILE_ID}, copied])
+    copy_mapping = DocmindSourceDocument.get(
+        DocmindSourceDocument.relative_path == "archive/copy.pdf"
+    )
+    assert copy_mapping.id != original.id
+    assert copy_mapping.document_id != original.document_id
+
+
+def test_incomplete_scan_cannot_rebind_move(reconciliation_db):
+    original = _indexed_source_for_move()
+    _start("incomplete-move")
+    _record(
+        source_id="home-test1", scan_id="incomplete-move", worker_id="worker-1",
+        batch_index=1, documents=[_keep_document() | {
+            "relative_path": "archive/moved.pdf", "host_file_id": HOST_FILE_ID,
+        }],
+    )
+    with pytest.raises(service.DocmindReconciliationError, match="COMPLETION_MISMATCH"):
+        service.complete_scan(
+            source_id="home-test1", scan_id="incomplete-move", worker_id="worker-1",
+            complete=True, file_count=1, batch_count=1,
+            adapter=RecordingRetentionAdapter(),
+        )
+    assert DocmindSourceDocument.get_by_id(original.id).relative_path == original.relative_path
 
 
 def test_started_requires_root_access(reconciliation_db):
@@ -522,6 +742,55 @@ def test_retry_policy_is_bounded_delayed_and_forces_new_decryption(reconciliatio
     assert service.reschedule_retryable_jobs(now=now + timedelta(seconds=1)) == []
     assert service.reschedule_retryable_jobs(now=now + timedelta(seconds=241)) == []
     assert DocmindIngestionJob.get_by_id(job.id).retry_not_before == now + timedelta(seconds=240)
+
+
+@pytest.mark.parametrize("error_code", [
+    "PARSER_PLATFORM_HWP_DISABLED", "PARSER_SOURCE_TYPE_MISMATCH", "PARSER_DOCLING_UNAVAILABLE",
+    "PARSER_MEDIA_OCR_FAILED", "DOCMIND_PDF_PAGE_CAP_EXCEEDED",
+])
+def test_retry_policy_preserves_unsupported_or_invalid_files(reconciliation_db, error_code):
+    version = DocmindSourceVersion.create(
+        id="version-preserved", source_document_id="source-document-keep",
+        document_id="document-keep", ciphertext_sha256="f" * 64,
+        ciphertext_size=1, source_mtime_ns=9, lifecycle_state="FAILED",
+    )
+    DocmindIngestionJob.create(
+        id="job-preserved", project_id="project-1", source_id="home-test1",
+        source_document_id="source-document-keep", document_id="document-keep",
+        version_id=version.id, idempotency_key="job-preserved", lifecycle_state="FAILED",
+        attempt=1, cleanup_state="COMPLETE", host_cleanup_state="COMPLETE", error_code=error_code,
+    )
+    assert service.reschedule_retryable_jobs(now=datetime(2026, 9, 22)) == []
+    job = DocmindIngestionJob.get_by_id("job-preserved")
+    assert (job.lifecycle_state, job.attempt, job.error_code) == ("FAILED", 1, error_code)
+
+
+def test_pipeline_timeout_retry_is_suppressed_only_for_dept2(reconciliation_db):
+    DocmindSource.create(id="dept-2-e2e", project_id="project-1", display_name="DEPT_2")
+    DocmindSourceDocument.create(
+        id="source-document-dept2-timeout", project_id="project-1", source_id="dept-2-e2e",
+        document_id="document-dept2-timeout", folder_id="folder-1",
+        relative_path="reports/large.pdf", relative_path_hash="e" * 64,
+    )
+    for source_id, source_document_id, document_id in (
+        ("home-test1", "source-document-keep", "document-keep"),
+        ("dept-2-e2e", "source-document-dept2-timeout", "document-dept2-timeout"),
+    ):
+        version = DocmindSourceVersion.create(
+            id=f"version-{source_id}", source_document_id=source_document_id,
+            document_id=document_id, ciphertext_sha256="f" * 64,
+            ciphertext_size=1, source_mtime_ns=9, lifecycle_state="FAILED",
+        )
+        DocmindIngestionJob.create(
+            id=f"job-{source_id}", project_id="project-1", source_id=source_id,
+            source_document_id=source_document_id, document_id=document_id,
+            version_id=version.id, idempotency_key=f"job-{source_id}", lifecycle_state="FAILED",
+            attempt=1, cleanup_state="COMPLETE", host_cleanup_state="COMPLETE",
+            error_code="DOCMIND_INGESTION_PIPELINE_TIMEOUT",
+        )
+    scheduled = service.reschedule_retryable_jobs(now=datetime(2026, 9, 22))
+    assert [item["job_id"] for item in scheduled] == ["job-home-test1"]
+    assert DocmindIngestionJob.get_by_id("job-dept-2-e2e").lifecycle_state == "FAILED"
 
 
 def test_scoped_reconciliation_does_not_retry_another_source(reconciliation_db):

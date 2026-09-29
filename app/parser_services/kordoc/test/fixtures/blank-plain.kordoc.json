@@ -1,0 +1,54 @@
+{
+  "schema_version": "docmind-kordoc-v2",
+  "patch_revision": "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b",
+  "parser_name": "kordoc",
+  "parser_version": "4.15.7",
+  "source_format": "xlsx",
+  "source_hash": "2d5fbbaacc97ea6dd379a98c113a1d447d34cf65ef6874846fc95ab281d20792",
+  "blocks": [
+    {
+      "type": "heading",
+      "text": "BlankFirst",
+      "level": 2,
+      "pageNumber": 1
+    },
+    {
+      "type": "heading",
+      "text": "Data",
+      "level": 2,
+      "pageNumber": 2
+    },
+    {
+      "type": "table",
+      "table": {
+        "rows": 1,
+        "cols": 1,
+        "cells": [
+          [
+            {
+              "text": "VISIBLE",
+              "colSpan": 1,
+              "rowSpan": 1
+            }
+          ]
+        ],
+        "hasHeader": false
+      },
+      "pageNumber": 2
+    },
+    {
+      "type": "heading",
+      "text": "BlankLast",
+      "level": 2,
+      "pageNumber": 3
+    }
+  ],
+  "markdown": "## BlankFirst\n\n\n## Data\n\nVISIBLE\n\n\n## BlankLast",
+  "metadata": {
+    "pageCount": 3,
+    "author": "openpyxl",
+    "createdAt": "2026-09-29T08:33:43Z",
+    "modifiedAt": "2026-09-29T08:33:43Z"
+  },
+  "warnings": []
+}

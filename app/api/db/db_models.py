@@ -1341,6 +1341,7 @@ class Document(DataBaseModel):
     # chunk_set_id remain searchable until this document completes its first
     # parser-platform activation.
     active_chunk_set_id = CharField(max_length=32, null=True, help_text="currently searchable parser-platform chunk set", index=True)
+    requested_parse_run_id = CharField(max_length=32, null=True, help_text="latest requested parser-platform run", index=True)
 
     run = CharField(max_length=1, null=True, help_text="start to run processing or cancel.(1: run it; 2: cancel)", default="0", index=True)
     status = CharField(max_length=1, null=True, help_text="is it validate(0: wasted, 1: validate)", default="1", index=True)
@@ -1466,6 +1467,7 @@ class ParserRun(DataBaseModel):
     source_format = CharField(max_length=16, null=False, index=True)
     source_fingerprint = CharField(max_length=64, null=False, index=True)
     config_fingerprint = CharField(max_length=64, null=False, index=True)
+    chunking_config = JSONField(null=False, default=dict)
     parser_fingerprint = CharField(max_length=64, null=False, index=True)
     parser_name = CharField(max_length=64, null=False, index=True)
     parser_version = CharField(max_length=64, null=False)
@@ -1805,6 +1807,7 @@ class DocmindSourceDocument(DataBaseModel):
     source_id = CharField(max_length=64, null=False, index=True)
     document_id = CharField(max_length=32, null=False, unique=True, index=True)
     source_object_id = CharField(max_length=255, null=True, index=True)
+    host_file_identity = CharField(max_length=255, null=True, index=True)
     folder_id = CharField(max_length=32, null=False, index=True)
     relative_path = CharField(max_length=1024, null=False)
     relative_path_hash = CharField(max_length=64, null=False, index=True)
@@ -1972,6 +1975,7 @@ class DocmindSourceScanEntry(DataBaseModel):
     ciphertext_sha256 = CharField(max_length=64, null=False, index=True)
     ciphertext_size = BigIntegerField(null=False)
     source_mtime_ns = BigIntegerField(null=False)
+    host_file_identity = CharField(max_length=255, null=True, index=True)
     source_document_id = CharField(max_length=32, null=True, index=True)
     reconciliation_state = CharField(max_length=32, null=False, index=True)
 
@@ -3081,6 +3085,7 @@ def migrate_db():
     alter_db_add_column(migrator, "document", "pipeline_id", CharField(max_length=32, null=True, help_text="Pipeline ID", index=True))
     alter_db_add_column(migrator, "document", "active_chunk_set_id", CharField(max_length=32, null=True, help_text="currently searchable parser-platform chunk set", index=True))
     alter_db_add_column(migrator, "parser_run", "retained_from_lifecycle", CharField(max_length=32, null=True))
+    alter_db_add_column(migrator, "parser_run", "chunking_config", JSONField(null=False, default=dict))
     alter_db_add_column(migrator, "knowledgebase", "graphrag_task_id", CharField(max_length=32, null=True, help_text="Gragh RAG task ID", index=True))
     alter_db_add_column(migrator, "knowledgebase", "raptor_task_id", CharField(max_length=32, null=True, help_text="RAPTOR task ID", index=True))
     alter_db_add_column(migrator, "knowledgebase", "graphrag_task_finish_at", DateTimeField(null=True))
@@ -3108,6 +3113,7 @@ def migrate_db():
     # type change and the ORM restores NULL to the application-level "".
     alter_db_column_type(migrator, "system_settings", "value", EmptyStringTextField(null=False, help_text="Configuration value (JSON, string, etc.)"))
     alter_db_add_column(migrator, "document", "content_hash", CharField(max_length=32, null=True, help_text="xxhash128 of document content for change detection", default="", index=True))
+    alter_db_add_column(migrator, "document", "requested_parse_run_id", CharField(max_length=32, null=True, index=True))
     alter_db_add_column(migrator, "user_canvas_version", "release", BooleanField(null=False, help_text="is released", default=False, index=True))
     alter_db_add_column(
         migrator,
@@ -3189,6 +3195,18 @@ def migrate_db():
         migrator,
         "docmind_source_document",
         "source_object_id",
+        CharField(max_length=255, null=True, index=True),
+    )
+    alter_db_add_column(
+        migrator,
+        "docmind_source_document",
+        "host_file_identity",
+        CharField(max_length=255, null=True, index=True),
+    )
+    alter_db_add_column(
+        migrator,
+        "docmind_source_scan_entry",
+        "host_file_identity",
         CharField(max_length=255, null=True, index=True),
     )
     alter_db_add_column(

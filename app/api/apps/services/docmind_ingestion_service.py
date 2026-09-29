@@ -14,7 +14,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
-import requests
 from peewee import IntegrityError
 
 from api.db.db_models import (
@@ -38,12 +37,14 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 TERMINAL_STATES = frozenset({"COMPLETE", "FAILED", "ACTION_REQUIRED", "DELETED"})
 CLAIMABLE_STATES = frozenset({"DISCOVERED", "RETRY_WAIT"})
+OPT_IN_CLAIM_FORMATS = frozenset({"pdf", "doc", "docx", "xls", "xlsx", "pptx"})
 
 
 class DocmindIngestionError(RuntimeError):
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, pdf_page_count: int | None = None):
         super().__init__(code)
         self.code = code
+        self.pdf_page_count = pdf_page_count
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ class TemporaryParserInputRunner(Protocol):
         version_id: str,
         workspace: TemporaryParserWorkspace,
         deadline_at: datetime,
+        max_pdf_pages: int | None = None,
     ) -> ParserStageResult: ...
 
 
@@ -242,7 +244,10 @@ def maintain_parser_workspaces(*, force: bool = False) -> None:
             report = reap(
                 stale_after=timedelta(seconds=stale_seconds),
                 guard=DocmindLeaseCleanupGuard(),
+                terminal_guard=DocmindLeaseCleanupGuard(terminal_only=True),
             )
+            _recover_missing_parser_workspaces(adapter)
+            _reschedule_ingestion_retries()
         except Exception as error:
             raise DocmindIngestionError("DOCMIND_INGESTION_REAPER_UNAVAILABLE") from error
         _last_reap_monotonic = now_monotonic
@@ -254,6 +259,12 @@ def maintain_parser_workspaces(*, force: bool = False) -> None:
             report.invalid,
             report.cleanup_failed,
         )
+
+
+def _reschedule_ingestion_retries() -> None:
+    from api.apps.services.docmind_reconciliation_service import reschedule_retryable_jobs
+
+    reschedule_retryable_jobs()
 
 
 def configure_parser_input_adapter(adapter: TemporaryParserInputAdapter | None) -> None:
@@ -327,6 +338,9 @@ class DocmindCleanupRecorder:
             error_code = "DOCMIND_INGESTION_CLEANUP_FAILED"
         if record.state == "CLEANUP_FAILED":
             target = "CLEANUP_FAILED"
+        elif record.state == "COMPLETE" and job.lifecycle_state in {"PARSING", "INDEXING"} and record.outcome == "REAPED":
+            target = "FAILED"
+            error_code = "DOCMIND_INGESTION_INTERRUPTED"
         elif (
             record.state == "COMPLETE"
             and job.lifecycle_state == "CLEANUP_FAILED"
@@ -344,7 +358,7 @@ class DocmindCleanupRecorder:
                 DocmindIngestionJob.update(
                     lifecycle_state=target,
                     cleanup_state=states[record.state],
-                    error_code=error_code if record.state == "CLEANUP_FAILED" else job.error_code,
+                    error_code=error_code if record.state == "CLEANUP_FAILED" or error_code == "DOCMIND_INGESTION_INTERRUPTED" else job.error_code,
                     error_message=None,
                     **_updates(),
                 )
@@ -365,6 +379,9 @@ class DocmindCleanupRecorder:
 class DocmindLeaseCleanupGuard:
     """Hold the job-row transaction while an abandoned workspace is removed."""
 
+    def __init__(self, *, terminal_only: bool = False):
+        self.terminal_only = terminal_only
+
     @contextmanager
     def claim_cleanup(
         self,
@@ -372,6 +389,7 @@ class DocmindLeaseCleanupGuard:
         job_id: str,
         version_id: str,
         fencing_token: int,
+        protected_consumer: bool = False,
     ) -> Iterator[bool]:
         database = DocmindIngestionJob._meta.database
         with database.atomic():
@@ -392,7 +410,55 @@ class DocmindLeaseCleanupGuard:
                 and job.lease_expires_at > _now()
                 and job.lifecycle_state in {"DECRYPTING", "PARSING", "INDEXING"}
             )
-            yield bool(matches and not lease_live)
+            terminal_safe = bool(
+                matches
+                and (
+                    (
+                        job.lifecycle_state in {"FAILED", "CLEANUP_FAILED"}
+                        and job.host_cleanup_state == "COMPLETE"
+                        and (protected_consumer or job.lease_expires_at is None or job.lease_expires_at <= _now())
+                    )
+                    or (
+                        job.lifecycle_state in {"PARSING", "INDEXING"}
+                        and job.lease_expires_at is not None
+                        and job.lease_expires_at <= _now()
+                    )
+                )
+            )
+            yield bool(terminal_safe if self.terminal_only else matches and not lease_live)
+
+
+def _recover_missing_parser_workspaces(adapter) -> None:
+    """Certify only an expired failed attempt whose exact tmpfs path is absent.
+
+    A tmpfs reset can lose its manifest before the COMPLETE receipt reaches DB.
+    Do not infer deletion from a global empty-directory count or clear active
+    attempts. The persisted token digest identifies the exact owned directory.
+    """
+    absent = getattr(adapter, "workspace_is_absent", None)
+    if not callable(absent):
+        return
+    jobs = DocmindIngestionJob.select().where(
+        DocmindIngestionJob.lifecycle_state.in_({"FAILED", "CLEANUP_FAILED", "PARSING", "INDEXING"})
+        & DocmindIngestionJob.cleanup_state.in_({"PENDING", "IN_PROGRESS", "FAILED"})
+        & DocmindIngestionJob.parser_input_token_hash.is_null(False)
+        & (DocmindIngestionJob.lease_expires_at <= _now())
+    ).order_by(DocmindIngestionJob.update_time.asc()).limit(100)
+    for candidate in jobs:
+        with DocmindLeaseCleanupGuard(terminal_only=True).claim_cleanup(
+            job_id=candidate.id, version_id=candidate.version_id, fencing_token=candidate.fencing_token,
+        ) as claimed:
+            if not claimed:
+                continue
+            job = DocmindIngestionJob.get_by_id(candidate.id)
+            if not job.parser_input_token_hash or not absent(job.parser_input_token_hash):
+                continue
+            from rag.parser_platform.ephemeral_input import CleanupRecord
+
+            DocmindCleanupRecorder().record_cleanup(CleanupRecord(
+                job_id=job.id, version_id=job.version_id, fencing_token=job.fencing_token,
+                state="COMPLETE", outcome="REAPED", error_code=None, recorded_at=_now().isoformat(),
+            ))
 
 
 def _now() -> datetime:
@@ -778,8 +844,11 @@ def request_cloud_source_reprocess(
     return {"job_id": job.id, "version_id": version.id, "fencing_token": new_fence}
 
 
-def _claimable_jobs(now: datetime):
-    return (
+def _claimable_jobs(
+    now: datetime, allowed_formats: tuple[str, ...] | None = None, *, skip_retries: bool = False,
+    claim_source_id: str | None = None, claim_job_id: str | None = None,
+):
+    query = (
         DocmindIngestionJob.select()
         .join(DocmindSourceDocument, on=(DocmindIngestionJob.source_document_id == DocmindSourceDocument.id))
         .switch(DocmindIngestionJob)
@@ -803,45 +872,67 @@ def _claimable_jobs(now: datetime):
             )
         )
     )
+    if skip_retries:
+        query = query.where(DocmindIngestionJob.lifecycle_state == "DISCOVERED")
+    if claim_source_id is not None:
+        query = query.where(DocmindIngestionJob.source_id == claim_source_id)
+    if claim_job_id is not None:
+        query = query.where(DocmindIngestionJob.id == claim_job_id)
+    if allowed_formats is not None:
+        format_match = None
+        for extension in allowed_formats:
+            suffix_match = DocmindSourceDocument.relative_path.endswith(f".{extension}")
+            format_match = suffix_match if format_match is None else format_match | suffix_match
+        query = query.where(
+            format_match
+            & ~DocmindSourceDocument.relative_path.startswith("~$")
+            & ~DocmindSourceDocument.relative_path.contains("/~$")
+        )
+    return query
 
 
-def _surya_required_before_claim(relative_path: str) -> bool:
-    from rag.parser_platform.config import ParserPlatformConfig
-
-    config = ParserPlatformConfig.from_env()
-    if not config.enabled or not config.integration_ready:
-        return False
-    suffix = Path(relative_path).suffix.lower()
-    return (suffix == ".pdf" and config.pdf_enabled) or (
-        suffix in {".doc", ".docx", ".xlsx", ".pptx"} and config.office_enabled
-    )
-
-
-def _surya_ready_before_claim() -> bool:
-    from rag.parser_platform.config import ParserPlatformConfig
-
-    url = ParserPlatformConfig.from_env().surya_service_url
-    try:
-        response = requests.get(f"{url}/ready", timeout=2)
-        return response.status_code == 200 and response.json().get("status") == "ready"
-    except (requests.RequestException, ValueError, AttributeError):
-        return False
-
-
-def claim_next(worker_id: str, *, lease_seconds: int = 300) -> WorkerDecryptRequest | None:
+def claim_next(
+    worker_id: str, *, lease_seconds: int = 300, allowed_formats: list[str] | None = None,
+    skip_retries: bool = False, claim_source_id: str | None = None,
+    claim_job_id: str | None = None,
+) -> WorkerDecryptRequest | None:
     worker_id = _valid_identifier(worker_id, max_length=128)
     if lease_seconds < 30 or lease_seconds > 1800:
         raise DocmindIngestionError("DOCMIND_INGESTION_LEASE_INVALID")
-    candidate = _claimable_jobs(_now()).order_by(DocmindIngestionJob.create_time.asc()).first()
+    if not isinstance(skip_retries, bool):
+        raise DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+    if claim_source_id is not None:
+        if not isinstance(claim_source_id, str):
+            raise DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        claim_source_id = _valid_identifier(claim_source_id, max_length=64)
+    formats = None
+    if allowed_formats is not None:
+        if (not isinstance(allowed_formats, list) or not allowed_formats
+            or len(allowed_formats) > len(OPT_IN_CLAIM_FORMATS)
+            or any(not isinstance(value, str) or value not in OPT_IN_CLAIM_FORMATS for value in allowed_formats)
+            or len(set(allowed_formats)) != len(allowed_formats)):
+            raise DocmindIngestionError("DOCMIND_INGESTION_CLAIM_FORMATS_INVALID")
+        formats = tuple(allowed_formats)
+    if claim_job_id is not None:
+        if (not isinstance(claim_job_id, str)
+            or re.fullmatch(r"[0-9a-f]{32}", claim_job_id) is None
+            or claim_source_id != "dept-2-e2e"
+            or formats != ("pptx",)
+            or not skip_retries):
+            raise DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+    candidate = _claimable_jobs(
+        _now(), formats, skip_retries=skip_retries, claim_source_id=claim_source_id,
+        claim_job_id=claim_job_id,
+    ).order_by(DocmindIngestionJob.create_time.asc()).first()
     if candidate is None:
-        return None
-    source_document = DocmindSourceDocument.get_by_id(candidate.source_document_id)
-    if _surya_required_before_claim(source_document.relative_path) and not _surya_ready_before_claim():
         return None
     database = DocmindIngestionJob._meta.database
     now = _now()
     with database.atomic():
-        job = _claimable_jobs(now).where(DocmindIngestionJob.id == candidate.id).first()
+        job = _claimable_jobs(
+            now, formats, skip_retries=skip_retries, claim_source_id=claim_source_id,
+            claim_job_id=claim_job_id,
+        ).where(DocmindIngestionJob.id == candidate.id).first()
         if job is None:
             return None
         next_fence = job.fencing_token + 1
@@ -977,6 +1068,7 @@ def process_decrypted_artifact(
     plaintext: bytes,
     plaintext_sha256: str,
     plaintext_size: int,
+    max_pdf_pages: int | None = None,
     adapter: TemporaryParserInputAdapter,
     runner: TemporaryParserInputRunner,
     activator: AtomicIndexActivator,
@@ -988,8 +1080,15 @@ def process_decrypted_artifact(
     """
 
     leased_job = _leased_job(job_id, worker_id, fencing_token)
+    if max_pdf_pages is not None:
+        if isinstance(max_pdf_pages, bool) or not isinstance(max_pdf_pages, int) or not 1 <= max_pdf_pages <= 30:
+            raise DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        source_document = DocmindSourceDocument.get_by_id(leased_job.source_document_id)
+        if leased_job.source_id != "dept-2-e2e" or not source_document.relative_path.lower().endswith(".pdf"):
+            raise DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
     deadline_at = leased_job.lease_expires_at - timedelta(seconds=10)
     receipt_holder: list[ParserInputReceipt] = []
+    observed_pdf_pages: int | None = None
 
     class CapturingAdapter:
         def accept(self, **kwargs):
@@ -1026,6 +1125,7 @@ def process_decrypted_artifact(
             version_id=version_id,
             workspace=workspace,
             deadline_at=deadline_at,
+            max_pdf_pages=max_pdf_pages,
         )
         _recycle_database_connection_after_long_stage()
         if _now() >= deadline_at:
@@ -1056,6 +1156,9 @@ def process_decrypted_artifact(
         adapter.consume(receipt, parse_and_activate)
     except Exception as error:
         code = getattr(error, "code", None)
+        if code == "PARSER_PDF_PAGE_LIMIT_EXCEEDED" and max_pdf_pages is not None:
+            observed_pdf_pages = getattr(error, "pdf_page_count", None)
+            code = "DOCMIND_PDF_PAGE_CAP_EXCEEDED"
         if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9_]{1,64}", code):
             code = "DOCMIND_INGESTION_PIPELINE_FAILED"
         cleanup_failed = code in {"EPHEMERAL_CLEANUP_FAILED", "EPHEMERAL_CLEANUP_STATE_FAILED"}
@@ -1063,7 +1166,8 @@ def process_decrypted_artifact(
             lifecycle_state="CLEANUP_FAILED" if cleanup_failed else "FAILED",
             cleanup_state="FAILED" if cleanup_failed else "COMPLETE",
             error_code=code,
-            error_message=None,
+            error_message=(f"pdf_page_count={observed_pdf_pages};max_pdf_pages={max_pdf_pages}"
+                           if code == "DOCMIND_PDF_PAGE_CAP_EXCEEDED" else None),
             **_updates(),
         ).where(
             (DocmindIngestionJob.id == job_id)
@@ -1160,6 +1264,39 @@ def activate_indexed_version(
         ).execute()
 
 
+def prepare_host_cleanup(
+    job_id: str, *, worker_id: str, version_id: str, fencing_token: int
+) -> dict:
+    """Describe one expired, server-cleaned attempt for signed host cleanup."""
+    job = DocmindIngestionJob.get_or_none(
+        DocmindIngestionJob.id == _valid_identifier(job_id, max_length=32)
+    )
+    if (
+        job is None
+        or job.lease_owner != _valid_identifier(worker_id, max_length=128)
+        or job.version_id != _valid_identifier(version_id, max_length=32)
+        or job.fencing_token != fencing_token
+    ):
+        raise DocmindIngestionError("DOCMIND_INGESTION_STALE_CLEANUP")
+    if (
+        job.lifecycle_state != "CLEANUP"
+        or job.cleanup_state != "COMPLETE"
+        or job.host_cleanup_state != "PENDING"
+        or job.lease_expires_at is None
+        or job.lease_expires_at > _now()
+        or job.plaintext_size is None
+        or job.plaintext_size <= 0
+    ):
+        raise DocmindIngestionError("DOCMIND_INGESTION_CLEANUP_STATE_INVALID")
+    return {
+        "job_id": job.id,
+        "version_id": job.version_id,
+        "fencing_token": job.fencing_token,
+        "lease_expires_at": job.lease_expires_at.isoformat(timespec="seconds") + "Z",
+        "plaintext_size": job.plaintext_size,
+    }
+
+
 def record_worker_status(
     job_id: str,
     *,
@@ -1202,12 +1339,13 @@ def record_worker_status(
         host_cleanup_state = "PENDING"
     else:
         raise DocmindIngestionError("DOCMIND_INGESTION_STATUS_INVALID")
+    preserve_pdf_cap = job.error_code == "DOCMIND_PDF_PAGE_CAP_EXCEEDED" and host_cleanup_state == "COMPLETE"
     with DocmindIngestionJob._meta.database.atomic():
         changed = DocmindIngestionJob.update(
             lifecycle_state=target,
             host_cleanup_state=host_cleanup_state,
-            error_code=error_code,
-            error_message=None,
+            error_code=job.error_code if preserve_pdf_cap else error_code,
+            error_message=job.error_message if preserve_pdf_cap else None,
             **_updates(),
         ).where(
             (DocmindIngestionJob.id == job.id)

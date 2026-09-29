@@ -111,30 +111,14 @@ def apply_source_chunks_document_availability(chunks: List[Dict[str, Any]]) -> N
 
 async def chunk_parser_platform_document(document, *, config, parser_config: dict, source_bytes: bytes) -> list[dict]:
     """Route normalized parser results through their format's chunk policy."""
-    from rag.parser_platform import CommonToStandardChunkAdapter, SourceFormat
+    from rag.parser_platform.office_chunker import OfficeChunker
 
-    if document.source_format == SourceFormat.PDF:
-        from rag.parser_platform.surya_hybrid_chunker import SuryaHybridChunker
-
-        return await asyncio.to_thread(
-            SuryaHybridChunker(
-                tokenizer_path=config.surya_chunk_tokenizer_path,
-                min_tokens=config.surya_chunk_min_tokens,
-                max_tokens=config.surya_chunk_max_tokens,
-            ).chunk,
-            document,
-            source_bytes=source_bytes,
-        )
-    if document.source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
-        from rag.parser_platform.office_chunker import OfficeChunker
-
-        return await asyncio.to_thread(
-            OfficeChunker().chunk,
-            document,
-            parser_config=parser_config,
-            source_bytes=source_bytes,
-        )
-    return CommonToStandardChunkAdapter().adapt(document)
+    if document.parser_name != "kordoc":
+        raise ValueError("search parser must be Kordoc")
+    return await asyncio.to_thread(
+        OfficeChunker().chunk, document,
+        parser_config=parser_config, source_bytes=source_bytes,
+    )
 
 
 class ChunkService:
@@ -216,14 +200,7 @@ class ChunkService:
 
             def parser_progress(phase: str, details: dict) -> None:
                 lifecycle = {
-                    "PARSING_SURYA": "PARSING_SURYA",
-                    "validating_source": "PARSING_SURYA",
-                    "parsing_pages": "PARSING_SURYA",
-                    "waiting_page_barrier": "PARSING_SURYA",
-                    "normalizing_document": "NORMALIZING",
-                    "PARSING_DOCLING": "PARSING_DOCLING",
-                    "PARSING_RHWP": "PARSING_RHWP",
-                    "OCR_MEDIA_SURYA": "OCR_MEDIA_SURYA",
+                    "PARSING_KORDOC": "PARSING_KORDOC",
                     "NORMALIZING": "NORMALIZING",
                 }.get(phase)
                 if lifecycle:

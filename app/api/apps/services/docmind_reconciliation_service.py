@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import Protocol
@@ -23,6 +25,7 @@ from api.db.db_models import (
     DocmindSourceScanBatch,
     DocmindSourceScanEntry,
     DocmindSourceVersion,
+    Document,
 )
 from common.docmind_source_path import (
     logical_path_identity,
@@ -35,6 +38,10 @@ SEOUL = ZoneInfo("Asia/Seoul")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RETRYABLE_STATES = frozenset({"FAILED", "CLEANUP_FAILED"})
+PRESERVED_FAILURE_CODES = frozenset({
+    "PARSER_PLATFORM_HWP_DISABLED", "PARSER_SOURCE_TYPE_MISMATCH", "PARSER_DOCLING_UNAVAILABLE",
+    "PARSER_MEDIA_OCR_FAILED", "DOCMIND_PDF_PAGE_CAP_EXCEEDED",
+})
 
 
 class DocmindReconciliationError(RuntimeError):
@@ -98,8 +105,17 @@ class ProductionSearchRetentionAdapter:
     def _retain_parser_runs(document_ids: list[str], retained_until: datetime) -> None:
         from api.db.db_models import ParserRun
 
-        ParserRun.update(retained_until=retained_until).where(
-            ParserRun.doc_id.in_(document_ids)
+        if os.getenv("DOCMIND_RETENTION_PURGE_ENABLED") != "1":
+            ParserRun.update(retained_until=retained_until).where(
+                ParserRun.doc_id.in_(document_ids)
+            ).execute()
+            return
+        # Existing deadlines are never shortened. Newly excluded active runs
+        # have no deadline; their search artifacts receive a 24-hour deadline.
+        artifact_deadline = min(retained_until, _now() + timedelta(hours=24))
+        ParserRun.update(retained_until=artifact_deadline).where(
+            (ParserRun.doc_id.in_(document_ids))
+            & (ParserRun.retained_until.is_null(True))
         ).execute()
 
 
@@ -109,6 +125,7 @@ class ScanDocument:
     ciphertext_sha256: str
     size: int
     mtime_ns: int
+    host_file_id: str | None = None
 
 
 def _discovered_document_payload(
@@ -158,7 +175,7 @@ def _provision_discovered_document(
     if folder is None:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_DEFAULT_FOLDER_INVALID")
     suffix = relative_path.rsplit(".", 1)[-1].lower() if "." in relative_path else ""
-    if suffix not in {"pdf", "doc", "docx", "xlsx", "pptx", "hwp", "hwpx"}:
+    if suffix not in {"pdf", "doc", "docx", "xls", "xlsx", "pptx", "hwp", "hwpx"}:
         return None
 
     from api.db.db_models import Document, Knowledgebase
@@ -357,6 +374,107 @@ def _scan(source_id: str, scan_id: str, worker_id: str) -> DocmindSourceScan:
     return scan
 
 
+def _observe_scan_entry(scan, project, mapping, entry, observation_handler=None) -> None:
+    active = (
+        DocmindSourceVersion.get_or_none(DocmindSourceVersion.id == mapping.active_source_version_id)
+        if mapping.active_source_version_id else None
+    )
+    # A move or timestamp-only touch does not change the encrypted content.
+    if (active is not None and active.lifecycle_state == "ACTIVE"
+        and active.search_cleanup_complete
+        and active.ciphertext_sha256 == entry.ciphertext_sha256
+        and active.ciphertext_size == entry.ciphertext_size
+        and mapping.observed_ciphertext_sha256 == entry.ciphertext_sha256
+        and mapping.observed_size == entry.ciphertext_size):
+        state = "INDEX_REUSED"
+    else:
+        if observation_handler is None:
+            from api.apps.services import docmind_ingestion_service
+            observation_handler = docmind_ingestion_service.observe_source_version
+        observation = observation_handler(
+            project.tenant_id, project_id=project.id, source_id=scan.source_id,
+            document_id=mapping.document_id, relative_path=mapping.relative_path,
+            ciphertext_sha256=entry.ciphertext_sha256,
+            ciphertext_size=entry.ciphertext_size,
+            source_mtime_ns=entry.source_mtime_ns,
+        )
+        state = observation["state"]
+    DocmindSourceScanEntry.update(
+        source_document_id=mapping.id, reconciliation_state=state, **_updates()
+    ).where(DocmindSourceScanEntry.id == entry.id).execute()
+
+
+def _resolve_host_file_entries(scan, *, observation_handler=None, provisioner=None) -> None:
+    """Resolve moves only after every batch is present and before absent paths are deleted."""
+    entries = list(DocmindSourceScanEntry.select().where(
+        DocmindSourceScanEntry.source_scan_id == scan.id
+    ))
+    identities = [item.host_file_identity for item in entries if item.host_file_identity]
+    identity_counts = Counter(identities)
+    observed_paths = {item.relative_path_hash for item in entries}
+    source = DocmindSource.get_by_id(scan.source_id)
+    project = DocmindProject.get_by_id(scan.project_id)
+    with DocmindSourceDocument._meta.database.atomic():
+        for entry in entries:
+            identity = entry.host_file_identity
+            if not identity:
+                continue
+            mapping = DocmindSourceDocument.get_or_none(
+                (DocmindSourceDocument.project_id == scan.project_id)
+                & (DocmindSourceDocument.source_id == scan.source_id)
+                & (DocmindSourceDocument.relative_path_hash == entry.relative_path_hash)
+                & (DocmindSourceDocument.deleted_at.is_null(True))
+            )
+            if mapping is None and identity_counts[identity] == 1:
+                candidates = list(DocmindSourceDocument.select().where(
+                    (DocmindSourceDocument.project_id == scan.project_id)
+                    & (DocmindSourceDocument.source_id == scan.source_id)
+                    & (DocmindSourceDocument.host_file_identity == identity)
+                    & (DocmindSourceDocument.deleted_at.is_null(True))
+                ).limit(2))
+                if len(candidates) == 1 and candidates[0].relative_path_hash not in observed_paths:
+                    candidate = candidates[0]
+                    active = (DocmindSourceVersion.get_or_none(
+                        DocmindSourceVersion.id == candidate.active_source_version_id
+                    ) if candidate.active_source_version_id else None)
+                    pending = DocmindIngestionJob.select().where(
+                        (DocmindIngestionJob.source_document_id == candidate.id)
+                        & ~(DocmindIngestionJob.lifecycle_state.in_(["COMPLETE", "DELETED"]))
+                    ).exists()
+                    old_suffix = candidate.relative_path.rsplit(".", 1)[-1].lower()
+                    new_suffix = entry.relative_path.rsplit(".", 1)[-1].lower()
+                    if (active is not None and active.lifecycle_state == "ACTIVE"
+                        and active.search_cleanup_complete and not pending
+                        and old_suffix == new_suffix):
+                        changed = DocmindSourceDocument.update(
+                            relative_path=entry.relative_path,
+                            relative_path_hash=entry.relative_path_hash,
+                            generation=candidate.generation + 1,
+                            **_updates(),
+                        ).where(
+                            (DocmindSourceDocument.id == candidate.id)
+                            & (DocmindSourceDocument.generation == candidate.generation)
+                            & (DocmindSourceDocument.deleted_at.is_null(True))
+                        ).execute()
+                        if changed != 1:
+                            raise DocmindReconciliationError("DOCMIND_RECONCILIATION_MOVE_CONFLICT")
+                        Document.update(name=entry.relative_path.rsplit("/", 1)[-1]).where(
+                            Document.id == candidate.document_id
+                        ).execute()
+                        mapping = DocmindSourceDocument.get_by_id(candidate.id)
+            if mapping is None and source.default_folder_id:
+                provision = provisioner or _provision_discovered_document
+                mapping = provision(source=source, project=project, relative_path=entry.relative_path)
+            if mapping is None:
+                continue
+            if identity_counts[identity] == 1:
+                DocmindSourceDocument.update(host_file_identity=identity, **_updates()).where(
+                    DocmindSourceDocument.id == mapping.id
+                ).execute()
+            if entry.source_document_id is None:
+                _observe_scan_entry(scan, project, mapping, entry, observation_handler)
+
+
 def record_scan_batch(
     *,
     source_id: str,
@@ -387,11 +505,18 @@ def record_scan_batch(
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
     normalized: list[ScanDocument] = []
     for raw in documents:
-        if not isinstance(raw, dict) or set(raw) != {"relative_path", "ciphertext_sha256", "size", "mtime_ns"}:
+        required = {"relative_path", "ciphertext_sha256", "size", "mtime_ns"}
+        if not isinstance(raw, dict) or not required <= set(raw) or set(raw) - required - {"host_file_id"}:
             raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
         if not isinstance(raw["size"], int) or not isinstance(raw["mtime_ns"], int):
             raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
         if raw["size"] < 0 or raw["mtime_ns"] < 0:
+            raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
+        host_file_id = raw.get("host_file_id")
+        if host_file_id is not None and (
+            not isinstance(host_file_id, str)
+            or re.fullmatch(r"[0-9a-f]{8}:[0-9a-f]{16}:[0-9a-f]{16}", host_file_id) is None
+        ):
             raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
         normalized.append(
             ScanDocument(
@@ -399,6 +524,7 @@ def record_scan_batch(
                 _hash(raw["ciphertext_sha256"]),
                 raw["size"],
                 raw["mtime_ns"],
+                host_file_id,
             )
         )
     canonical = [document.__dict__ for document in normalized]
@@ -433,7 +559,7 @@ def record_scan_batch(
                 & (DocmindSourceDocument.source_id == scan.source_id)
                 & (DocmindSourceDocument.relative_path_hash == path_hash)
             )
-            if mapping is None and source.default_folder_id:
+            if mapping is None and source.default_folder_id and document.host_file_id is None:
                 provision = provisioner or _provision_discovered_document
                 mapping = provision(
                     source=source,
@@ -449,6 +575,7 @@ def record_scan_batch(
                     ciphertext_sha256=document.ciphertext_sha256,
                     ciphertext_size=document.size,
                     source_mtime_ns=document.mtime_ns,
+                    host_file_identity=(f"{scan.worker_id}:{document.host_file_id}" if document.host_file_id else None),
                     source_document_id=mapping.id if mapping else None,
                     reconciliation_state="MATCHED" if mapping else "ACTION_REQUIRED_MAPPING",
                     **_timestamps(),
@@ -456,23 +583,7 @@ def record_scan_batch(
             except IntegrityError as error:
                 raise DocmindReconciliationError("DOCMIND_RECONCILIATION_DUPLICATE_PATH") from error
             if mapping is not None and mapping.deleted_at is None:
-                if observation_handler is None:
-                    from api.apps.services import docmind_ingestion_service
-
-                    observation_handler = docmind_ingestion_service.observe_source_version
-                observation = observation_handler(
-                    project.tenant_id,
-                    project_id=project.id,
-                    source_id=scan.source_id,
-                    document_id=mapping.document_id,
-                    relative_path=mapping.relative_path,
-                    ciphertext_sha256=document.ciphertext_sha256,
-                    ciphertext_size=document.size,
-                    source_mtime_ns=document.mtime_ns,
-                )
-                DocmindSourceScanEntry.update(
-                    reconciliation_state=observation["state"], **_updates()
-                ).where(DocmindSourceScanEntry.id == entry.id).execute()
+                _observe_scan_entry(scan, project, mapping, entry, observation_handler)
         changed = (
             DocmindSourceScan.update(
                 received_batch_count=scan.received_batch_count + 1,
@@ -596,6 +707,8 @@ def complete_scan(
     batch_count: int,
     adapter: SearchRetentionAdapter | None = None,
     occurred_at: datetime | None = None,
+    observation_handler=None,
+    provisioner=None,
 ) -> dict:
     scan = _scan(source_id, scan_id, worker_id)
     if scan.lifecycle_state == "COMPLETE":
@@ -632,6 +745,9 @@ def complete_scan(
     ):
         fail_scan(source_id=source_id, scan_id=scan_id, worker_id=worker_id, error_code="SCAN_INCOMPLETE")
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_COMPLETION_MISMATCH")
+    _resolve_host_file_entries(
+        scan, observation_handler=observation_handler, provisioner=provisioner
+    )
     observed_hashes = {
         value
         for (value,) in DocmindSourceScanEntry.select(
@@ -866,6 +982,15 @@ def reschedule_retryable_jobs(
             (DocmindIngestionJob.lifecycle_state.in_(RETRYABLE_STATES))
             & (DocmindSourceDocument.deleted_at.is_null(True))
             & (DocmindSource.enabled == True)
+            & (
+                DocmindIngestionJob.error_code.is_null(True)
+                | ~DocmindIngestionJob.error_code.in_(PRESERVED_FAILURE_CODES)
+            )
+            & (
+                (DocmindIngestionJob.source_id != "dept-2-e2e")
+                | DocmindIngestionJob.error_code.is_null(True)
+                | (DocmindIngestionJob.error_code != "DOCMIND_INGESTION_PIPELINE_TIMEOUT")
+            )
         )
     )
     if source_id is not None:
@@ -921,6 +1046,8 @@ def reschedule_retryable_jobs(
                 (DocmindIngestionJob.id == job.id)
                 & (DocmindIngestionJob.fencing_token == job.fencing_token)
                 & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
+                & (DocmindIngestionJob.cleanup_state == job.cleanup_state)
+                & (DocmindIngestionJob.host_cleanup_state == job.host_cleanup_state)
             )
             .execute()
         )

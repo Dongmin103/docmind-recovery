@@ -342,6 +342,64 @@ def test_other_tenant_cannot_read_source_projection(source_db):
     assert projection.load("tenant-other") is None
 
 
+@pytest.mark.parametrize("state,expected", [
+    ("DISCOVERED", "PENDING"), ("WAITING_SOURCE_STABLE", "PENDING"),
+    ("DECRYPTING", "PROCESSING"), ("PARSING", "PROCESSING"), ("INDEXING", "PROCESSING"),
+    ("FAILED", "FAILED"), ("CLEANUP", "CLEANUP"), ("CLEANUP_FAILED", "CLEANUP_FAILED"),
+    ("RETRY_WAIT", "RETRY_WAIT"), ("ACTION_REQUIRED", "ACTION_REQUIRED"),
+    ("COMPLETE", "FAILED"),
+])
+def test_unindexed_document_displays_actual_latest_job_state(source_db, state, expected):
+    mapping = _mapping("dept", "moved-xlsx", "nested/sample.xlsx", complete=False)
+    DocmindIngestionJob.create(
+        id="moved-job", project_id="project-1", source_id="dept",
+        source_document_id=mapping.id, document_id=mapping.document_id,
+        version_id="unindexed-version", idempotency_key="moved-job-key",
+        lifecycle_state=state, host_cleanup_state="COMPLETE", cleanup_state="PENDING",
+        error_code="HOST_WORKER_ERROR" if state == "FAILED" else None,
+        error_message="private path and document body must never appear",
+    )
+    tree = projection.load("tenant-1")
+    node = next(row for row in tree.hierarchy_nodes if row.get("document_id") == "moved-xlsx")
+    assert node["index_state"] == expected
+    assert node["index_cleanup_state"] == "PENDING"
+    assert node["searchable"] is False
+    assert node["index_error_code"] == ("HOST_WORKER_ERROR" if state == "FAILED" else None)
+    assert "error_message" not in node
+    assert "private" not in str(node)
+    assert tree.document_paths == {}
+
+
+def test_failed_update_status_preserves_previous_searchable_version(source_db):
+    mapping = _mapping("home", "doc-a", "guide.doc", complete=True)
+    DocmindIngestionJob.update(create_time=1).execute()
+    DocmindIngestionJob.create(
+        id="new-job", project_id="project-1", source_id="home",
+        source_document_id=mapping.id, document_id=mapping.document_id,
+        version_id="new-version", idempotency_key="new-key", create_time=2,
+        lifecycle_state="FAILED", error_code="SECRET_UPPERCASE_TOKEN",
+        cleanup_state="COMPLETE", host_cleanup_state="COMPLETE",
+    )
+    tree = projection.load("tenant-1")
+    node = next(row for row in tree.hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_state"] == "FAILED"
+    assert node["searchable"] is True
+    assert node["index_error_code"] == "DOCMIND_INGESTION_FAILED"
+    assert tree.document_version_ids == {"doc-a": "version-doc-a"}
+
+
+def test_status_ignores_job_from_wrong_source_or_document(source_db):
+    mapping = _mapping("home", "doc-a", "guide.doc", complete=True)
+    DocmindIngestionJob.create(
+        id="foreign-job", project_id="project-1", source_id="dept",
+        source_document_id=mapping.id, document_id=mapping.document_id,
+        version_id="foreign-version", idempotency_key="foreign-key",
+        lifecycle_state="FAILED", create_time=9999999999999,
+    )
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_state"] == "INDEXED"
+
+
 def test_empty_registered_sources_remain_distinct_from_absent_project(source_db):
     tree = projection.load("tenant-1")
     assert tree is not None

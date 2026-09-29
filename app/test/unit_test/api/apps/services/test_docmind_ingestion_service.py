@@ -2,11 +2,13 @@ import hashlib
 import importlib.util
 import sys
 from datetime import timedelta
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from peewee import SqliteDatabase
+from pypdf import PdfWriter
 
 from api.db.db_models import (
     DocmindFolder,
@@ -176,6 +178,232 @@ def test_claim_contains_only_logical_source_contract_and_fences_reclaim(ingestio
         service._leased_job(first.job_id, "windows-worker-1", 1)
 
 
+def test_opt_in_claim_formats_skip_hwp_and_office_lock_files(ingestion_db):
+    def enqueue(document_id, relative_path, fingerprint):
+        service.register_source_document_mapping(
+            "tenant-1", project_id="project-1", source_id="home-test1",
+            document_id=document_id, folder_id="folder-1", relative_path=relative_path,
+        )
+        observation = dict(
+            source_id="home-test1", document_id=document_id, relative_path=relative_path,
+            ciphertext_sha256=fingerprint * 64, ciphertext_size=123, source_mtime_ns=456,
+        )
+        service.observe_source_version("tenant-1", **observation)
+        return service.observe_source_version("tenant-1", **observation)["job_id"]
+
+    hwp_id = enqueue("document-hwp", "reports/old.hwp", "b")
+    lock_id = enqueue("document-lock", "reports/~$draft.pptx", "c")
+    pdf_id = enqueue("document-pdf", "reports/valid.pdf", "d")
+    claimed = service.claim_next("windows-worker-1", allowed_formats=["pdf", "doc", "docx", "xlsx", "pptx"])
+    assert claimed is not None and claimed.job_id == pdf_id
+    for job_id in (hwp_id, lock_id):
+        job = DocmindIngestionJob.get_by_id(job_id)
+        assert (job.lifecycle_state, job.attempt, job.lease_owner) == ("DISCOVERED", 0, None)
+
+
+@pytest.mark.parametrize("formats", [[], ["hwp"], ["PDF"], ["pdf", "pdf"], "pdf"])
+def test_opt_in_claim_formats_reject_invalid_values(ingestion_db, formats):
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_CLAIM_FORMATS_INVALID"):
+        service.claim_next("windows-worker-1", allowed_formats=formats)
+
+
+def test_opt_in_claim_rechecks_format_before_lease(ingestion_db, monkeypatch):
+    _observe()
+    discovered = _observe()
+
+    original_now = service._now
+    calls = 0
+
+    def change_path_between_selection_and_lease():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            DocmindSourceDocument.update(relative_path="reports/document.hwp").execute()
+        return original_now()
+
+    monkeypatch.setattr(service, "_now", change_path_between_selection_and_lease)
+    assert service.claim_next("windows-worker-1", allowed_formats=["pdf"]) is None
+    job = DocmindIngestionJob.get_by_id(discovered["job_id"])
+    assert (job.lifecycle_state, job.attempt, job.lease_owner) == ("DISCOVERED", 0, None)
+
+
+def test_opt_in_skip_retries_only_claims_fresh_jobs(ingestion_db):
+    _observe()
+    discovered = _observe()
+    DocmindIngestionJob.update(lifecycle_state="RETRY_WAIT").where(
+        DocmindIngestionJob.id == discovered["job_id"]
+    ).execute()
+    assert service.claim_next("windows-worker-1", skip_retries=True) is None
+    job = DocmindIngestionJob.get_by_id(discovered["job_id"])
+    assert (job.lifecycle_state, job.attempt, job.lease_owner) == ("RETRY_WAIT", 0, None)
+    assert service.claim_next("windows-worker-1") is not None
+
+
+def test_opt_in_skip_retries_rechecks_state_before_lease(ingestion_db, monkeypatch):
+    _observe()
+    discovered = _observe()
+
+    original_now = service._now
+    calls = 0
+
+    def schedule_retry_between_selection_and_lease():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            DocmindIngestionJob.update(lifecycle_state="RETRY_WAIT").where(
+                DocmindIngestionJob.id == discovered["job_id"]
+            ).execute()
+        return original_now()
+
+    monkeypatch.setattr(service, "_now", schedule_retry_between_selection_and_lease)
+    assert service.claim_next("windows-worker-1", skip_retries=True) is None
+    job = DocmindIngestionJob.get_by_id(discovered["job_id"])
+    assert (job.lifecycle_state, job.attempt, job.lease_owner) == ("RETRY_WAIT", 0, None)
+
+
+def test_opt_in_skip_retries_rejects_non_boolean(ingestion_db):
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_REQUEST_INVALID"):
+        service.claim_next("windows-worker-1", skip_retries="true")
+
+
+def test_opt_in_claim_source_only_leases_requested_source(ingestion_db):
+    _observe()
+    home_job = _observe()["job_id"]
+    DocmindSource.create(id="dept-2", project_id="project-1", display_name="DEPT_2")
+    service.register_source_document_mapping(
+        "tenant-1", project_id="project-1", source_id="dept-2",
+        document_id="document-dept-2", folder_id="folder-1", relative_path="reports/dept.xlsx",
+    )
+    observation = dict(
+        source_id="dept-2", document_id="document-dept-2", relative_path="reports/dept.xlsx",
+        ciphertext_sha256="e" * 64, ciphertext_size=42, source_mtime_ns=456,
+    )
+    service.observe_source_version("tenant-1", **observation)
+    dept_job = service.observe_source_version("tenant-1", **observation)["job_id"]
+    claimed = service.claim_next("windows-worker-1", claim_source_id="dept-2")
+    assert claimed is not None and claimed.job_id == dept_job
+    assert DocmindIngestionJob.get_by_id(home_job).lifecycle_state == "DISCOVERED"
+
+
+def test_opt_in_claim_source_rechecks_before_lease(ingestion_db, monkeypatch):
+    _observe()
+    discovered = _observe()
+
+    original_now = service._now
+    calls = 0
+
+    def change_source_between_selection_and_lease():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            DocmindIngestionJob.update(source_id="other-source").where(
+                DocmindIngestionJob.id == discovered["job_id"]
+            ).execute()
+        return original_now()
+
+    monkeypatch.setattr(service, "_now", change_source_between_selection_and_lease)
+    assert service.claim_next("windows-worker-1", claim_source_id="home-test1") is None
+    job = DocmindIngestionJob.get_by_id(discovered["job_id"])
+    assert (job.lifecycle_state, job.attempt, job.lease_owner) == ("DISCOVERED", 0, None)
+
+
+@pytest.mark.parametrize("source_id", [123, "", "../dept-2"])
+def test_opt_in_claim_source_rejects_invalid_values(ingestion_db, source_id):
+    with pytest.raises(service.DocmindIngestionError):
+        service.claim_next("windows-worker-1", claim_source_id=source_id)
+
+
+def _enqueue_dept2_pptx(document_id: str, filename: str, fingerprint: str) -> str:
+    if DocmindSource.get_or_none(DocmindSource.id == "dept-2-e2e") is None:
+        DocmindSource.create(id="dept-2-e2e", project_id="project-1", display_name="DEPT_2")
+    relative_path = f"reports/{filename}"
+    service.register_source_document_mapping(
+        "tenant-1", project_id="project-1", source_id="dept-2-e2e",
+        document_id=document_id, folder_id="folder-1", relative_path=relative_path,
+    )
+    observation = dict(
+        source_id="dept-2-e2e", document_id=document_id, relative_path=relative_path,
+        ciphertext_sha256=fingerprint * 64, ciphertext_size=123, source_mtime_ns=456,
+    )
+    service.observe_source_version("tenant-1", **observation)
+    return service.observe_source_version("tenant-1", **observation)["job_id"]
+
+
+def test_exact_dept2_pptx_claim_selects_only_requested_job(ingestion_db):
+    older = _enqueue_dept2_pptx("document-old", "older.pptx", "b")
+    target = _enqueue_dept2_pptx("document-target", "target.pptx", "c")
+    claimed = service.claim_next(
+        "windows-worker-1", claim_source_id="dept-2-e2e", allowed_formats=["pptx"],
+        skip_retries=True, claim_job_id=target,
+    )
+    assert claimed is not None and claimed.job_id == target
+    assert DocmindIngestionJob.get_by_id(older).lifecycle_state == "DISCOVERED"
+
+
+def test_exact_dept2_pptx_claim_rechecks_job_state_before_lease(ingestion_db, monkeypatch):
+    target = _enqueue_dept2_pptx("document-target", "target.pptx", "b")
+
+    original_now = service._now
+    calls = 0
+
+    def schedule_retry_between_selection_and_lease():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            DocmindIngestionJob.update(lifecycle_state="RETRY_WAIT").where(
+                DocmindIngestionJob.id == target
+            ).execute()
+        return original_now()
+
+    monkeypatch.setattr(service, "_now", schedule_retry_between_selection_and_lease)
+    assert service.claim_next(
+        "windows-worker-1", claim_source_id="dept-2-e2e", allowed_formats=["pptx"],
+        skip_retries=True, claim_job_id=target,
+    ) is None
+    job = DocmindIngestionJob.get_by_id(target)
+    assert (job.lifecycle_state, job.attempt, job.lease_owner) == ("RETRY_WAIT", 0, None)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"claim_job_id": "not-a-job"},
+    {"claim_source_id": "home-test1"},
+    {"allowed_formats": ["pdf"]},
+    {"skip_retries": False},
+])
+def test_exact_dept2_pptx_claim_rejects_broader_or_invalid_scope(ingestion_db, overrides):
+    target = _enqueue_dept2_pptx("document-target", "target.pptx", "b")
+    options = dict(claim_source_id="dept-2-e2e", allowed_formats=["pptx"],
+                   skip_retries=True, claim_job_id=target)
+    options.update(overrides)
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_REQUEST_INVALID"):
+        service.claim_next("windows-worker-1", **options)
+    assert DocmindIngestionJob.get_by_id(target).lifecycle_state == "DISCOVERED"
+
+
+def test_prepare_host_cleanup_requires_expired_exact_server_cleaned_attempt(ingestion_db):
+    _, claimed = _enqueue_and_claim()
+    DocmindIngestionJob.update(
+        lifecycle_state="CLEANUP", cleanup_state="COMPLETE",
+        host_cleanup_state="PENDING", plaintext_size=42,
+    ).where(DocmindIngestionJob.id == claimed.job_id).execute()
+    kwargs = dict(
+        worker_id="windows-worker-1", version_id=claimed.version_id,
+        fencing_token=claimed.fencing_token,
+    )
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_CLEANUP_STATE_INVALID"):
+        service.prepare_host_cleanup(claimed.job_id, **kwargs)
+    DocmindIngestionJob.update(lease_expires_at=service._now() - timedelta(seconds=1)).where(
+        DocmindIngestionJob.id == claimed.job_id
+    ).execute()
+    prepared = service.prepare_host_cleanup(claimed.job_id, **kwargs)
+    assert prepared["job_id"] == claimed.job_id
+    assert prepared["version_id"] == claimed.version_id
+    assert prepared["fencing_token"] == claimed.fencing_token
+    assert prepared["plaintext_size"] == 42
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_STALE_CLEANUP"):
+        service.prepare_host_cleanup(claimed.job_id, **{**kwargs, "fencing_token": 2})
+
+
 def test_claim_respects_retry_not_before_and_never_claims_deleted_source(ingestion_db):
     _observe()
     discovered = _observe()
@@ -195,58 +423,22 @@ def test_claim_respects_retry_not_before_and_never_claims_deleted_source(ingesti
 
 
 @pytest.mark.parametrize("suffix", ["pdf", "doc"])
-def test_claim_waits_for_surya_before_consuming_lease(ingestion_db, monkeypatch, suffix):
+def test_claim_does_not_depend_on_retired_parser_readiness(ingestion_db, monkeypatch, suffix):
     monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "true")
     monkeypatch.setenv("PARSER_PLATFORM_INTEGRATION_READY", "true")
-    monkeypatch.setenv("PARSER_PLATFORM_SURYA_URL", "http://surya-test:8091")
     path = f"reports/document.{suffix}"
     DocmindSourceDocument.update(relative_path=path).execute()
     _observe(relative_path=path)
     discovered = _observe(relative_path=path)
-    probes = []
-
-    def not_ready(url, *, timeout):
-        probes.append((url, timeout, ingestion_db.in_transaction()))
-        return SimpleNamespace(status_code=503, json=lambda: {"status": "starting"})
-
-    monkeypatch.setattr(service.requests, "get", not_ready)
-    assert service.claim_next("windows-worker-1", lease_seconds=1800) is None
-    job = DocmindIngestionJob.get_by_id(discovered["job_id"])
-    assert (job.lifecycle_state, job.attempt, job.fencing_token, job.lease_owner, job.lease_expires_at) == (
-        "DISCOVERED", 0, 0, None, None,
-    )
-    assert probes == [("http://surya-test:8091/ready", 2, False)]
-
-    monkeypatch.setattr(
-        service.requests,
-        "get",
-        lambda url, *, timeout: SimpleNamespace(status_code=200, json=lambda: {"status": "ready"}),
-    )
     claim = service.claim_next("windows-worker-1", lease_seconds=1800)
     assert claim is not None and claim.job_id == discovered["job_id"]
     assert DocmindIngestionJob.get_by_id(claim.job_id).attempt == 1
 
 
-def test_claim_treats_unreachable_surya_as_not_ready(ingestion_db, monkeypatch):
-    monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "true")
-    monkeypatch.setenv("PARSER_PLATFORM_INTEGRATION_READY", "true")
-    _observe()
-    discovered = _observe()
-
-    def unavailable(*args, **kwargs):
-        raise service.requests.ConnectionError("unavailable")
-
-    monkeypatch.setattr(service.requests, "get", unavailable)
-    assert service.claim_next("windows-worker-1", lease_seconds=1800) is None
-    assert DocmindIngestionJob.get_by_id(discovered["job_id"]).attempt == 0
-
-
-def test_claim_does_not_probe_surya_when_parser_platform_disabled(ingestion_db, monkeypatch):
+def test_claim_when_parser_platform_disabled(ingestion_db, monkeypatch):
     monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "false")
     _observe()
     discovered = _observe()
-    monkeypatch.setattr(service.requests, "get", lambda *args, **kwargs: pytest.fail("unexpected probe"))
-
     claim = service.claim_next("windows-worker-1", lease_seconds=300)
 
     assert claim is not None and claim.job_id == discovered["job_id"]
@@ -256,8 +448,6 @@ def test_claim_does_not_decrypt_job_from_disabled_source(ingestion_db, monkeypat
     _observe()
     discovered = _observe()
     DocmindSource.update(enabled=False).execute()
-    monkeypatch.setattr(service.requests, "get", lambda *args, **kwargs: pytest.fail("unexpected probe"))
-
     assert service.claim_next("windows-worker-1", lease_seconds=300) is None
     assert DocmindIngestionJob.get_by_id(discovered["job_id"]).attempt == 0
 
@@ -684,6 +874,97 @@ def test_bounded_runner_consumes_token_activates_and_waits_for_host_cleanup(inge
     assert DocmindIngestionJob.get().lifecycle_state == "COMPLETE"
 
 
+def test_pdf_page_cap_from_kordoc_preserves_page_count_after_host_cleanup(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    DocmindSource.create(id="dept-2-e2e", project_id="project-1", display_name="DEPT_2")
+    DocmindSourceDocument.update(source_id="dept-2-e2e").execute()
+    DocmindIngestionJob.update(source_id="dept-2-e2e").execute()
+    writer = PdfWriter()
+    for _ in range(31):
+        writer.add_blank_page(width=72, height=72)
+    output = BytesIO()
+    writer.write(output)
+    plaintext = output.getvalue()
+    events = []
+
+    class Adapter:
+        def accept(self, **_kwargs):
+            events.append("accepted")
+            return service.ParserInputReceipt("ephemeral-pdf-cap")
+
+        def consume(self, receipt, callback):
+            try:
+                return callback(SimpleNamespace(input_path=Path("synthetic.pdf")))
+            finally:
+                events.append(("cleaned", receipt.token))
+
+    def parser_rejects_page_cap(**kwargs):
+        events.append(("page_cap", kwargs["max_pdf_pages"]))
+        raise service.DocmindIngestionError("PARSER_PDF_PAGE_LIMIT_EXCEEDED", pdf_page_count=31)
+
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_PDF_PAGE_CAP_EXCEEDED"):
+        service.process_decrypted_artifact(
+            claim.job_id,
+            worker_id="windows-worker-1",
+            version_id=claim.version_id,
+            fencing_token=claim.fencing_token,
+            plaintext=plaintext,
+            plaintext_sha256=hashlib.sha256(plaintext).hexdigest(),
+            plaintext_size=len(plaintext),
+            max_pdf_pages=30,
+            adapter=Adapter(),
+            runner=SimpleNamespace(run=parser_rejects_page_cap),
+            activator=SimpleNamespace(activate=lambda **_kwargs: pytest.fail("activation called")),
+        )
+    assert events == ["accepted", ("page_cap", 30), ("cleaned", "ephemeral-pdf-cap")]
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert (job.lifecycle_state, job.cleanup_state, job.host_cleanup_state) == ("FAILED", "COMPLETE", "PENDING")
+    assert (job.error_code, job.error_message) == (
+        "DOCMIND_PDF_PAGE_CAP_EXCEEDED", "pdf_page_count=31;max_pdf_pages=30",
+    )
+    service.record_worker_status(
+        claim.job_id,
+        worker_id="windows-worker-1",
+        version_id=claim.version_id,
+        fencing_token=claim.fencing_token,
+        status="FAILED",
+        error_code="HOST_WORKER_ERROR",
+    )
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert (job.lifecycle_state, job.cleanup_state, job.host_cleanup_state) == ("FAILED", "COMPLETE", "COMPLETE")
+    assert (job.error_code, job.error_message) == (
+        "DOCMIND_PDF_PAGE_CAP_EXCEEDED", "pdf_page_count=31;max_pdf_pages=30",
+    )
+
+
+@pytest.mark.parametrize("source_id,relative_path", [
+    ("home-test1", "reports/document.pdf"),
+    ("dept-2-e2e", "reports/document.pptx"),
+])
+def test_pdf_page_cap_rejects_other_source_or_format_before_accept(ingestion_db, source_id, relative_path):
+    _, claim = _enqueue_and_claim()
+    if source_id == "dept-2-e2e":
+        DocmindSource.create(id="dept-2-e2e", project_id="project-1", display_name="DEPT_2")
+        DocmindSourceDocument.update(source_id="dept-2-e2e").execute()
+        DocmindIngestionJob.update(source_id="dept-2-e2e").execute()
+    DocmindSourceDocument.update(relative_path=relative_path).execute()
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_REQUEST_INVALID"):
+        service.process_decrypted_artifact(
+            claim.job_id,
+            worker_id="windows-worker-1",
+            version_id=claim.version_id,
+            fencing_token=claim.fencing_token,
+            plaintext=b"synthetic",
+            plaintext_sha256=hashlib.sha256(b"synthetic").hexdigest(),
+            plaintext_size=9,
+            max_pdf_pages=30,
+            adapter=SimpleNamespace(accept=lambda **_kwargs: pytest.fail("artifact accepted")),
+            runner=SimpleNamespace(run=lambda **_kwargs: pytest.fail("runner called")),
+            activator=SimpleNamespace(activate=lambda **_kwargs: pytest.fail("activation called")),
+        )
+    assert DocmindIngestionJob.get_by_id(claim.job_id).lifecycle_state == "DECRYPTING"
+
+
 def test_long_stage_connection_recycle_closes_and_reconnects_before_activation():
     events = []
 
@@ -850,7 +1131,7 @@ def test_runtime_maintenance_is_rate_limited_and_lease_guarded(monkeypatch):
     calls = []
 
     class Adapter:
-        def reap(self, *, stale_after, guard):
+        def reap(self, *, stale_after, guard, terminal_guard):
             calls.append((stale_after, guard))
             return SimpleNamespace(
                 examined=2,
@@ -863,6 +1144,8 @@ def test_runtime_maintenance_is_rate_limited_and_lease_guarded(monkeypatch):
 
     monkeypatch.setattr(service, "_parser_input_adapter", Adapter())
     monkeypatch.setattr(service, "_last_reap_monotonic", float("-inf"))
+    retries = []
+    monkeypatch.setattr(service, "_reschedule_ingestion_retries", lambda: retries.append(True))
     monkeypatch.setenv("DOCMIND_EPHEMERAL_REAPER_TTL_SECONDS", "60")
     monkeypatch.setenv("DOCMIND_EPHEMERAL_REAPER_INTERVAL_SECONDS", "300")
 
@@ -872,3 +1155,86 @@ def test_runtime_maintenance_is_rate_limited_and_lease_guarded(monkeypatch):
     assert len(calls) == 1
     assert calls[0][0].total_seconds() == 60
     assert isinstance(calls[0][1], service.DocmindLeaseCleanupGuard)
+    assert retries == [True]
+
+
+@pytest.mark.parametrize("state", ["FAILED", "CLEANUP_FAILED", "PARSING", "INDEXING"])
+def test_missing_expired_workspace_recovers_only_scoped_cleanup(ingestion_db, state):
+    _, claim = _enqueue_and_claim()
+    DocmindIngestionJob.update(
+        lifecycle_state=state, host_cleanup_state="COMPLETE", cleanup_state="PENDING",
+        parser_input_token_hash="a" * 64, lease_expires_at=service._now() - timedelta(seconds=1),
+    ).execute()
+    checked = []
+    adapter = SimpleNamespace(workspace_is_absent=lambda digest: checked.append(digest) or True)
+    service._recover_missing_parser_workspaces(adapter)
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert checked == ["a" * 64]
+    assert job.cleanup_state == "COMPLETE"
+    assert job.lifecycle_state == "FAILED"
+    assert job.fencing_token == claim.fencing_token
+    if state in {"PARSING", "INDEXING"}:
+        assert job.error_code == "DOCMIND_INGESTION_INTERRUPTED"
+
+
+@pytest.mark.parametrize("remaining", [True, False])
+def test_missing_workspace_recovery_retains_live_lease_or_existing_files(ingestion_db, remaining):
+    _, claim = _enqueue_and_claim()
+    DocmindIngestionJob.update(
+        lifecycle_state="FAILED", host_cleanup_state="COMPLETE", cleanup_state="PENDING",
+        parser_input_token_hash="a" * 64,
+        lease_expires_at=service._now() + timedelta(seconds=-1 if remaining else 60),
+    ).execute()
+    service._recover_missing_parser_workspaces(SimpleNamespace(workspace_is_absent=lambda digest: not remaining))
+    assert DocmindIngestionJob.get_by_id(claim.job_id).cleanup_state == "PENDING"
+
+
+def test_terminal_reap_guard_preserves_fence_host_cleanup_and_old_protocol_live_lease(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    DocmindIngestionJob.update(lifecycle_state="FAILED", host_cleanup_state="COMPLETE").execute()
+    guard = service.DocmindLeaseCleanupGuard(terminal_only=True)
+    args = {"job_id": claim.job_id, "version_id": claim.version_id, "fencing_token": claim.fencing_token}
+    with guard.claim_cleanup(**args) as allowed:
+        assert not allowed  # old manifests lack a demonstrable OS-held lock
+    with guard.claim_cleanup(**args, protected_consumer=True) as allowed:
+        assert allowed
+    with guard.claim_cleanup(**{**args, "fencing_token": claim.fencing_token + 1}, protected_consumer=True) as allowed:
+        assert not allowed
+    DocmindIngestionJob.update(host_cleanup_state="PENDING").execute()
+    with guard.claim_cleanup(**args, protected_consumer=True) as allowed:
+        assert not allowed
+
+
+def test_routine_maintenance_reaps_then_schedules_bounded_retry(ingestion_db, tmp_path, monkeypatch):
+    from rag.parser_platform.ephemeral_input import EphemeralParserInputAdapter
+
+    retry_path = SERVICE_PATH.with_name("docmind_reconciliation_service.py")
+    retry_spec = importlib.util.spec_from_file_location("recovery_retry_under_test", retry_path)
+    retry_service = importlib.util.module_from_spec(retry_spec)
+    sys.modules[retry_spec.name] = retry_service
+    retry_spec.loader.exec_module(retry_service)
+    _, claim = _enqueue_and_claim()
+    adapter = EphemeralParserInputAdapter(tmp_path / "ephemeral", recorder=service.DocmindCleanupRecorder())
+    receipt = adapter.accept(
+        job_id=claim.job_id, document_id=claim.document_id, version_id=claim.version_id,
+        fencing_token=claim.fencing_token, filename="synthetic.pdf", plaintext=b"synthetic",
+        plaintext_sha256=hashlib.sha256(b"synthetic").hexdigest(),
+    )
+    DocmindIngestionJob.update(
+        lifecycle_state="FAILED", host_cleanup_state="COMPLETE",
+        parser_input_token_hash=hashlib.sha256(receipt.token.encode()).hexdigest(),
+    ).execute()
+    monkeypatch.setattr(service, "_parser_input_adapter", adapter)
+    monkeypatch.setattr(service, "_last_reap_monotonic", float("-inf"))
+    monkeypatch.setattr(service, "_reschedule_ingestion_retries", retry_service.reschedule_retryable_jobs)
+    service.maintain_parser_workspaces()
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert job.lifecycle_state == "RETRY_WAIT"
+    assert job.retry_not_before > service._now()
+    assert job.fencing_token == claim.fencing_token + 1
+    assert job.parser_input_token_hash is None
+    assert list(adapter.root.iterdir()) == []
+    assert service.claim_next("windows-worker-1") is None
+    previous_retry = job.retry_not_before
+    service.maintain_parser_workspaces(force=True)
+    assert DocmindIngestionJob.get_by_id(job.id).retry_not_before == previous_retry

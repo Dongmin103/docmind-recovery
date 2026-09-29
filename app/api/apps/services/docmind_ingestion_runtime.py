@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -34,6 +35,7 @@ SUPPORTED_FORMATS = {
     ".pdf": SourceFormat.PDF,
     ".doc": SourceFormat.DOC,
     ".docx": SourceFormat.DOCX,
+    ".xls": SourceFormat.XLS,
     ".xlsx": SourceFormat.XLSX,
     ".pptx": SourceFormat.PPTX,
     ".hwp": SourceFormat.HWP,
@@ -100,6 +102,7 @@ class ProductionTemporaryParserInputRunner:
         version_id: str,
         workspace: TemporaryParserWorkspace,
         deadline_at: datetime,
+        max_pdf_pages: int | None = None,
     ) -> ParserStageResult:
         remaining = (deadline_at - _now()).total_seconds()
         if remaining <= 0:
@@ -115,6 +118,8 @@ class ProductionTemporaryParserInputRunner:
             ParserPlatformConfig.from_env(),
             artifact_root=str(workspace.derived_root / "parser-artifacts"),
         )
+        if source_format == SourceFormat.PDF and max_pdf_pages is not None:
+            config = replace(config, max_pdf_pages=min(config.max_pdf_pages, max_pdf_pages))
         prepared = self._prepare_run(document.to_dict(), source_bytes, source_format, config)
         try:
             remaining = (deadline_at - _now()).total_seconds()
@@ -145,7 +150,11 @@ class ProductionTemporaryParserInputRunner:
                 )
             except Exception as cleanup_error:
                 raise DocmindIngestionError("DOCMIND_INGESTION_STAGING_CLEANUP_FAILED") from cleanup_error
-            raise DocmindIngestionError(code) from error
+            observed_pages = None
+            if code == "PARSER_PDF_PAGE_LIMIT_EXCEEDED":
+                detail = getattr(error, "detail", None)
+                observed_pages = int(detail) if isinstance(detail, str) and detail.isdecimal() else None
+            raise DocmindIngestionError(code, pdf_page_count=observed_pages) from error
 
     def _run_prepared(
         self,
@@ -267,23 +276,23 @@ class ProductionTemporaryParserInputRunner:
     @staticmethod
     def _prepare_run(document: dict, source_bytes: bytes, source_format: SourceFormat, config: ParserPlatformConfig):
         if source_format == SourceFormat.PDF:
-            from rag.parser_platform.surya_pdf import count_pdf_pages
-
             normalized = normalize_pdf_source(source_bytes).content
             return ParserRunService.prepare_pdf_run(
                 document=document,
                 source_bytes=normalized,
-                expected_page_count=count_pdf_pages(normalized),
+                expected_page_count=0,
                 config=config,
                 force_new=True,
+                chunking_config=document.get("parser_config") or {},
             )
-        if source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
+        if source_format in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLS, SourceFormat.XLSX, SourceFormat.PPTX}:
             return ParserRunService.prepare_office_run(
                 document=document,
                 source_bytes=source_bytes,
                 source_format=source_format,
                 config=config,
                 force_new=True,
+                chunking_config=document.get("parser_config") or {},
             )
         return ParserRunService.prepare_hangul_run(
             document=document,
@@ -291,6 +300,7 @@ class ProductionTemporaryParserInputRunner:
             source_format=source_format,
             config=config,
             force_new=True,
+            chunking_config=document.get("parser_config") or {},
         )
 
     @staticmethod
@@ -434,6 +444,7 @@ class ProductionAtomicIndexActivator:
         )
         coordinator = ChunkSetActivationCoordinator(
             PeeweeAtomicChunkSetStore(
+                retention_seconds=(24 * 3600 if os.getenv("DOCMIND_RETENTION_PURGE_ENABLED") == "1" else 7 * 24 * 3600),
                 artifact_cleaner=DocStoreChunkSetArtifactCleaner(
                     raw_artifact_cleaner=lambda _ref: None,
                     page_artifact_cleaner=lambda _source, _parser: None,

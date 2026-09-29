@@ -27,15 +27,34 @@ from api.utils.api_utils import add_tenant_id_to_kwargs, get_error_argument_resu
 logger = logging.getLogger(__name__)
 
 
-def _claim_cloud_sync_job_in_thread(worker_id: str, lease_seconds: int):
+def _claim_cloud_sync_job_in_thread(
+    worker_id: str, lease_seconds: int, allowed_formats: list[str] | None, skip_retries: bool,
+    claim_source_id: str | None, claim_job_id: str | None,
+):
     with DocmindIngestionJob._meta.database.connection_context():
         docmind_ingestion_service.maintain_parser_workspaces()
-        return docmind_ingestion_service.claim_next(worker_id, lease_seconds=lease_seconds)
+        return docmind_ingestion_service.claim_next(
+            worker_id, lease_seconds=lease_seconds, allowed_formats=allowed_formats,
+            skip_retries=skip_retries, claim_source_id=claim_source_id,
+            claim_job_id=claim_job_id,
+        )
 
 
 def _worker_path_and_query() -> str:
     query = request.query_string.decode("ascii")
     return request.path + (f"?{query}" if query else "")
+
+
+def _artifact_page_cap(args) -> int | None:
+    if not args:
+        return None
+    values = args.getlist("max_pdf_pages")
+    if set(args) != {"max_pdf_pages"} or len(values) != 1 or not re.fullmatch(r"[1-9][0-9]?", values[0]):
+        raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+    cap = int(values[0])
+    if cap > 30:
+        raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+    return cap
 
 
 async def _authenticate_worker(body: bytes) -> str:
@@ -87,6 +106,28 @@ async def _preview_reaper_loop():
         except Exception:
             logger.exception("DocMind preview reaper failed")
         await asyncio.sleep(30)
+
+
+def _purge_retained_search_artifacts():
+    from api.apps.services import docmind_retention_service
+
+    with DocmindIngestionJob._meta.database.connection_context():
+        return docmind_retention_service.purge_expired()
+
+
+async def _retention_reaper_loop():
+    while True:
+        try:
+            await asyncio.to_thread(_purge_retained_search_artifacts)
+        except Exception:
+            logger.exception("DocMind retention reaper failed")
+        await asyncio.sleep(300)
+
+
+@app.before_serving  # noqa: F821
+async def _start_retention_reaper():
+    if os.getenv("DOCMIND_RETENTION_PURGE_ENABLED") == "1":
+        app.add_background_task(_retention_reaper_loop)  # noqa: F821
 
 
 @app.before_serving  # noqa: F821
@@ -176,15 +217,28 @@ async def claim_cloud_sync_job():
         req = await request.get_json(silent=True)
         if (
             not isinstance(req, dict)
-            or set(req) - {"worker_id", "protocol_version", "lease_seconds"}
+            or set(req) - {"worker_id", "protocol_version", "lease_seconds", "allowed_formats", "skip_retries", "claim_source_id", "claim_job_id", "single_claim"}
             or req.get("protocol_version") != 1
         ):
             raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
         worker_id = str(req.get("worker_id") or "")
         lease_seconds = req.get("lease_seconds", 300)
+        allowed_formats = req.get("allowed_formats")
+        skip_retries = req.get("skip_retries", False)
+        claim_source_id = req.get("claim_source_id")
+        claim_job_id = req.get("claim_job_id")
+        if (("claim_job_id" in req and
+             (not isinstance(claim_job_id, str) or req.get("single_claim") is not True))
+            or ("claim_job_id" not in req and "single_claim" in req)):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
         if not isinstance(lease_seconds, int):
             raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_LEASE_INVALID")
-        job = await asyncio.to_thread(_claim_cloud_sync_job_in_thread, worker_id, lease_seconds)
+        if not isinstance(skip_retries, bool):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        job = await asyncio.to_thread(
+            _claim_cloud_sync_job_in_thread, worker_id, lease_seconds, allowed_formats, skip_retries,
+            claim_source_id, claim_job_id,
+        )
         return _signed_worker_response({"job": job.to_dict() if job else None}, key_id)
     except docmind_worker_auth.WorkerAuthenticationError:
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
@@ -212,6 +266,7 @@ async def upload_cloud_sync_artifact(job_id: str):
         key_id = await _authenticate_worker(body)
         if len(body) > maximum:
             return _signed_worker_response({"error": "ARTIFACT_TOO_LARGE"}, key_id, 413)
+        max_pdf_pages = _artifact_page_cap(request.args)
         worker_id = str(request.headers.get("X-DocMind-Worker-Id") or "")
         version_id = str(request.headers.get("X-DocMind-Version-Id") or "")
         plaintext_sha256 = str(request.headers.get("X-DocMind-Plaintext-SHA256") or "").lower()
@@ -230,6 +285,7 @@ async def upload_cloud_sync_artifact(job_id: str):
             plaintext=body,
             plaintext_sha256=plaintext_sha256,
             plaintext_size=plaintext_size,
+            max_pdf_pages=max_pdf_pages,
             adapter=adapter,
             runner=runner,
             activator=activator,
@@ -241,6 +297,37 @@ async def upload_cloud_sync_artifact(job_id: str):
         return _signed_worker_response({"error": error.code}, key_id, 409)
     except Exception:
         logger.exception("DocMind host worker artifact upload failed")
+        if key_id:
+            return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+
+
+@manager.route("/cloud-sync/host-worker/jobs/<job_id>/cleanup/prepare", methods=["POST"])  # noqa: F821
+async def prepare_cloud_sync_job_cleanup(job_id: str):
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate_worker(body)
+        req = await request.get_json(silent=True)
+        if (
+            not isinstance(req, dict)
+            or set(req) != {"worker_id", "version_id", "fencing_token"}
+            or not isinstance(req["fencing_token"], int)
+        ):
+            raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID")
+        result = docmind_ingestion_service.prepare_host_cleanup(
+            job_id,
+            worker_id=str(req["worker_id"]),
+            version_id=str(req["version_id"]),
+            fencing_token=req["fencing_token"],
+        )
+        return _signed_worker_response(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+    except docmind_ingestion_service.DocmindIngestionError as error:
+        return _signed_worker_response({"error": error.code}, key_id, 409)
+    except Exception:
+        logger.exception("DocMind host cleanup preparation failed")
         if key_id:
             return _signed_worker_response({"error": "DOCMIND_INGESTION_INTERNAL_ERROR"}, key_id, 500)
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")

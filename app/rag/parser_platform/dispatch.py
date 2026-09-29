@@ -11,6 +11,7 @@ from rag.parser_platform.schemas import SourceFormat
 
 PDF_MIMES = {"application/pdf"}
 DOC_MIMES = {"application/msword", "application/vnd.ms-word"}
+XLS_MIMES = {"application/vnd.ms-excel", "application/xls"}
 OOXML_MIMES = {
     SourceFormat.DOCX: {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
     SourceFormat.XLSX: {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
@@ -75,29 +76,17 @@ class FormatDispatcher:
         if source_format is None:
             raise parser_error("PARSER_SOURCE_FORMAT_UNSUPPORTED")
 
-        if source_format in {SourceFormat.HWP, SourceFormat.HWPX}:
-            if not document_id:
-                raise parser_error("PARSER_PLATFORM_HWP_CANARY_BOOTSTRAP_REQUIRED")
-            self.config.require_hwp_queue_ready(document_id=document_id, source_format=source_format.value)
-        else:
-            self.config.require_enabled_te_mode()
-            if not self.config.format_enabled(source_format.value):
-                raise parser_error("PARSER_PLATFORM_DISABLED")
+        self.config.require_queue_ready()
+        if not self.config.format_enabled(source_format.value):
+            raise parser_error("PARSER_PLATFORM_DISABLED")
+        self._require_kordoc_size(source.content)
 
         declared = source.declared_mime.strip().lower()
         sniffed = source.sniffed_mime.strip().lower()
         if source_format == SourceFormat.PDF:
             if declared not in PDF_MIMES or sniffed not in PDF_MIMES or not source.content.startswith(b"%PDF-"):
                 raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
-            routing_scope = self.config.pdf_routing_canary_document_ids
-            if self.config.pdf_routing_enabled and (
-                not routing_scope or document_id in routing_scope
-            ):
-                reason = (
-                    "pdf_global_rule_engine" if not routing_scope else "pdf_canary_rule_engine"
-                )
-                return ParserSelection(source_format, "pdf-router", "pdf_document_route", reason)
-            return ParserSelection(source_format, "surya", "pdf_document_parse", "file_format_pdf")
+            return ParserSelection(source_format, "kordoc", "pdf_document_parse", "file_format_pdf")
 
         if source_format == SourceFormat.HWP:
             if (
@@ -106,7 +95,7 @@ class FormatDispatcher:
                 or not source.content.startswith(OLE_MAGIC)
             ):
                 raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
-            return ParserSelection(source_format, "rhwp", "hangul_document_parse", "file_format_hwp")
+            return ParserSelection(source_format, "kordoc", "hangul_document_parse", "file_format_hwp")
 
         if source_format == SourceFormat.HWPX:
             if (
@@ -116,7 +105,7 @@ class FormatDispatcher:
             ):
                 raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
             self._validate_hwpx(source.content)
-            return ParserSelection(source_format, "rhwp", "hangul_document_parse", "file_format_hwpx")
+            return ParserSelection(source_format, "kordoc", "hangul_document_parse", "file_format_hwpx")
 
         if source_format == SourceFormat.DOC:
             if (
@@ -125,13 +114,26 @@ class FormatDispatcher:
                 or not source.content.startswith(OLE_MAGIC)
             ):
                 raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
-            return ParserSelection(source_format, "docling", "office_document_parse", "file_format_doc")
+            return ParserSelection(source_format, "kordoc", "office_document_parse", "file_format_doc")
+
+        if source_format == SourceFormat.XLS:
+            if (
+                declared not in XLS_MIMES | {GENERIC_BINARY_MIME}
+                or sniffed not in XLS_MIMES | {GENERIC_BINARY_MIME}
+                or not source.content.startswith(OLE_MAGIC)
+            ):
+                raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
+            return ParserSelection(source_format, "kordoc", "office_document_parse", "file_format_xls")
 
         expected_mimes = OOXML_MIMES[source_format]
         if declared not in expected_mimes or sniffed not in expected_mimes or not source.content.startswith(b"PK"):
             raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
         self._validate_ooxml(source.content, source_format)
-        return ParserSelection(source_format, "docling", "office_document_parse", f"file_format_{source_format.value}")
+        return ParserSelection(source_format, "kordoc", "office_document_parse", f"file_format_{source_format.value}")
+
+    def _require_kordoc_size(self, content: bytes) -> None:
+        if len(content) > self.config.kordoc_max_source_bytes:
+            raise parser_error("PARSER_SOURCE_SIZE_LIMIT_EXCEEDED")
 
     def _validate_ooxml(self, content: bytes, source_format: SourceFormat) -> None:
         try:

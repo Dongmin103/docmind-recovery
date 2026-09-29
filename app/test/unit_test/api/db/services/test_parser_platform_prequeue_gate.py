@@ -7,9 +7,20 @@ from api.db.services.document_service import DocumentService
 from rag.parser_platform import ParserPlatformError, enforce_prequeue_gate
 
 
-def test_feature_flag_off_preserves_existing_queue_behavior() -> None:
-    assert enforce_prequeue_gate({"type": "pdf"}, env={}) is False
+def test_supported_format_never_falls_back_to_legacy_queue() -> None:
+    with pytest.raises(ParserPlatformError) as disabled:
+        enforce_prequeue_gate({"type": "pdf"}, env={})
+    assert disabled.value.code == "PARSER_PLATFORM_DISABLED"
     assert enforce_prequeue_gate({"type": "txt"}, env={"PARSER_PLATFORM_ENABLED": "1"}) is False
+
+    with pytest.raises(ParserPlatformError) as denied:
+        enforce_prequeue_gate({"type": "pdf"}, env={
+            "PARSER_PLATFORM_ENABLED": "1",
+            "PARSER_PLATFORM_INTEGRATION_READY": "1",
+            "PARSER_PLATFORM_KORDOC_PDF_ENABLED": "0",
+            "TE_RUN_MODE": "0",
+        })
+    assert denied.value.code == "PARSER_PLATFORM_DISABLED"
 
 
 def test_feature_flag_off_blocks_legacy_reparse_of_versioned_document() -> None:

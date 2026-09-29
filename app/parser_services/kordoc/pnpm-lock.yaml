@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  kordoc@4.15.7: 25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b
+
 importers:
 
   .:
     dependencies:
       kordoc:
         specifier: 4.15.7
-        version: 4.15.7(@types/node@26.6.3)
+        version: 4.15.7(patch_hash=25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b)(@types/node@26.6.3)
 
 packages:
 
@@ -1393,7 +1396,7 @@ snapshots:
       readable-stream: 2.3.8
       setimmediate: 1.0.5
 
-  kordoc@4.15.7(@types/node@26.6.3):
+  kordoc@4.15.7(patch_hash=25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b)(@types/node@26.6.3):
     dependencies:
       '@modelcontextprotocol/sdk': 1.30.1(zod@3.25.76)
       '@xmldom/xmldom': 0.9.12

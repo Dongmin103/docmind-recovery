@@ -1,0 +1,14 @@
+# Small local development patch image; dependencies come from the validated
+# runtime. Build the frontend before this image. No credentials are copied.
+ARG BASE_IMAGE=docmind-ragflow:preview-20260928-validated
+FROM ${BASE_IMAGE} AS ingestion-recovery-backend
+COPY api/apps/services/docmind_ingestion_service.py /ragflow/api/apps/services/docmind_ingestion_service.py
+COPY api/apps/services/docmind_reconciliation_service.py /ragflow/api/apps/services/docmind_reconciliation_service.py
+COPY api/apps/services/docmind_source_projection_service.py /ragflow/api/apps/services/docmind_source_projection_service.py
+COPY rag/parser_platform/ephemeral_input.py /ragflow/rag/parser_platform/ephemeral_input.py
+COPY scripts/verify_removed_runtime.py /ragflow/scripts/verify_removed_runtime.py
+RUN python scripts/verify_removed_runtime.py --root /ragflow
+LABEL io.docmind.ingestion-recovery="20260928"
+
+FROM ingestion-recovery-backend AS ingestion-recovery
+COPY web/dist/ /ragflow/web/dist/

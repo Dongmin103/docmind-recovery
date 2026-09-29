@@ -45,6 +45,37 @@ const Nodes: DocMindHierarchyNode[] = [
 ];
 
 describe('SourceTree', () => {
+  it.each([
+    ['PROCESSING', '인덱싱 처리 중'],
+    ['FAILED', '인덱싱 실패'],
+    ['CLEANUP', '임시 파일 정리 중'],
+    ['CLEANUP_FAILED', '임시 파일 정리 실패'],
+    ['RETRY_WAIT', '인덱싱 재시도 대기'],
+    ['ACTION_REQUIRED', '인덱싱 확인 필요'],
+  ] as const)('renders %s without calling it pending', (state, label) => {
+    render(<SourceTree nodes={[{ ...Nodes[1], index_state: state }]} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText('인덱싱 대기')).not.toBeInTheDocument();
+  });
+
+  it('shows a failed job with pending cleanup separately from searchable old content', () => {
+    render(
+      <SourceTree
+        nodes={[
+          {
+            ...Nodes[1],
+            index_state: 'FAILED',
+            index_cleanup_state: 'PENDING',
+            index_error_code: 'HOST_WORKER_ERROR',
+            searchable: true,
+          },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByText(/인덱싱 실패 · 임시 파일 정리 대기/),
+    ).toHaveTextContent('이전 색인 검색 가능 (HOST_WORKER_ERROR)');
+  });
   it('distinguishes a registered paused source from an active empty folder', () => {
     render(<SourceTree nodes={[{ ...Nodes[0], source_enabled: false }]} />);
     expect(screen.getByText('동기화 중지')).toBeInTheDocument();

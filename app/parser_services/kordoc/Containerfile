@@ -1,9 +1,17 @@
 FROM node:24.19.0-bookworm-slim@sha256:e5a8dee7bc1e6a215d224a7ef8206f7e77271bc3cabd5febf2beafac0674f174
 
 WORKDIR /opt/kordoc
+ARG LIBREOFFICE_PACKAGE_VERSION=4:7.4.7-1+deb12u14
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    "libreoffice-core=${LIBREOFFICE_PACKAGE_VERSION}" \
+    "libreoffice-writer=${LIBREOFFICE_PACKAGE_VERSION}" \
+    "libreoffice-impress=${LIBREOFFICE_PACKAGE_VERSION}" && \
+    rm -rf /var/lib/apt/lists/*
 RUN npm install --global pnpm@11.19.0
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --ignore-scripts --prod && \
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ ./patches/
+RUN echo '25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b  patches/kordoc@4.15.7.patch' | sha256sum -c - && \
+    pnpm install --frozen-lockfile --ignore-scripts --prod && \
     groupadd --gid 10001 parser && \
     useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser
 COPY src/ ./src/

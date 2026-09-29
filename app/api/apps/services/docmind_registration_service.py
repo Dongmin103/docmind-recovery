@@ -7,7 +7,7 @@ from typing import Any
 
 from peewee import IntegrityError
 
-from api.apps.services import docmind_api_service, docmind_canary_policy
+from api.apps.services import docmind_api_service
 from api.apps.services.document_api_service import reset_document_for_reparse
 from api.db.db_models import (
     DocmindAuditEvent,
@@ -357,29 +357,6 @@ def _safe_error_code(error: Exception) -> str:
     return "DOCMIND_REGISTRATION_EXECUTION_FAILED"
 
 
-def _validate_canary_registration_files(file_objects: list[Any]) -> None:
-    if not docmind_canary_policy.enabled():
-        return
-    if len(file_objects) != 1:
-        raise DocmindRegistrationError("DOCMIND_CANARY_EXACTLY_ONE_DOCUMENT")
-    file_object = file_objects[0]
-    stream = getattr(file_object, "stream", None)
-    if stream is None or not hasattr(stream, "seek"):
-        raise DocmindRegistrationError("DOCMIND_CANARY_PDF_INVALID")
-    try:
-        position = stream.tell()
-        blob = stream.read()
-        stream.seek(position)
-    except Exception as error:
-        raise DocmindRegistrationError("DOCMIND_CANARY_PDF_INVALID") from error
-    if not isinstance(blob, bytes):
-        raise DocmindRegistrationError("DOCMIND_CANARY_PDF_INVALID")
-    try:
-        docmind_canary_policy.validate_single_pdf(file_object.filename, blob)
-    except docmind_canary_policy.DocmindCanaryPolicyError as error:
-        raise DocmindRegistrationError(error.code) from error
-
-
 async def register_documents(tenant_id: str, folder_slug: str, file_objects: list[Any]) -> dict[str, Any]:
     context = _owner_context(tenant_id)
     folder = _folder(context, folder_slug)
@@ -388,38 +365,11 @@ async def register_documents(tenant_id: str, folder_slug: str, file_objects: lis
     if any(file_object is None or not getattr(file_object, "filename", "") for file_object in file_objects):
         raise DocmindRegistrationError("DOCMIND_REGISTRATION_FILE_INVALID")
 
-    _validate_canary_registration_files(file_objects)
-
     results: list[dict[str, Any]] = []
     for file_object in file_objects:
         document_id = get_uuid()
         registration = _create_attempt(context, folder, document_id, tenant_id)
         try:
-            from pathlib import Path
-
-            from rag.parser_platform.config import ParserPlatformConfig
-
-            suffix = Path(file_object.filename).suffix.lower()
-            hwp_config = ParserPlatformConfig.from_env()
-            if suffix in {".hwp", ".hwpx"} and hwp_config.hwp_registration_mode == "canary":
-                registration = _transition(
-                    registration,
-                    "FAILED",
-                    actor_id=tenant_id,
-                    error_code="PARSER_PLATFORM_HWP_CANARY_BOOTSTRAP_REQUIRED",
-                    error_message=(
-                        "먼저 RAGFlow upload-only로 문서를 등록해 ID를 확인한 뒤 canary 설정을 적용하고 "
-                        "수동 분석을 시작하세요."
-                    ),
-                )
-                results.append(
-                    _public_registration(
-                        registration,
-                        dataset_id=context.project.dataset_id,
-                        folder_slug=folder.slug,
-                    )
-                )
-                continue
             identified_file = _IdentifiedFile(document_id, file_object)
             errors, uploaded = await thread_pool_exec(
                 FileService.upload_document,

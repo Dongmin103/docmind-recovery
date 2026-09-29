@@ -7,19 +7,23 @@ import pytest
 from api.db.services import parser_run_service, task_service
 from api.db.services.document_service import DocumentService
 from rag.parser_platform.schemas import SourceFormat
+from test.unit_test.api.db.services.test_parser_platform_office_queue import QueueDocument, QueueTask, queue_database
 
 
 @pytest.mark.parametrize("source_format", [SourceFormat.HWP, SourceFormat.HWPX])
-def test_hwp_queues_one_run_scoped_task_with_common_gate_off_and_without_legacy_predelete(
+def test_hwp_queues_one_run_scoped_task_without_legacy_predelete(
     monkeypatch,
+    queue_database,
     source_format: SourceFormat,
 ) -> None:
     calls = {"inserted": None, "deleted_tasks": 0, "deleted_chunks": 0, "reused": 0, "queued": 0, "prepared": None}
-    prepared = SimpleNamespace(parse_run_id="a" * 32, chunk_set_id="b" * 32)
+    prepared = SimpleNamespace(parse_run_id="a" * 32, chunk_set_id="b" * 32, config_fingerprint="config")
     source_bytes = b"ordinary-unprotected-fixture"
     document_id = "c" * 32
 
-    monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "0")
+    QueueDocument.create(id=document_id, name=f"ordinary.{source_format.value}")
+    monkeypatch.setenv("PARSER_PLATFORM_ENABLED", "1")
+    monkeypatch.setenv("PARSER_PLATFORM_INTEGRATION_READY", "1")
     monkeypatch.setenv("PARSER_PLATFORM_HWP_ENABLED", "1")
     monkeypatch.setenv("PARSER_PLATFORM_HWP_INTEGRATION_READY", "1")
     monkeypatch.setenv("PARSER_PLATFORM_HWP_REGISTRATION_MODE", "canary")
@@ -45,8 +49,7 @@ def test_hwp_queues_one_run_scoped_task_with_common_gate_off_and_without_legacy_
         "docStoreConn",
         SimpleNamespace(delete=lambda *args, **kwargs: calls.__setitem__("deleted_chunks", calls["deleted_chunks"] + 1)),
     )
-    monkeypatch.setattr(task_service, "bulk_insert_into_db", lambda model, rows, replace: calls.__setitem__("inserted", list(rows)))
-    monkeypatch.setattr(task_service, "seed_doc_chunking_counter", lambda doc_id, count: count == 1)
+    monkeypatch.setattr(task_service, "seed_doc_chunking_counter", lambda doc_id, count, **kwargs: count == 1)
     monkeypatch.setattr(task_service.REDIS_CONN, "queue_product", lambda *args, **kwargs: calls.__setitem__("queued", calls["queued"] + 1) or True)
 
     task_service.queue_tasks(
@@ -64,9 +67,9 @@ def test_hwp_queues_one_run_scoped_task_with_common_gate_off_and_without_legacy_
         0,
     )
 
-    assert len(calls["inserted"]) == 1
-    assert calls["inserted"][0]["parse_run_id"] == prepared.parse_run_id
-    assert calls["inserted"][0]["chunk_set_id"] == prepared.chunk_set_id
+    assert QueueTask.select().count() == 1
+    assert QueueTask.get().parse_run_id == prepared.parse_run_id
+    assert QueueTask.get().chunk_set_id == prepared.chunk_set_id
     assert calls["prepared"]["source_format"] == source_format
     assert calls["prepared"]["source_bytes"] == source_bytes
     assert calls["deleted_tasks"] == calls["deleted_chunks"] == calls["reused"] == 0

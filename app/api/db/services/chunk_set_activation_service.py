@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from typing import Protocol
@@ -151,6 +152,8 @@ class PeeweeAtomicChunkSetStore:
             document = Document.get_or_none(Document.id == request.document_id)
             if run is None or document is None:
                 raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="document or run missing")
+            if document.status != "1":
+                raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="document is inactive")
             if run.doc_id != document.id or run.chunk_set_id != request.chunk_set_id:
                 raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="run identity mismatch")
             if run.lifecycle != "ACTIVATING":
@@ -165,8 +168,14 @@ class PeeweeAtomicChunkSetStore:
                 raise parser_error("CHUNK_SET_ACTIVATION_INCOMPLETE", detail="persisted counters differ")
             if document.active_chunk_set_id != request.expected_current_chunk_set_id:
                 raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="active pointer changed")
+            if document.requested_parse_run_id and document.requested_parse_run_id != request.parse_run_id:
+                raise parser_error("CHUNK_SET_ACTIVATION_CONFLICT", detail="newer parse run requested")
 
-            condition = Document.id == document.id
+            condition = (Document.id == document.id) & (Document.status == "1")
+            condition &= (
+                (Document.requested_parse_run_id == request.parse_run_id)
+                | Document.requested_parse_run_id.is_null(True)
+            )
             if request.expected_current_chunk_set_id is None:
                 condition &= Document.active_chunk_set_id.is_null(True)
             else:
@@ -235,7 +244,7 @@ class PeeweeAtomicChunkSetStore:
             target = ParserRun.get_or_none(
                 (ParserRun.doc_id == document_id) & (ParserRun.chunk_set_id == target_chunk_set_id)
             )
-            if document is None or target is None or target.lifecycle != "RETAINED":
+            if document is None or document.status != "1" or target is None or target.lifecycle != "RETAINED":
                 raise parser_error("CHUNK_SET_ROLLBACK_TARGET_INVALID")
             if target.retained_until is None or target.retained_until < now:
                 raise parser_error("CHUNK_SET_ROLLBACK_TARGET_INVALID", detail="retention expired")
@@ -253,7 +262,7 @@ class PeeweeAtomicChunkSetStore:
                     progress_msg="",
                     run="0",
                 )
-                .where((Document.id == document_id) & (Document.active_chunk_set_id == current))
+                .where((Document.id == document_id) & (Document.status == "1") & (Document.active_chunk_set_id == current))
                 .execute()
             )
             if updated != 1:
@@ -294,12 +303,15 @@ class PeeweeAtomicChunkSetStore:
             else retained_before.astimezone(UTC)
         )
         legacy_update_before_ms = int(retained_before_utc.timestamp() * 1000)
+        eligible = ParserRun.lifecycle.in_(("RETAINED", "FAILED_RETRYABLE", "FAILED_TERMINAL"))
+        if os.getenv("DOCMIND_RETENTION_PURGE_ENABLED") == "1":
+            eligible &= Document.source_type != "docmind_cloud"
         candidates = list(
             ParserRun.select(ParserRun, Document.kb_id, Knowledgebase.tenant_id)
             .join(Document, on=(ParserRun.doc_id == Document.id))
             .join(Knowledgebase, JOIN.INNER, on=(Document.kb_id == Knowledgebase.id))
             .where(
-                (ParserRun.lifecycle.in_(("RETAINED", "FAILED_RETRYABLE", "FAILED_TERMINAL")))
+                eligible
                 & (
                     ((ParserRun.retained_until.is_null(False)) & (ParserRun.retained_until <= retained_before))
                     | (

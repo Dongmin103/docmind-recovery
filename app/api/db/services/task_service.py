@@ -16,13 +16,15 @@
 import logging
 import os
 import random
+from contextlib import nullcontext
+from copy import deepcopy
 from datetime import datetime
 
 import xxhash
-from peewee import JOIN
+from peewee import JOIN, SqliteDatabase
 
 from api.db import FileType
-from api.db.db_models import DB, Document, File, File2Document, Knowledgebase, Task, Tenant
+from api.db.db_models import DB, Document, File, File2Document, Knowledgebase, ParserRun, Task, Tenant
 from api.db.db_utils import bulk_insert_into_db
 from api.db.joint_services.tenant_model_service import get_composite_model_name_by_id
 from api.db.services.common_service import CommonService
@@ -42,25 +44,31 @@ TASK_MAX_LOG_LENGTH = int(os.environ.get("TASK_MAX_LOG_LENGTH", 3000))  # TEXT M
 DOC_CHUNKING_COUNTER_TTL_SECONDS = 7 * 24 * 3600
 
 
-def _doc_chunking_pending_key(doc_id: str) -> str:
-    return f"doc:chunking_pending:{doc_id}"
+class _TaskClaimConflict(Exception):
+    pass
 
 
-def _doc_chunking_aborted_key(doc_id: str) -> str:
-    return f"doc:chunking_aborted:{doc_id}"
+def _doc_chunking_pending_key(doc_id: str, parse_run_id: str | None = None) -> str:
+    return f"doc:chunking_pending:{doc_id}" + (f":{parse_run_id}" if parse_run_id else "")
+
+
+def _doc_chunking_aborted_key(doc_id: str, parse_run_id: str | None = None) -> str:
+    return f"doc:chunking_aborted:{doc_id}" + (f":{parse_run_id}" if parse_run_id else "")
 
 
 def _doc_chunking_done_key(task_id: str) -> str:
     return f"doc:chunking_done:{task_id}"
 
 
-def seed_doc_chunking_counter(doc_id: str, pending_count: int) -> bool:
+def seed_doc_chunking_counter(doc_id: str, pending_count: int, *, parse_run_id: str | None = None) -> bool:
     if not doc_id or pending_count <= 0:
         return False
     try:
         REDIS_CONN.delete(_doc_chunking_aborted_key(doc_id))
+        if parse_run_id:
+            REDIS_CONN.delete(_doc_chunking_aborted_key(doc_id, parse_run_id))
         return REDIS_CONN.set(
-            _doc_chunking_pending_key(doc_id),
+            _doc_chunking_pending_key(doc_id, parse_run_id),
             str(pending_count),
             exp=DOC_CHUNKING_COUNTER_TTL_SECONDS,
         )
@@ -69,22 +77,22 @@ def seed_doc_chunking_counter(doc_id: str, pending_count: int) -> bool:
         return False
 
 
-def clear_doc_chunking_counter(doc_id: str) -> None:
+def clear_doc_chunking_counter(doc_id: str, *, parse_run_id: str | None = None) -> None:
     if not doc_id:
         return
     try:
-        REDIS_CONN.delete(_doc_chunking_pending_key(doc_id))
+        REDIS_CONN.delete(_doc_chunking_pending_key(doc_id, parse_run_id))
     except Exception:
         logging.exception("Failed to clear chunking counter for doc %s", doc_id)
 
 
-def abort_doc_chunking_counter(doc_id: str) -> None:
+def abort_doc_chunking_counter(doc_id: str, *, parse_run_id: str | None = None) -> None:
     if not doc_id:
         return
     try:
-        REDIS_CONN.delete(_doc_chunking_pending_key(doc_id))
+        REDIS_CONN.delete(_doc_chunking_pending_key(doc_id, parse_run_id))
         REDIS_CONN.set(
-            _doc_chunking_aborted_key(doc_id),
+            _doc_chunking_aborted_key(doc_id, parse_run_id),
             "1",
             exp=DOC_CHUNKING_COUNTER_TTL_SECONDS,
         )
@@ -92,17 +100,18 @@ def abort_doc_chunking_counter(doc_id: str) -> None:
         logging.exception("Failed to abort chunking counter for doc %s", doc_id)
 
 
-def is_doc_chunking_aborted(doc_id: str) -> bool:
+def is_doc_chunking_aborted(doc_id: str, *, parse_run_id: str | None = None) -> bool:
     if not doc_id:
         return False
     try:
-        return bool(REDIS_CONN.get(_doc_chunking_aborted_key(doc_id)))
+        return bool(REDIS_CONN.get(_doc_chunking_aborted_key(doc_id))
+                    or (parse_run_id and REDIS_CONN.get(_doc_chunking_aborted_key(doc_id, parse_run_id))))
     except Exception:
         logging.exception("Failed to read chunking abort marker for doc %s", doc_id)
         return False
 
 
-def credit_doc_chunking_task(doc_id: str, task_id: str) -> int | None:
+def credit_doc_chunking_task(doc_id: str, task_id: str, *, parse_run_id: str | None = None) -> int | None:
     """Credit one completed standard chunking task.
 
     Returns the post-decrement pending count when this task was credited for
@@ -119,7 +128,7 @@ def credit_doc_chunking_task(doc_id: str, task_id: str) -> int | None:
         )
         if not first_credit:
             return 1
-        pending_key = _doc_chunking_pending_key(doc_id)
+        pending_key = _doc_chunking_pending_key(doc_id, parse_run_id)
         if REDIS_CONN.get(pending_key) is None:
             return -1
         return REDIS_CONN.decrby(pending_key, 1)
@@ -228,6 +237,11 @@ class TaskService(CommonService):
         if not docs:
             return None
         doc = docs[0]
+        if doc.get("parse_run_id"):
+            run = ParserRun.get_or_none(ParserRun.id == doc["parse_run_id"])
+            if run is None or run.chunk_set_id != doc.get("chunk_set_id"):
+                return None
+            doc["parser_config"] = deepcopy(run.chunking_config or {})
         guard_doc_id = doc_ids[0] if doc["doc_id"] == CANVAS_DEBUG_DOC_ID and doc_ids else doc["doc_id"]
         if allow_protected_generationless_staging:
             if (
@@ -251,15 +265,34 @@ class TaskService(CommonService):
             msg = "\nERROR: Task is abandoned after 3 times attempts."
             prog = -1
 
-        cls.model.update(
-            progress_msg=cls.model.progress_msg + msg,
-            progress=prog,
-            retry_count=doc["retry_count"] + 1,
-        ).where(cls.model.id == doc["id"]).execute()
+        try:
+            with DB.atomic():
+                if doc.get("parse_run_id"):
+                    run_claimed = (ParserRun.update(lifecycle="PARSING_KORDOC")
+                                   .where((ParserRun.id == doc["parse_run_id"])
+                                          & (ParserRun.lifecycle == "QUEUED"))
+                                   .execute())
+                    if run_claimed != 1:
+                        raise _TaskClaimConflict()
+                task_claimed = cls.model.update(
+                    progress_msg=cls.model.progress_msg + msg,
+                    progress=prog,
+                    retry_count=doc["retry_count"] + 1,
+                ).where(
+                    (cls.model.id == doc["id"])
+                    & (cls.model.retry_count == doc["retry_count"])
+                ).execute()
+                if task_claimed != 1:
+                    raise _TaskClaimConflict()
+        except _TaskClaimConflict:
+            return None
 
         if docs[0]["retry_count"] >= 3:
-            abort_doc_chunking_counter(docs[0]["doc_id"])
-            DocumentService.update_by_id(docs[0]["doc_id"], {"progress": -1, "run": TaskStatus.FAIL.value, "update_time": current_timestamp(), "update_date": get_format_time()})
+            abort_doc_chunking_counter(docs[0]["doc_id"], parse_run_id=docs[0].get("parse_run_id"))
+            failure_query = Document.update(progress=-1, run=TaskStatus.FAIL.value, update_time=current_timestamp(), update_date=get_format_time()).where(Document.id == docs[0]["doc_id"])
+            if docs[0].get("parse_run_id"):
+                failure_query = failure_query.where(Document.requested_parse_run_id == docs[0]["parse_run_id"])
+            failure_query.execute()
             return None
 
         return doc
@@ -457,9 +490,12 @@ class TaskService(CommonService):
             doc_info = {"progress": -1, "run": TaskStatus.FAIL.value, "update_time": current_timestamp(), "update_date": get_format_time()}
             if info.get("progress_msg"):
                 doc_info["progress_msg"] = trim_header_by_lines((task.progress_msg or "") + "\n" + info["progress_msg"], TASK_MAX_LOG_LENGTH)
-            DocumentService.model.update(doc_info).where(
+            failure_query = DocumentService.model.update(doc_info).where(
                 (DocumentService.model.id == task.doc_id) & ((DocumentService.model.run.is_null(True)) | (DocumentService.model.run != TaskStatus.CANCEL.value))
-            ).execute()
+            )
+            if task.parse_run_id:
+                failure_query = failure_query.where(DocumentService.model.requested_parse_run_id == task.parse_run_id)
+            failure_query.execute()
 
     @classmethod
     @DB.connection_context()
@@ -515,6 +551,83 @@ class TaskService(CommonService):
         return cls.model.delete().where(cls.model.doc_id.in_(doc_ids)).execute()
 
 
+def _queue_parser_platform_task(doc, bucket, name, priority, source_format, config):
+    """Register one run and task while holding the document's database row lock."""
+    from api.db.services.parser_run_service import ParserRunService
+    from rag.parser_platform.pdf_source import normalize_pdf_source
+    from rag.parser_platform.schemas import SourceFormat
+
+    config.require_queue_ready()
+    if not config.format_enabled(source_format.value):
+        from rag.parser_platform.errors import parser_error
+        raise parser_error("PARSER_PLATFORM_DISABLED")
+    source_bytes = settings.STORAGE_IMPL.get(bucket, name)
+    if source_format == SourceFormat.PDF:
+        source_bytes = normalize_pdf_source(source_bytes).content
+
+    connection = DB.connection_context() if DB.is_closed() else nullcontext()
+    with connection:
+        with DB.atomic():
+            lock_query = Document.select().where(Document.id == doc["id"])
+            if not isinstance(DB, SqliteDatabase):
+                lock_query = lock_query.for_update()
+            locked = lock_query.get()
+            snapshot = deepcopy(locked.parser_config or {})
+            locked_doc = {**doc, "name": locked.name, "parser_config": snapshot}
+            if source_format == SourceFormat.PDF:
+                prepared = ParserRunService.prepare_pdf_run(
+                    document=locked_doc, source_bytes=source_bytes,
+                    expected_page_count=0, config=config, chunking_config=snapshot,
+                )
+            elif source_format in {SourceFormat.HWP, SourceFormat.HWPX}:
+                prepared = ParserRunService.prepare_hangul_run(
+                    document=locked_doc, source_bytes=source_bytes,
+                    source_format=source_format, config=config, chunking_config=snapshot,
+                )
+            else:
+                prepared = ParserRunService.prepare_office_run(
+                    document=locked_doc, source_bytes=source_bytes,
+                    source_format=source_format, config=config, chunking_config=snapshot,
+                )
+            existing = Task.get_or_none(Task.parse_run_id == prepared.parse_run_id)
+            if existing is not None:
+                Document.update(requested_parse_run_id=prepared.parse_run_id).where(Document.id == doc["id"]).execute()
+                return
+
+            task = {
+                "id": get_uuid(), "doc_id": doc["id"], "progress": 0.0,
+                "from_page": 0, "to_page": MAXIMUM_TASK_PAGE_NUMBER,
+                "begin_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "parse_run_id": prepared.parse_run_id,
+                "chunk_set_id": prepared.chunk_set_id,
+                "priority": priority,
+            }
+            digest = xxhash.xxh64()
+            digest.update(prepared.config_fingerprint.encode("utf-8"))
+            digest.update(prepared.parse_run_id.encode("utf-8"))
+            task["digest"] = digest.hexdigest()
+            Task.create(**task)
+            updated = (Document.update(
+                requested_parse_run_id=prepared.parse_run_id,
+                progress_msg="Task is queued...",
+                process_begin_at=get_format_time(),
+                progress=random.random() / 100.0,
+                run=TaskStatus.RUNNING.value,
+            ).where((Document.id == doc["id"])
+                    & (Document.status == "1")
+                    & ((Document.run.is_null(True)) | (Document.run != TaskStatus.CANCEL.value)))
+             .execute())
+            if updated != 1:
+                raise ValueError("document is unavailable for parser-platform queueing")
+
+    assert seed_doc_chunking_counter(doc["id"], 1, parse_run_id=prepared.parse_run_id), "Can't access Redis. Please check the Redis' status."
+    try:
+        assert REDIS_CONN.queue_product(settings.get_svr_queue_name(priority, "common"), message=task), "Can't access Redis. Please check the Redis' status."
+    except Exception:
+        abort_doc_chunking_counter(doc["id"], parse_run_id=prepared.parse_run_id)
+        raise
+
+
 def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
     """Create and queue document processing tasks.
 
@@ -553,64 +666,18 @@ def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
         }
 
     parse_task_array = []
-    parser_platform_run = None
-
     from rag.parser_platform.config import ParserPlatformConfig
     from rag.parser_platform.dispatch import document_source_format
     from rag.parser_platform.schemas import SourceFormat
 
     parser_platform_config = ParserPlatformConfig.from_env()
     source_format = document_source_format(doc)
-    if source_format in {SourceFormat.HWP, SourceFormat.HWPX}:
-        from api.db.services.parser_run_service import ParserRunService
+    if source_format is not None:
+        return _queue_parser_platform_task(doc, bucket, name, priority, source_format,
+                                           parser_platform_config)
+    chunking_config = DocumentService.get_chunking_config(doc["id"])
 
-        file_bin = settings.STORAGE_IMPL.get(bucket, name)
-        parser_platform_run = ParserRunService.prepare_hangul_run(
-            document=doc,
-            source_bytes=file_bin,
-            source_format=source_format,
-            config=parser_platform_config,
-        )
-        task = new_task()
-        task["parse_run_id"] = parser_platform_run.parse_run_id
-        task["chunk_set_id"] = parser_platform_run.chunk_set_id
-        parse_task_array.append(task)
-    elif (
-        parser_platform_config.enabled
-        and source_format is not None
-        and parser_platform_config.format_enabled(source_format.value)
-    ):
-        parser_platform_config.require_queue_ready()
-        from api.db.services.parser_run_service import ParserRunService
-
-        file_bin = settings.STORAGE_IMPL.get(bucket, name)
-        if source_format == SourceFormat.PDF:
-            from rag.parser_platform.pdf_source import normalize_pdf_source
-            from rag.parser_platform.surya_pdf import count_pdf_pages
-
-            parser_source = normalize_pdf_source(file_bin).content
-            pages = count_pdf_pages(parser_source)
-            parser_platform_run = ParserRunService.prepare_pdf_run(
-                document=doc,
-                source_bytes=parser_source,
-                expected_page_count=pages,
-                config=parser_platform_config,
-            )
-        else:
-            parser_platform_run = ParserRunService.prepare_office_run(
-                document=doc,
-                source_bytes=file_bin,
-                source_format=source_format,
-                config=parser_platform_config,
-            )
-        task = new_task()
-        task["parse_run_id"] = parser_platform_run.parse_run_id
-        task["chunk_set_id"] = parser_platform_run.chunk_set_id
-        parse_task_array.append(task)
-
-    if parser_platform_run is not None:
-        pass
-    elif doc["type"] == FileType.PDF.value:
+    if doc["type"] == FileType.PDF.value:
         file_bin = settings.STORAGE_IMPL.get(bucket, name)
         pages = PdfParser.total_page_number(doc["name"], file_bin)
         if pages is None:
@@ -658,7 +725,6 @@ def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
     # Determine suffix based on parser_id (consistent with SAAS version line 444)
     suffix = "common" if doc["parser_id"] != "resume" else "resume"
 
-    chunking_config = DocumentService.get_chunking_config(doc["id"])
     for task in parse_task_array:
         hasher = xxhash.xxh64()
         for field in sorted(chunking_config.keys()):
@@ -676,7 +742,7 @@ def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
 
     prev_tasks = TaskService.get_tasks(doc["id"])
     ck_num = 0
-    if prev_tasks and parser_platform_run is None:
+    if prev_tasks:
         for task in parse_task_array:
             ck_num += reuse_prev_task_chunks(task, prev_tasks, chunking_config)
         TaskService.filter_delete([Task.doc_id == doc["id"]])
@@ -686,8 +752,7 @@ def queue_tasks(doc: dict, bucket: str, name: str, priority: int):
                 pre_chunk_ids.extend(pre_task["chunk_ids"].split())
         if pre_chunk_ids:
             settings.docStoreConn.delete({"id": pre_chunk_ids}, search.index_name(chunking_config["tenant_id"]), chunking_config["kb_id"])
-    if parser_platform_run is None:
-        DocumentService.update_by_id(doc["id"], {"chunk_num": ck_num})
+    DocumentService.update_by_id(doc["id"], {"chunk_num": ck_num})
 
     bulk_insert_into_db(Task, parse_task_array, True)
     DocumentService.begin2parse(doc["id"])

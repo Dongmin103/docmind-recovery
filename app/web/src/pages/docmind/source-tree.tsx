@@ -1,18 +1,11 @@
 import type { DocMindHierarchyNode } from '@/services/docmind-service';
 import type { ReactNode } from 'react';
+import { SourceIndexStatus } from './source-index-status';
 
 export interface SourceTreeProps {
   nodes: DocMindHierarchyNode[];
   renderDocumentAction?: (node: DocMindHierarchyNode) => ReactNode;
 }
-
-const IndexStateLabels: Record<
-  NonNullable<DocMindHierarchyNode['index_state']>,
-  string
-> = {
-  INDEXED: '인덱싱 완료',
-  PENDING: '인덱싱 대기',
-};
 
 interface IndexedNode {
   index: number;
@@ -59,7 +52,7 @@ export function SourceTree({ nodes, renderDocumentAction }: SourceTreeProps) {
             </span>
             {node.index_state ? (
               <span className="shrink-0 text-xs text-text-secondary">
-                {IndexStateLabels[node.index_state]}
+                <SourceIndexStatus node={node} />
               </span>
             ) : null}
             {node.document_exists && renderDocumentAction ? (

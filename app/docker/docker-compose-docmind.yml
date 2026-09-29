@@ -16,9 +16,6 @@ services:
       args:
         RAGFLOW_VERSION: v0.27.1-docmind-c128-cutover-20260921
     depends_on:
-      surya-parser-cpu:
-        condition: service_healthy
-        required: false
       bge-m3-cpu:
         condition: service_healthy
         required: true

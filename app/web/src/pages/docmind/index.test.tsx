@@ -10,6 +10,7 @@ let mockRegistrationError = false;
 let mockSearchResult: any;
 let mockSearchVariables: any;
 let mockDocumentOptions: any[];
+let mockHierarchyDocumentId = 'document-1';
 
 jest.mock('@tanstack/react-query', () => ({
   useMutation: (options: { mutationKey?: string[] }) => ({
@@ -55,12 +56,15 @@ jest.mock('@tanstack/react-query', () => ({
           nodes: [
             {
               file_id: 'file-1',
-              document_id: 'document-1',
+              document_id: mockHierarchyDocumentId,
               name: 'protocol.pdf',
               relative_path: '품질/protocol.pdf',
               depth: 1,
               type: 'file',
               document_exists: true,
+              index_state: 'FAILED',
+              index_cleanup_state: 'PENDING',
+              index_error_code: 'HOST_WORKER_ERROR',
             },
           ],
         },
@@ -140,6 +144,7 @@ describe('DocMind search scopes', () => {
     mockFolderError = false;
     mockHierarchyError = false;
     mockRegistrationError = false;
+    mockHierarchyDocumentId = 'document-1';
     mockSearchResult = undefined;
     mockSearchVariables = undefined;
     mockDocumentOptions = [
@@ -215,6 +220,23 @@ describe('DocMind search scopes', () => {
     renderDocMind('/docmind?view=library');
     expect(screen.queryByLabelText('등록할 문서')).not.toBeInTheDocument();
     expect(screen.getByText(/문서 추가·수정은 All-in-One/)).toBeInTheDocument();
+  });
+
+  it('shows actual ingestion failure on the document detail view', () => {
+    mockCanAdminister = true;
+    mockHierarchyDocumentId = 'b'.repeat(32);
+    renderDocMind(`/docmind?view=document&id=${'a'.repeat(32)}&doc_id=${mockHierarchyDocumentId}&source=docmind`);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '인덱싱 실패 · 임시 파일 정리 대기 (HOST_WORKER_ERROR)',
+    );
+  });
+
+  it('does not show stale success when detail status refresh fails', () => {
+    mockCanAdminister = true;
+    mockHierarchyError = true;
+    mockHierarchyDocumentId = 'b'.repeat(32);
+    renderDocMind(`/docmind?view=document&id=${'a'.repeat(32)}&doc_id=${mockHierarchyDocumentId}&source=docmind`);
+    expect(screen.getByRole('status')).toHaveTextContent('문서 상태를 확인하지 못했습니다.');
   });
 
   it('blocks search on a failed scope load and allows scope recovery', () => {

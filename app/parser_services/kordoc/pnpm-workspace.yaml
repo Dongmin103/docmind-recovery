@@ -1,0 +1,2 @@
+patchedDependencies:
+  kordoc@4.15.7: patches/kordoc@4.15.7.patch

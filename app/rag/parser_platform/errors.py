@@ -214,6 +214,11 @@ ERRORS = {
         "문서 구조를 검색용 형식으로 정리하지 못했습니다.",
         True,
     ),
+    "PARSER_PDF_PAGE_LIMIT_EXCEEDED": ParserPlatformErrorInfo(
+        "PARSER_PDF_PAGE_LIMIT_EXCEEDED",
+        "PDF 페이지 수가 분석 한도를 초과했습니다.",
+        False,
+    ),
     "PARSER_MEDIA_OCR_FAILED": ParserPlatformErrorInfo(
         "PARSER_MEDIA_OCR_FAILED",
         "필수 Office 이미지의 글자를 읽지 못했습니다.",

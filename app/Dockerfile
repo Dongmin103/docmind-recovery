@@ -240,7 +240,7 @@ ARG WEB_BUILD_HEAP_MB=8192
 RUN --mount=type=cache,id=ragflow_npm,target=/root/.npm,sharing=locked \
     cd web && NODE_OPTIONS="--max-old-space-size=${WEB_BUILD_HEAP_MB}" VITE_BUILD_SOURCEMAP=false VITE_MINIFY=esbuild npm run build
 
-ARG RAGFLOW_VERSION=v0.27.1-docmind-rhwp-canary-20260902
+ARG RAGFLOW_VERSION=v0.27.1-docmind-kordoc-cutover-20260929
 RUN printf '%s\n' "$RAGFLOW_VERSION" > /ragflow/VERSION
 
 # production stage
@@ -278,7 +278,6 @@ COPY deepdoc deepdoc
 COPY rag rag
 COPY --from=builder /ragflow/rag/res/paddleocr/ /ragflow/rag/res/paddleocr/
 COPY scripts scripts
-COPY parser_services/rhwp/tokenizer /ragflow/parser-platform-tokenizers/multilingual-minilm
 COPY agent agent
 COPY pyproject.toml uv.lock ./
 COPY mcp mcp

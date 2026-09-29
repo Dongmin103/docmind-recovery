@@ -32,7 +32,7 @@ services:
 
   ragflow-cpu:
     depends_on:
-      docling-office-parser:
+      kordoc-parser:
         condition: service_healthy
     environment:
       # The isolated E2E path retains its process-environment fallback when
@@ -52,101 +52,54 @@ services:
       PARSER_PLATFORM_ENABLED: "1"
       PARSER_PLATFORM_INTEGRATION_READY: "1"
       PARSER_PLATFORM_OFFICE_ENABLED: "1"
-      PARSER_PLATFORM_DOCLING_OFFICE_URL: http://docling-office-parser:8092
-      PARSER_PLATFORM_OFFICE_DEADLINE_SECONDS: "900"
-      PARSER_PLATFORM_SURYA_URL: http://surya-parser:8091
-      PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS: ${PARSER_PLATFORM_SURYA_MEDIA_DEADLINE_SECONDS:-720}
-      PARSER_PLATFORM_SURYA_PARSER_VERSION: "0.22.1"
-      PARSER_PLATFORM_SURYA_MODEL_REVISION: "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
-      PARSER_PLATFORM_SURYA_BACKEND: llamacpp
-      PARSER_PLATFORM_SVG_RENDERER: /usr/bin/rsvg-convert
+      PARSER_PLATFORM_HWP_ENABLED: "1"
+      PARSER_PLATFORM_KORDOC_PDF_ENABLED: "1"
+      PARSER_PLATFORM_KORDOC_DOCX_ENABLED: "1"
+      PARSER_PLATFORM_KORDOC_EXCEL_ENABLED: "1"
+      PARSER_PLATFORM_KORDOC_PPTX_ENABLED: "1"
+      PARSER_PLATFORM_KORDOC_HWP_ENABLED: "1"
+      PARSER_PLATFORM_KORDOC_URL: http://kordoc-parser:8095
+      PARSER_PLATFORM_KORDOC_PATCH_REVISION: sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b
+      PARSER_PLATFORM_LIBREOFFICE_CONVERTER_REVISION: libreoffice-4:7.4.7-1+deb12u14
     volumes:
       - ../scripts/docmind_generationless_e2e_seed.py:/ragflow/scripts/docmind_generationless_e2e_seed.py:ro
     networks:
       docmind-parser-internal: {}
 
-  surya-parser-cpu:
-    # OCR is an independently started parser capability.  Do not make the
-    # existing API/search process unavailable when the licensed model bundle
-    # has not been provisioned yet; required OCR still fails closed at the
-    # parser policy boundary and supplemental OCR records an explicit warning.
+  kordoc-parser:
     profiles: [full]
     platform: linux/amd64
-    image: ${SURYA_CPU_IMAGE:-docmind-surya-parser:cpu-0.22.1-amd64}
+    image: ${KORDOC_IMAGE:-docmind-kordoc-parser:4.15.7-cutover-amd64}
     build:
-      context: ..
-      dockerfile: parser_services/surya/Containerfile.cpu-amd64
+      context: ../parser_services/kordoc
+      dockerfile: Containerfile
     environment:
-      HOME: /home/parser
-      XDG_CACHE_HOME: /home/parser/.cache
-      SURYA_INFERENCE_BACKEND: llamacpp
-      SURYA_MODEL_REVISION: "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
-      SURYA_GGUF_MODEL_SHA256: "1f18abe17b1ed8b4e47ee9b1ad0e274c93daf5efbb6b29a04ff1712e37051e05"
-      SURYA_GGUF_MMPROJ_SHA256: "98c0563673b1657ff6d021d1e5f04af06cbf61bb40c63ac613e8bb71b42fb2c0"
-      SURYA_INFERENCE_PARALLEL: "1"
-      SURYA_INFERENCE_TIMEOUT_SECONDS: ${SURYA_INFERENCE_TIMEOUT_SECONDS:-600}
-      SURYA_SERVICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
-      SURYA_SERVICE_MAX_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
-      SURYA_SERVICE_MAX_MEDIA_BYTES: ${PARSER_PLATFORM_MAX_MEDIA_BYTES:-33554432}
-      SURYA_SERVICE_PAGE_TIMEOUT_SECONDS: ${SURYA_SERVICE_PAGE_TIMEOUT_SECONDS:-600}
-      SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS: ${SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS:-1800}
-      SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS: ${SURYA_SERVICE_MEDIA_TIMEOUT_SECONDS:-660}
-      SURYA_SERVICE_MEDIA_INFERENCE_TIMEOUT_SECONDS: ${SURYA_SERVICE_MEDIA_INFERENCE_TIMEOUT_SECONDS:-600}
-      SURYA_SERVICE_MEDIA_MAX_TOKENS: ${SURYA_SERVICE_MEDIA_MAX_TOKENS:-1024}
+      KORDOC_OFFLINE: "1"
+      KORDOC_MODEL_CACHE: /models/kordoc
+      KORDOC_REQUIRE_OCR: "1"
+      KORDOC_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_KORDOC_MAX_SOURCE_BYTES:-67108864}
+      KORDOC_MAX_PDF_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      KORDOC_CONVERSION_TIMEOUT_MS: "180000"
     networks:
       docmind-parser-internal:
-        aliases: [surya-parser]
+        aliases: [kordoc-parser]
     volumes:
-      - ${SURYA_MODEL_DIR:-../models/surya}:/models:ro
+      - ${KORDOC_OCR_MODEL_DIR:-../models/kordoc}:/models/kordoc:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=1g
-      - /opt/surya/runtime:rw,noexec,nosuid,nodev,size=64m
-      - /home/parser/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: ${SURYA_CPU_MEMORY_LIMIT:-8g}
-    cpus: ${SURYA_CPU_CPUS:-8}
-    pids_limit: 128
+    mem_limit: ${KORDOC_MEMORY_LIMIT:-3g}
+    cpus: ${KORDOC_CPUS:-2}
+    pids_limit: 64
     restart: unless-stopped
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/ready', timeout=3).read()"]
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8095/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
-      start_period: 930s
+      start_period: 60s
       retries: 20
-
-  docling-office-parser:
-    profiles: [full]
-    platform: linux/amd64
-    image: ${DOCLING_OFFICE_IMAGE:-docmind-docling-office:2.115.0-legacy-doc-amd64}
-    build:
-      context: ..
-      dockerfile: parser_services/docling_office/Containerfile
-      args:
-        UV_BASE_IMAGE: ${DOCLING_UV_BASE_IMAGE:-ghcr.io/astral-sh/uv:0.11.7@sha256:733b4042187702f832f7fdecb3aff14a61b288c4ca37af188bb5715c1caebaf8}
-        PYTHON_BASE_IMAGE: ${DOCLING_PYTHON_BASE_IMAGE:-python:3.12.13-slim-trixie@sha256:d657ab0ade19f404a6ccc883ab399540de667aff751748ce23c07330c5a89e64}
-    environment:
-      DOCLING_OFFICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_MAX_SOURCE_BYTES:-536870912}
-      DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS: ${DOCLING_LEGACY_CONVERSION_TIMEOUT_SECONDS:-180}
-    networks:
-      docmind-parser-internal:
-        aliases: [docling-office-parser]
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=1g
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: ${DOCLING_OFFICE_MEMORY_LIMIT:-2g}
-    cpus: ${DOCLING_OFFICE_CPUS:-2}
-    pids_limit: 128
-    restart: unless-stopped
-    healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health', timeout=3).read()"]
-      interval: 15s
-      timeout: 5s
-      start_period: 20s
-      retries: 12
 
 networks:
   docmind-parser-internal:

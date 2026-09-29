@@ -86,6 +86,47 @@ def _searchable(mapping, version, job, run, document, project_id: str) -> bool:
     )
 
 
+def _index_status(job, *, searchable: bool) -> dict[str, Any]:
+    """Describe ingestion separately from access to a previously active index."""
+    state = job.lifecycle_state if job is not None else None
+    cleanup_states = {job.cleanup_state, job.host_cleanup_state} if job is not None else set()
+    cleanup = (
+        "FAILED" if "FAILED" in cleanup_states else
+        "PENDING" if cleanup_states & {"PENDING", "IN_PROGRESS"} else
+        "COMPLETE" if cleanup_states == {"COMPLETE"} else None
+    )
+    if state in {"FAILED", "ACTION_REQUIRED", "CLEANUP_FAILED", "RETRY_WAIT", "CLEANUP"}:
+        index_state = state
+    elif state in {"DECRYPTING", "PARSING", "INDEXING"}:
+        index_state = "PROCESSING"
+    elif state in {"DISCOVERED", "WAITING_SOURCE_STABLE"}:
+        index_state = "PENDING"
+    elif searchable:
+        index_state = "INDEXED"
+    elif state == "COMPLETE":
+        # A completed job alone is not evidence of a usable index.
+        index_state = "FAILED"
+    else:
+        index_state = "PENDING" if state is None else "FAILED"
+    error_code = job.error_code if job is not None else None
+    # Worker-provided messages/codes can contain paths or arbitrary data.
+    if error_code:
+        allowed_errors = {
+            "HOST_WORKER_ERROR", "DOCMIND_INGESTION_FAILED", "DOCMIND_INGESTION_INTERRUPTED",
+            "DOCMIND_INGESTION_CLEANUP_FAILED", "DOCMIND_INGESTION_STAGING_CLEANUP_FAILED",
+            "DOCMIND_INGESTION_SOURCE_CHANGED", "DOCMIND_INGESTION_RETRY_EXHAUSTED",
+            "EPHEMERAL_CLEANUP_FAILED", "EPHEMERAL_CLEANUP_STATE_FAILED",
+        }
+        if error_code not in allowed_errors:
+            error_code = "DOCMIND_INGESTION_FAILED"
+    return {
+        "index_state": index_state,
+        "index_cleanup_state": cleanup,
+        "index_error_code": error_code,
+        "searchable": searchable,
+    }
+
+
 def project_for_tenant(tenant_id: str) -> DocmindProject | None:
     projects = list(
         DocmindProject.select()
@@ -139,6 +180,23 @@ def load(tenant_id: str) -> SourceProjection | None:
         {version.parser_run_id for version in versions.values() if version.parser_run_id},
     )
     documents = _records_by_id(Document, {row.document_id for row in mappings})
+    latest_jobs: dict[str, DocmindIngestionJob] = {}
+    mappings_by_id = {row.id: row for row in mappings}
+    mapping_ids = sorted(mappings_by_id)
+    for offset in range(0, len(mapping_ids), 500):
+        query = DocmindIngestionJob.select(
+            DocmindIngestionJob.id, DocmindIngestionJob.source_document_id,
+            DocmindIngestionJob.source_id, DocmindIngestionJob.document_id,
+            DocmindIngestionJob.lifecycle_state, DocmindIngestionJob.cleanup_state,
+            DocmindIngestionJob.host_cleanup_state, DocmindIngestionJob.error_code,
+        ).where(
+            (DocmindIngestionJob.project_id == project.id)
+            & (DocmindIngestionJob.source_document_id.in_(mapping_ids[offset : offset + 500]))
+        ).order_by(DocmindIngestionJob.create_time.desc(), DocmindIngestionJob.id.desc())
+        for candidate in query.iterator():
+            mapping = mappings_by_id[candidate.source_document_id]
+            if candidate.source_id == mapping.source_id and candidate.document_id == mapping.document_id:
+                latest_jobs.setdefault(mapping.id, candidate)
 
     root_id = _id("docmind-source-root", project.id)
     folder_rows: dict[str, dict[str, Any]] = {}
@@ -246,7 +304,7 @@ def load(tenant_id: str) -> SourceProjection | None:
             "type": "file",
             "document_id": mapping.document_id,
             "document_exists": document is not None,
-            "index_state": "INDEXED" if eligible else "PENDING",
+            **_index_status(latest_jobs.get(mapping.id), searchable=eligible),
         }
         nodes[parent_id]["child_count"] += 1
         if eligible:

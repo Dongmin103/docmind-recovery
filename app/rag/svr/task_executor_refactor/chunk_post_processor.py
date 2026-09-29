@@ -1167,12 +1167,12 @@ async def run_document_post_chunking_if_last(
     task_doc_id = ctx.doc_id
 
     if ctx.has_canceled_func(task_id):
-        abort_doc_chunking_counter(task_doc_id)
+        abort_doc_chunking_counter(task_doc_id, parse_run_id=ctx.parse_run_id)
         ctx.progress_cb(-1, msg="Task has been canceled.")
         return False
 
-    chunking_aborted = is_doc_chunking_aborted(task_doc_id)
-    remaining_chunking_tasks = 0 if ctx.write_interceptor else credit_doc_chunking_task(task_doc_id, task_id)
+    chunking_aborted = is_doc_chunking_aborted(task_doc_id, parse_run_id=ctx.parse_run_id)
+    remaining_chunking_tasks = 0 if ctx.write_interceptor else credit_doc_chunking_task(task_doc_id, task_id, parse_run_id=ctx.parse_run_id)
     if remaining_chunking_tasks != 0:
         if chunking_aborted:
             logging.info(
@@ -1230,10 +1230,10 @@ async def run_document_post_chunking_if_last(
     finally:
         if original_progress_cb is not None:
             ctx._progress_cb = original_progress_cb
-        clear_doc_chunking_counter(task_doc_id)
+        clear_doc_chunking_counter(task_doc_id, parse_run_id=ctx.parse_run_id)
 
     if ctx.has_canceled_func(task_id):
-        abort_doc_chunking_counter(task_doc_id)
+        abort_doc_chunking_counter(task_doc_id, parse_run_id=ctx.parse_run_id)
         ctx.progress_cb(-1, msg="Task has been canceled.")
         return False
     return True

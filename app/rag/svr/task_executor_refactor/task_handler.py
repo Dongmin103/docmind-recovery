@@ -154,7 +154,7 @@ class TaskHandler:
             await self.handle()
         except Exception:
             if self._is_standard_chunking_task(self._task_context.task_type):
-                abort_doc_chunking_counter(self._task_context.doc_id)
+                abort_doc_chunking_counter(self._task_context.doc_id, parse_run_id=self._task_context.parse_run_id)
             raise
         finally:
             task_id = self._task_context.id
@@ -163,7 +163,7 @@ class TaskHandler:
             task_doc_id = self._task_context.doc_id
             if self._task_context.has_canceled_func(task_id):
                 if self._is_standard_chunking_task(self._task_context.task_type):
-                    abort_doc_chunking_counter(task_doc_id)
+                    abort_doc_chunking_counter(task_doc_id, parse_run_id=self._task_context.parse_run_id)
                     try:
                         exists = await thread_pool_exec(
                             settings.docStoreConn.index_exist,
@@ -563,7 +563,7 @@ class TaskHandler:
                     error_message=str(error),
                     retryable=getattr(error, "retryable", True),
                 )
-            abort_doc_chunking_counter(ctx.doc_id)
+            abort_doc_chunking_counter(ctx.doc_id, parse_run_id=ctx.parse_run_id)
             raise
 
     async def _run_standard_chunking_impl(

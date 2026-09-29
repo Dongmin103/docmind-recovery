@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pytest
+import asyncio
 
 from api.db.services.active_chunk_scope_service import ActiveChunkScopeService
 from rag.nlp.search import Dealer
@@ -35,8 +35,13 @@ class EmptyStore:
         return {}
 
 
-@pytest.mark.asyncio
-async def test_dealer_applies_scope_before_empty_query_backend_search(monkeypatch) -> None:
+def _dealer_without_query_startup(store: EmptyStore) -> Dealer:
+    dealer = Dealer.__new__(Dealer)
+    dealer.dataStore = store
+    return dealer
+
+
+def test_dealer_applies_scope_before_empty_query_backend_search(monkeypatch) -> None:
     calls = []
 
     def apply(condition, *, kb_ids, requested_doc_ids, **kwargs):
@@ -45,11 +50,11 @@ async def test_dealer_applies_scope_before_empty_query_backend_search(monkeypatc
 
     monkeypatch.setattr(ActiveChunkScopeService, "apply_to_condition", apply)
     store = EmptyStore()
-    result = await Dealer(store).search(
+    result = asyncio.run(_dealer_without_query_startup(store).search(
         {"question": "", "doc_ids": ["doc"], "page": 1, "size": 10, "sort": True},
         "index",
         ["kb"],
-    )
+    ))
 
     assert result.total == 0
     assert calls == [({"doc_id": ["doc"]}, ["kb"], ["doc"])]
@@ -82,6 +87,6 @@ def test_chunk_list_applies_the_same_active_scope_before_backend_search(monkeypa
     monkeypatch.setattr(ActiveChunkScopeService, "apply_to_condition", apply)
     store = EmptyStore()
 
-    assert Dealer(store).chunk_list("doc", "tenant", ["kb"]) == []
+    assert _dealer_without_query_startup(store).chunk_list("doc", "tenant", ["kb"]) == []
     assert calls == [({"doc_id": "doc"}, ["kb"], ["doc"])]
     assert store.conditions[0]["_active_chunk_scope"] == {"active_chunk_set_ids": ["set-active"]}

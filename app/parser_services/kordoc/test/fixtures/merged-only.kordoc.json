@@ -1,0 +1,83 @@
+{
+  "schema_version": "docmind-kordoc-v2",
+  "patch_revision": "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b",
+  "parser_name": "kordoc",
+  "parser_version": "4.15.7",
+  "source_format": "xlsx",
+  "source_hash": "571d663009c4d9898f6694b0ace9f4b3e322b57745bd98ed74244e2ee0875b75",
+  "blocks": [
+    {
+      "type": "heading",
+      "text": "MergedData",
+      "level": 2,
+      "pageNumber": 1
+    },
+    {
+      "type": "table",
+      "table": {
+        "rows": 4,
+        "cols": 2,
+        "cells": [
+          [
+            {
+              "text": "FIRST",
+              "colSpan": 1,
+              "rowSpan": 2
+            },
+            {
+              "text": "",
+              "colSpan": 1,
+              "rowSpan": 1
+            }
+          ],
+          [
+            {
+              "text": "",
+              "colSpan": 1,
+              "rowSpan": 1
+            },
+            {
+              "text": "CROSSING",
+              "colSpan": 1,
+              "rowSpan": 2
+            }
+          ],
+          [
+            {
+              "text": "FOURTH",
+              "colSpan": 1,
+              "rowSpan": 1
+            },
+            {
+              "text": "",
+              "colSpan": 1,
+              "rowSpan": 1
+            }
+          ],
+          [
+            {
+              "text": "OUTSIDE",
+              "colSpan": 1,
+              "rowSpan": 1
+            },
+            {
+              "text": "LAST",
+              "colSpan": 1,
+              "rowSpan": 1
+            }
+          ]
+        ],
+        "hasHeader": true
+      },
+      "pageNumber": 1
+    }
+  ],
+  "markdown": "## MergedData\n\n<table>\n<tr><th rowspan=\"2\">FIRST</th><th></th></tr>\n<tr><td rowspan=\"2\">CROSSING</td></tr>\n<tr><td>FOURTH</td></tr>\n<tr><td>OUTSIDE</td><td>LAST</td></tr>\n</table>",
+  "metadata": {
+    "pageCount": 1,
+    "author": "openpyxl",
+    "createdAt": "2026-09-29T08:33:43Z",
+    "modifiedAt": "2026-09-29T08:33:43Z"
+  },
+  "warnings": []
+}

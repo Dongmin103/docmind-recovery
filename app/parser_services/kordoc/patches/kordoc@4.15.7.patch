@@ -1,0 +1,99 @@
+diff --git a/dist/index.js b/dist/index.js
+index 0d7b8fe1a93cb92162730c348944a9a090862234..69a6ee939911ef07a6e3e360e12380ddec8c82d9 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -40086,10 +40086,13 @@ async function parsePdf(buffer, options) {
+     };
+   }
+   try {
+-    const { markdown, blocks, metadata, outline, warnings, isImageBased, pageQuality, qualitySummary, images, pages } = await parsePdfDocument(buffer, options);
+-    return { success: true, fileType: "pdf", markdown, blocks, metadata, outline, warnings, isImageBased, pageQuality, qualitySummary, images, pages, pageCount: metadata?.pageCount };
++    const { markdown, blocks, metadata, outline, warnings, isImageBased, pageQuality, qualitySummary, images, pages, pdfPages } = await parsePdfDocument(buffer, options);
++    return { success: true, fileType: "pdf", markdown, blocks, metadata, outline, warnings, isImageBased, pageQuality, qualitySummary, images, pages, pdfPages, pageCount: metadata?.pageCount };
+   } catch (err) {
+     const isImageBased = err instanceof Error && "isImageBased" in err ? true : void 0;
++    if (Number.isSafeInteger(err?.pageCount) && err.pageCount > 0) {
++      return { success: false, fileType: "pdf", code: "PAGE_LIMIT_EXCEEDED", pageCount: err.pageCount };
++    }
+     return { success: false, fileType: "pdf", error: sanitizeError(err), code: classifyError(err), isImageBased };
+   }
+ }
+diff --git a/dist/parser-BCN3SZZC.js b/dist/parser-BCN3SZZC.js
+index 20f6b406d6a29ea09e790dbca0fd240ebcdc3d59..756a7647dca6aa07bda8bd00c92f4b99045458db 100644
+--- a/dist/parser-BCN3SZZC.js
++++ b/dist/parser-BCN3SZZC.js
+@@ -2274,11 +2274,19 @@ async function parsePdfDocument(buffer, options) {
+   try {
+     const pageCount = doc.numPages;
+     if (pageCount === 0) throw new KordocError("PDF\uC5D0 \uD398\uC774\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.");
++    const maxPages = options?.maxPages ?? MAX_PAGES;
++    if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > MAX_PAGES) throw new KordocError("Invalid PDF page limit");
++    if (pageCount > maxPages) {
++      const error = new KordocError(`PDF page limit exceeded: ${pageCount} > ${maxPages}`);
++      error.pageCount = pageCount;
++      throw error;
++    }
+     const metadata = { pageCount, pageMode: "layout" };
+     await extractPdfMetadata(doc, metadata);
+     const blocks = [];
+     const warnings = [];
+     const pageQuality = [];
++    const pdfPages = [];
+     let totalChars = 0;
+     let totalTextBytes = 0;
+     const effectivePageCount = Math.min(pageCount, MAX_PAGES);
+@@ -2309,9 +2317,13 @@ async function parsePdfDocument(buffer, options) {
+         const tc = await page.getTextContent();
+         const [viewX1, viewY1, viewX2, viewY2] = page.view;
+         const pageW = viewX2 - viewX1, pageH = viewY2 - viewY1;
++        if (!(pageW > 0 && pageH > 0)) throw new KordocError(`Invalid PDF page geometry: ${i}`);
++        const pdfPage = { page: i, width: pageW, height: pageH, has_images: false, ocr_applied: false };
++        pdfPages.push(pdfPage);
+         pageHeights.set(i, pageH);
+         const rawItems = tc.items;
+         const rawOps = await page.getOperatorList();
++        pdfPage.has_images = extractImageRegions(rawOps.fnArray, rawOps.argsArray).length > 0;
+         const fontObj = (loadedName) => {
+           try {
+             return page.commonObjs.has(loadedName) ? page.commonObjs.get(loadedName) : void 0;
+@@ -2428,13 +2440,14 @@ async function parsePdfDocument(buffer, options) {
+       }
+     }
+     const parsedPageCount = parsedPages || (pageFilter ? pageFilter.size : effectivePageCount);
+-    const isImageBased = pageFilter?.size !== 0 && totalChars / Math.max(parsedPageCount, 1) < 10;
++    const contentPages = pageQuality.filter((quality) => quality.textChars > 0 || pdfPages.find((page) => page.page === quality.page)?.has_images || quality.ocrReason === "vector_text");
++    const isImageBased = pageFilter?.size !== 0 && contentPages.length > 0 && totalChars / contentPages.length < 10;
+     const ocrDone = /* @__PURE__ */ new Set();
+     if (options?.ocr && ocrBuffer) {
+       const inScope = (p) => !pageFilter || pageFilter.has(p);
+       const targets = /* @__PURE__ */ new Set();
+       if (options.ocr === "force" || isImageBased) {
+-        for (let i = 1; i <= effectivePageCount; i++) if (inScope(i)) targets.add(i);
++        for (let i = 1; i <= effectivePageCount; i++) if (inScope(i) && contentPages.some((quality) => quality.page === i)) targets.add(i);
+       } else {
+         for (const pq of pageQuality) {
+           if (!pq.needsOcr) continue;
+@@ -2471,6 +2484,7 @@ async function parsePdfDocument(buffer, options) {
+               blocks.push(...merged);
+             }
+             for (const pq of pageQuality) if (ocrDone.has(pq.page)) pq.ocrApplied = true;
++            for (const pdfPage of pdfPages) if (ocrDone.has(pdfPage.page)) pdfPage.ocr_applied = true;
+             warnings.push({
+               message: `${ocrDone.size}\uAC1C \uD398\uC774\uC9C0\uC5D0 OCR \uC801\uC6A9 (${mode === "builtin" ? "\uB0B4\uC7A5 PP-OCRv5" : "\uC0AC\uC6A9\uC790 \uD504\uB85C\uBC14\uC774\uB354"})`,
+               code: "OCR_APPLIED"
+@@ -2520,7 +2534,6 @@ async function parsePdfDocument(buffer, options) {
+     mergeContinuedCells(blocks, pageHeights);
+     mergeCrossPageTables(blocks, pageHeights);
+     if (!options?.keepTrailingEmptyCols) trimTrailingEmptyTableCols(blocks);
+-    joinPageBreakWraps(blocks, wrapLexicon);
+     injectPageImageBlocks(blocks, pageImageBlocks);
+     if (options?.formulaOcr && formulaBuffer) {
+       try {
+@@ -2564,6 +2578,7 @@ async function parsePdfDocument(buffer, options) {
+       pages: blocksToPages(outBlocks, finishMarkdown),
+       blocks,
+       metadata,
++      pdfPages,
+       outline: outline.length > 0 ? outline : void 0,
+       warnings: warnings.length > 0 ? warnings : void 0,
+       isImageBased: isImageBased || void 0,

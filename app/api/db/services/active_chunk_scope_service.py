@@ -17,7 +17,7 @@ class ActiveChunkScopeService:
         config: ParserPlatformConfig | None = None,
     ) -> dict:
         runtime = config or ParserPlatformConfig.from_env()
-        if not (runtime.integration_ready or runtime.hwp_integration_ready):
+        if not runtime.integration_ready:
             return dict(condition)
         # Exact document scopes are cheap to resolve and must reflect an activation
         # performed by another process immediately. The process-local cache cannot

@@ -38,6 +38,10 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { useSearchParams } from 'react-router';
 import RegistrationPanel from './registration-panel';
 import SourceTree from './source-tree';
+import {
+  SourceDocumentStatus,
+  SourceHierarchyKeys,
+} from './source-document-status';
 import { useFolderSelection } from './use-folder-selection';
 import { ChunkInspection, WorkspaceSettings } from './workspace-views';
 import WorkspaceShell from './workspace-shell';
@@ -46,7 +50,7 @@ import './index.less';
 const RESULTS_PER_PAGE = 10;
 const DocMindKeys = {
   folders: () => ['docmind-folders'] as const,
-  hierarchy: () => ['docmind-hierarchy'] as const,
+  hierarchy: SourceHierarchyKeys.hierarchy,
   registrations: () => ['docmind-registrations'] as const,
 };
 
@@ -484,29 +488,40 @@ export default function DocMind() {
             </div>
           )}
           {workspaceView === 'document' && (
-            <div className="min-h-0 flex-1" aria-label="문서 상세">
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              aria-label="문서 상세"
+            >
+              {validInspection &&
+                inspectionDocumentId &&
+                canAdminister &&
+                folderCatalog.data?.source_sync && (
+                  <SourceDocumentStatus documentId={inspectionDocumentId} />
+                )}
               {validInspection ? (
-                <ErrorBoundary
-                  FallbackComponent={WorkspaceViewError}
-                  resetKeys={[inspectionDocumentId]}
-                >
-                  <React.Suspense
-                    fallback={
-                      <p role="status" className="p-6">
-                        원문과 청크를 불러오는 중입니다.
-                      </p>
-                    }
+                <div className="min-h-0 flex-1">
+                  <ErrorBoundary
+                    FallbackComponent={WorkspaceViewError}
+                    resetKeys={[inspectionDocumentId]}
                   >
-                    <ChunkInspection
-                      key={`${inspectionDatasetId}:${inspectionDocumentId}`}
-                      embedded
-                      readOnly
-                      onBack={() =>
-                        setParams({ view: returnView }, { replace: true })
+                    <React.Suspense
+                      fallback={
+                        <p role="status" className="p-6">
+                          원문과 청크를 불러오는 중입니다.
+                        </p>
                       }
-                    />
-                  </React.Suspense>
-                </ErrorBoundary>
+                    >
+                      <ChunkInspection
+                        key={`${inspectionDatasetId}:${inspectionDocumentId}`}
+                        embedded
+                        readOnly
+                        onBack={() =>
+                          setParams({ view: returnView }, { replace: true })
+                        }
+                      />
+                    </React.Suspense>
+                  </ErrorBoundary>
+                </div>
               ) : (
                 <p role="alert" className="p-6">
                   문서 주소가 올바르지 않습니다.

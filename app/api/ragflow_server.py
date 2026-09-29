@@ -102,9 +102,6 @@ if __name__ == "__main__":
     logging.info(f"project base: {get_project_base_directory()}")
     show_configs()
     settings.init_settings()
-    from rag.parser_platform.config import validate_hwp_global_startup
-
-    validate_hwp_global_startup()
     settings.print_rag_settings()
 
     if RAGFLOW_DEBUGPY_LISTEN > 0:

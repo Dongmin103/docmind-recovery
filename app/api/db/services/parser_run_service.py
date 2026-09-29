@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from dataclasses import replace
+from functools import wraps
+from typing import Any
 
 from api.db.db_models import DB, ParserRun
 from rag.parser_platform.config import ParserPlatformConfig
 from rag.parser_platform.coordinator import ParserCoordinator, ParserRunRequest, PreparedParserRun, validate_transition
 from rag.parser_platform.dispatch import SourceDescriptor
-from rag.parser_platform.pdf_routing import PDF_ROUTING_POLICY_VERSION
 from rag.parser_platform.pdf_source import normalize_pdf_source
 from rag.parser_platform.schemas import ParserRunStatus, SourceFormat
 
 REUSABLE_LIFECYCLES = {
     "QUEUED",
+    "PARSING_KORDOC",
     "PARSING_SURYA",
     "PARSING_DOCLING",
     "PARSING_RHWP",
@@ -27,11 +28,26 @@ SOURCE_MIME_TYPES = {
     SourceFormat.PDF: "application/pdf",
     SourceFormat.DOC: "application/msword",
     SourceFormat.DOCX: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    SourceFormat.XLS: "application/vnd.ms-excel",
     SourceFormat.XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     SourceFormat.PPTX: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     SourceFormat.HWP: "application/octet-stream",
     SourceFormat.HWPX: "application/octet-stream",
 }
+
+
+def _connection_context_if_needed(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        owns_connection = DB.is_closed()
+        if owns_connection:
+            DB.connect()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            if owns_connection and not DB.is_closed():
+                DB.close()
+    return wrapped
 
 
 class ParserRunService:
@@ -55,11 +71,13 @@ class ParserRunService:
         if record.doc_id != document["id"] or record.source_hash != source_hash:
             raise ValueError("parser run source identity mismatch")
         source_format = SourceFormat(record.source_format)
-        if source_format in {SourceFormat.HWP, SourceFormat.HWPX}:
-            runtime.require_hwp_queue_ready(document_id=document["id"], source_format=source_format.value)
-        else:
-            runtime.require_queue_ready()
-        if record.config_fingerprint != runtime.run_config_fingerprint(source_format.value):
+        runtime.require_queue_ready()
+        if not runtime.format_enabled(source_format.value):
+            raise ValueError("parser run source format is disabled")
+        if record.config_fingerprint != runtime.run_config_fingerprint(
+            source_format.value, document_id=document["id"],
+            chunking_config=getattr(record, "chunking_config", {}) or {},
+        ):
             raise ValueError("parser run configuration fingerprint changed")
         mime = SOURCE_MIME_TYPES[source_format]
         selection = ParserCoordinator(runtime).dispatcher.select(
@@ -71,8 +89,11 @@ class ParserRunService:
             ),
             document_id=document["id"],
         )
-        if selection.engine != record.parser_name:
+        if selection.engine != "kordoc" or selection.engine != record.parser_name:
             raise ValueError("parser run engine selection changed")
+        if (record.parser_version != runtime.kordoc_parser_version
+                or record.model_version is not None or record.backend != "kordoc-offline"):
+            raise ValueError("parser run parser runtime identity changed")
         prepared = PreparedParserRun(
             parse_run_id=record.id,
             chunk_set_id=record.chunk_set_id,
@@ -237,6 +258,7 @@ class ParserRunService:
             source_format=source_format.value,
             source_fingerprint=prepared.source_fingerprint,
             config_fingerprint=prepared.config_fingerprint,
+            chunking_config=dict(base_request.chunking_config),
             parser_fingerprint=prepared.parser_fingerprint,
             parser_name=parser_name,
             parser_version=base_request.parser_version,
@@ -250,7 +272,7 @@ class ParserRunService:
         return prepared
 
     @classmethod
-    @DB.connection_context()
+    @_connection_context_if_needed
     def prepare_pdf_run(
         cls,
         *,
@@ -259,6 +281,7 @@ class ParserRunService:
         expected_page_count: int,
         config: ParserPlatformConfig | None = None,
         force_new: bool = False,
+        chunking_config: dict[str, Any] | None = None,
     ) -> PreparedParserRun:
         runtime = config or ParserPlatformConfig.from_env()
         runtime.require_queue_ready()
@@ -272,18 +295,14 @@ class ParserRunService:
             sniffed_mime="application/pdf",
         )
         selection = coordinator.dispatcher.select(source, document_id=document["id"])
-        is_router = selection.engine == "pdf-router"
         base_request = ParserRunRequest(
             document_id=document["id"],
             source_hash=source_hash,
             source=source,
-            parser_version=PDF_ROUTING_POLICY_VERSION if is_router else "0.22.1",
-            model_version=None
-            if is_router
-            else os.environ.get("SURYA_MODEL_REVISION", "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"),
-            backend="deterministic-rule-engine"
-            if is_router
-            else os.environ.get("SURYA_INFERENCE_BACKEND", "llamacpp"),
+            parser_version=runtime.kordoc_parser_version,
+            model_version=None,
+            backend="kordoc-offline",
+            chunking_config=dict(chunking_config or {}),
         )
         return cls._reuse_or_create_run(
             document=document,
@@ -297,7 +316,7 @@ class ParserRunService:
         )
 
     @classmethod
-    @DB.connection_context()
+    @_connection_context_if_needed
     def prepare_office_run(
         cls,
         *,
@@ -306,30 +325,30 @@ class ParserRunService:
         source_format: SourceFormat,
         config: ParserPlatformConfig | None = None,
         force_new: bool = False,
+        chunking_config: dict[str, Any] | None = None,
     ) -> PreparedParserRun:
-        if source_format not in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLSX, SourceFormat.PPTX}:
-            raise ValueError("prepare_office_run requires DOC, DOCX, XLSX, or PPTX")
+        if source_format not in {SourceFormat.DOC, SourceFormat.DOCX, SourceFormat.XLS, SourceFormat.XLSX, SourceFormat.PPTX}:
+            raise ValueError("prepare_office_run requires DOC, DOCX, XLS, XLSX, or PPTX")
         runtime = config or ParserPlatformConfig.from_env()
         runtime.require_queue_ready()
         mime = SOURCE_MIME_TYPES[source_format]
         source_hash = hashlib.sha256(source_bytes).hexdigest()
         coordinator = ParserCoordinator(runtime)
+        source = SourceDescriptor(
+            filename=document.get("name") or f"{document['id']}.{source_format.value}",
+            content=source_bytes,
+            declared_mime=mime,
+            sniffed_mime=mime,
+        )
+        selection = coordinator.dispatcher.select(source, document_id=document["id"])
         base_request = ParserRunRequest(
             document_id=document["id"],
             source_hash=source_hash,
-            source=SourceDescriptor(
-                filename=document.get("name") or f"{document['id']}.{source_format.value}",
-                content=source_bytes,
-                declared_mime=mime,
-                sniffed_mime=mime,
-            ),
-            parser_version="2.115.0",
+            source=source,
+            parser_version=runtime.kordoc_parser_version,
             model_version=None,
-            backend=(
-                "libreoffice-headless+native-office-backend"
-                if source_format == SourceFormat.DOC
-                else "native-office-backend"
-            ),
+            backend="kordoc-offline",
+            chunking_config=dict(chunking_config or {}),
         )
         return cls._reuse_or_create_run(
             document=document,
@@ -337,13 +356,13 @@ class ParserRunService:
             coordinator=coordinator,
             base_request=base_request,
             source_format=source_format,
-            parser_name="docling",
+            parser_name=selection.engine,
             expected_page_count=0,
             force_new=force_new,
         )
 
     @classmethod
-    @DB.connection_context()
+    @_connection_context_if_needed
     def prepare_hangul_run(
         cls,
         *,
@@ -352,26 +371,30 @@ class ParserRunService:
         source_format: SourceFormat,
         config: ParserPlatformConfig | None = None,
         force_new: bool = False,
+        chunking_config: dict[str, Any] | None = None,
     ) -> PreparedParserRun:
         if source_format not in {SourceFormat.HWP, SourceFormat.HWPX}:
             raise ValueError("prepare_hangul_run requires HWP or HWPX")
         runtime = config or ParserPlatformConfig.from_env()
-        runtime.require_hwp_queue_ready(document_id=document["id"], source_format=source_format.value)
+        runtime.require_queue_ready()
         mime = SOURCE_MIME_TYPES[source_format]
         source_hash = hashlib.sha256(source_bytes).hexdigest()
         coordinator = ParserCoordinator(runtime)
+        source = SourceDescriptor(
+            filename=document.get("name") or f"{document['id']}.{source_format.value}",
+            content=source_bytes,
+            declared_mime=mime,
+            sniffed_mime=mime,
+        )
+        selection = coordinator.dispatcher.select(source, document_id=document["id"])
         base_request = ParserRunRequest(
             document_id=document["id"],
             source_hash=source_hash,
-            source=SourceDescriptor(
-                filename=document.get("name") or f"{document['id']}.{source_format.value}",
-                content=source_bytes,
-                declared_mime=mime,
-                sniffed_mime=mime,
-            ),
-            parser_version=runtime.hwp_parser_version,
-            model_version=runtime.hwp_core_revision,
-            backend=runtime.hwp_backend,
+            source=source,
+            parser_version=runtime.kordoc_parser_version,
+            model_version=None,
+            backend="kordoc-offline",
+            chunking_config=dict(chunking_config or {}),
         )
         return cls._reuse_or_create_run(
             document=document,
@@ -379,7 +402,7 @@ class ParserRunService:
             coordinator=coordinator,
             base_request=base_request,
             source_format=source_format,
-            parser_name="rhwp",
+            parser_name=selection.engine,
             expected_page_count=0,
             force_new=force_new,
         )

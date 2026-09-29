@@ -16,6 +16,7 @@ class SourceFormat(StrEnum):
     PDF = "pdf"
     DOC = "doc"
     DOCX = "docx"
+    XLS = "xls"
     XLSX = "xlsx"
     PPTX = "pptx"
     HWP = "hwp"
@@ -41,6 +42,7 @@ class OcrRequirement(StrEnum):
 
 class ParserRunStatus(StrEnum):
     QUEUED = "QUEUED"
+    PARSING_KORDOC = "PARSING_KORDOC"
     PARSING_SURYA = "PARSING_SURYA"
     PARSING_DOCLING = "PARSING_DOCLING"
     PARSING_RHWP = "PARSING_RHWP"
@@ -137,11 +139,11 @@ class HwpTableCell(FrozenModel):
 
 class HwpProvenance(FrozenModel):
     kind: Literal["hwp", "hwpx"]
-    section_index: int = Field(ge=0)
+    section_index: int | None = Field(default=None, ge=0)
     paragraph_index: int | None = Field(default=None, ge=0)
     block_locator: str = Field(min_length=1)
     table: HwpTableCell | None = None
-    page: None = None
+    page: int | None = Field(default=None, ge=1)
     bbox: None = None
 
 

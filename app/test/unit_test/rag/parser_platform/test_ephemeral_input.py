@@ -252,3 +252,51 @@ def test_invalid_or_guard_error_reaper_fails_closed(tmp_path: Path) -> None:
     assert report.invalid == 1
     assert adapter._directory_for_token(receipt.token).exists()
     assert invalid.exists()
+
+
+def test_recent_failed_workspace_reaped_without_shortening_general_ttl(tmp_path):
+    adapter = EphemeralParserInputAdapter(tmp_path / "ephemeral", recorder=Recorder())
+    failed = _accept(adapter, job_id="failed")
+    active = _accept(adapter, job_id="active")
+
+    class TerminalGuard:
+        def claim_cleanup(self, *, job_id, protected_consumer, **kwargs):
+            assert protected_consumer
+            return Claim(job_id == "failed")
+
+    report = adapter.reap(stale_after=timedelta(hours=1), guard=Guard({}), terminal_guard=TerminalGuard())
+    assert report.removed == 1
+    assert not adapter._directory_for_token(failed.token).exists()
+    assert adapter._directory_for_token(active.token).exists()
+
+
+def test_reaper_never_removes_locked_consumer_even_with_failed_db_state(tmp_path):
+    adapter = EphemeralParserInputAdapter(tmp_path / "ephemeral", recorder=Recorder())
+    receipt = _accept(adapter)
+
+    class TerminalGuard:
+        def claim_cleanup(self, **kwargs):
+            pytest.fail("OS-held consumer lock must prevent reaching DB guard")
+
+    def consume(workspace):
+        with pytest.raises(EphemeralInputError, match="EPHEMERAL_INPUT_ALREADY_CONSUMING"):
+            adapter.cleanup(receipt, "FAILED")
+        report = adapter.reap(stale_after=timedelta(hours=1), guard=Guard({}), terminal_guard=TerminalGuard())
+        assert report.removed == 0
+        assert report.active_or_newer == 1
+        assert workspace.input_path.exists()
+
+    adapter.consume(receipt, consume)
+    assert list(adapter.root.iterdir()) == []
+
+
+def test_missing_workspace_confirmation_is_exact_and_fails_closed_on_missing_root(tmp_path):
+    adapter = EphemeralParserInputAdapter(tmp_path / "ephemeral", recorder=Recorder())
+    receipt = _accept(adapter)
+    digest = hashlib.sha256(receipt.token.encode()).hexdigest()
+    assert not adapter.workspace_is_absent(digest)
+    assert not adapter.workspace_is_absent("../escape")
+    adapter.cleanup(receipt, "FAILED")
+    assert adapter.workspace_is_absent(digest)
+    adapter.root.rmdir()
+    assert not adapter.workspace_is_absent(digest)

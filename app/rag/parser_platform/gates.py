@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from rag.parser_platform.config import ParserPlatformConfig
 from rag.parser_platform.dispatch import document_source_format
 from rag.parser_platform.errors import parser_error
-from rag.parser_platform.schemas import SourceFormat
 
 
 def enforce_prequeue_gate(document: dict, *, env: Mapping[str, str] | None = None) -> bool:
@@ -13,16 +12,9 @@ def enforce_prequeue_gate(document: dict, *, env: Mapping[str, str] | None = Non
     source_format = document_source_format(document)
     if source_format is None:
         return False
-    if source_format in {SourceFormat.HWP, SourceFormat.HWPX}:
-        if document.get("pipeline_id"):
-            raise parser_error("PARSER_PLATFORM_DATAFLOW_UNSUPPORTED")
-        config.require_hwp_queue_ready(document_id=str(document.get("id") or ""), source_format=source_format.value)
-        return True
-    if not config.enabled or not config.format_enabled(source_format.value):
-        if document.get("active_chunk_set_id"):
-            raise parser_error("PARSER_PLATFORM_DISABLED")
-        return False
     config.require_queue_ready()
+    if not config.format_enabled(source_format.value):
+        raise parser_error("PARSER_PLATFORM_DISABLED")
     if document.get("pipeline_id"):
         raise parser_error("PARSER_PLATFORM_DATAFLOW_UNSUPPORTED")
     return True

@@ -2,18 +2,59 @@
 param(
     [string]$ConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG,
     [switch]$Once,
+    [switch]$SkipRetries,
+    [string]$ClaimSourceId = '',
+    [string]$ClaimJobId = '',
     [switch]$PreviewOnly,
+    [string]$ClaimFormats = '',
+    [int]$MaxPdfPages = 0,
+    [string]$CleanupJobId,
+    [string]$CleanupVersionId,
+    [Int64]$CleanupFencingToken,
+    [string]$CleanupPlaintextExtension,
+    [switch]$AllowMalformedManifest,
     [ValidateRange(1, 300)][int]$PollSeconds = 5
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 . (Join-Path $PSScriptRoot 'DocMindUEncryptorHostWorker.Common.ps1')
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { throw 'DOCMIND_HOST_WORKER_CONFIG or -ConfigPath is required.' }
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not [string]::IsNullOrWhiteSpace($CleanupJobId)) {
+    Assert-DocMindIdentifier -Value $CleanupJobId -Name 'cleanup_job_id'
+    Assert-DocMindIdentifier -Value $CleanupVersionId -Name 'cleanup_version_id'
+    if ($CleanupFencingToken -lt 1 -or $CleanupPlaintextExtension -notmatch '^\.(pdf|doc|docx|xlsx|pptx|hwp|hwpx)$' -or $PreviewOnly -or $Once) {
+        throw 'TARGET_CLEANUP_ARGUMENTS_INVALID'
+    }
+} elseif ($CleanupVersionId -or $CleanupFencingToken -or $CleanupPlaintextExtension -or $AllowMalformedManifest) {
+    throw 'TARGET_CLEANUP_ARGUMENTS_INVALID'
+}
+$allowedClaimFormats = @()
+if (-not [string]::IsNullOrWhiteSpace($ClaimSourceId)) {
+    Assert-DocMindIdentifier -Value $ClaimSourceId -Name 'claim_source_id'
+}
+if (-not [string]::IsNullOrWhiteSpace($ClaimFormats)) {
+    $allowedClaimFormats = @($ClaimFormats.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() })
+    $validClaimFormats = @('pdf', 'doc', 'docx', 'xlsx', 'pptx')
+    if ($allowedClaimFormats.Count -eq 0 -or @($allowedClaimFormats | Where-Object { $_ -notin $validClaimFormats }).Count -gt 0 -or @($allowedClaimFormats | Select-Object -Unique).Count -ne $allowedClaimFormats.Count) {
+        throw 'CLAIM_FORMATS_INVALID'
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($ClaimJobId) -and
+    ($ClaimJobId -cnotmatch '^[0-9a-f]{32}$' -or $ClaimSourceId -ne 'dept-2-e2e' -or
+     $allowedClaimFormats.Count -ne 1 -or $allowedClaimFormats[0] -ne 'pptx' -or
+     -not $SkipRetries -or -not $Once -or $PreviewOnly -or $CleanupJobId)) {
+    throw 'CLAIM_JOB_ID_ARGUMENTS_INVALID'
+}
+if ($MaxPdfPages -ne 0 -and ($MaxPdfPages -lt 1 -or $MaxPdfPages -gt 30 -or $ClaimSourceId -ne 'dept-2-e2e' -or
+    $allowedClaimFormats.Count -ne 1 -or $allowedClaimFormats[0] -ne 'pdf' -or -not $Once -or $PreviewOnly -or $CleanupJobId)) {
+    throw 'PDF_PAGE_CAP_ARGUMENTS_INVALID'
+}
 
 $requiredConfig = @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'executable_path', 'executable_sha256', 'executable_signer_thumbprint', 'work_root')
 foreach ($name in $requiredConfig) {
@@ -248,18 +289,66 @@ function Send-CleanupReceipt {
     Send-WorkerStatusBody -JobId ([string]$Receipt.job_id) -Body $body -Purpose $Purpose
 }
 
-function Write-JobState {
-    param([string]$JobDirectory, $Lease, [string]$State)
-    $state = [ordered]@{
-        schema_version = 1
-        job_id = [string]$Lease.job_id
-        version_id = [string]$Lease.version_id
-        fencing_token = [string]$Lease.fencing_token
-        lease_expires_at = (ConvertTo-DocMindDateTimeOffset -Value $Lease.lease_expires_at -Name 'lease_expires_at').ToString('o')
-        state = $State
-        updated_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
+function Invoke-TargetHostCleanup {
+    $prepareBody = [ordered]@{
+        worker_id = [string]$config.worker_id
+        version_id = $CleanupVersionId
+        fencing_token = $CleanupFencingToken
     }
-    [IO.File]::WriteAllText((Join-Path $JobDirectory 'job-state.json'), ($state | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+    $relativeUri = "$jobsPath/$([Uri]::EscapeDataString($CleanupJobId))/cleanup/prepare"
+    $response = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri $relativeUri -Body $prepareBody
+    $prepared = [Text.Encoding]::UTF8.GetString($response.Body) | ConvertFrom-Json
+    if ([string]$prepared.job_id -ne $CleanupJobId -or [string]$prepared.version_id -ne $CleanupVersionId -or
+        [Int64]$prepared.fencing_token -ne $CleanupFencingToken -or [Int64]$prepared.plaintext_size -lt 1) {
+        throw 'TARGET_CLEANUP_PREPARE_MISMATCH'
+    }
+    $expiry = ConvertTo-DocMindDateTimeOffset -Value ([string]$prepared.lease_expires_at) -Name 'lease_expires_at'
+    if ($expiry -ge [DateTimeOffset]::UtcNow) { throw 'TARGET_CLEANUP_LEASE_ACTIVE' }
+    Assert-DocMindNoReparsePoint -LiteralPath $workRoot -Boundary $workRoot -Name 'Work root'
+    $directories = @(Get-ChildItem -LiteralPath $workRoot -Directory -Filter "$CleanupJobId-*" -Force -ErrorAction Stop)
+    if ($directories.Count -ne 1 -or $directories[0].Name -notmatch ('^{0}-[0-9a-f]{{32}}$' -f [regex]::Escape($CleanupJobId))) {
+        throw 'TARGET_CLEANUP_DIRECTORY_MISMATCH'
+    }
+    $directory = $directories[0]
+    Assert-DocMindNoReparsePoint -LiteralPath $directory.FullName -Boundary $workRoot -Name 'Cleanup target'
+    if (@(Get-ChildItem -LiteralPath $directory.FullName -Directory -Force -ErrorAction Stop).Count -ne 0) {
+        throw 'TARGET_CLEANUP_DIRECTORY_MISMATCH'
+    }
+    $files = @(Get-ChildItem -LiteralPath $directory.FullName -File -Force -ErrorAction Stop)
+    $plainName = 'plaintext' + $CleanupPlaintextExtension.ToLowerInvariant()
+    if ($files.Count -ne 2 -or @($files | Where-Object { $_.Name -notin @('job-state.json', $plainName) }).Count -ne 0) {
+        throw 'TARGET_CLEANUP_FILE_MISMATCH'
+    }
+    $statePath = Join-Path $directory.FullName 'job-state.json'
+    $plainPath = Join-Path $directory.FullName $plainName
+    Assert-DocMindNoReparsePoint -LiteralPath $statePath -Boundary $workRoot -Name 'Job state'
+    Assert-DocMindNoReparsePoint -LiteralPath $plainPath -Boundary $workRoot -Name 'Plaintext target'
+    if ((Get-Item -LiteralPath $plainPath).Length -ne [Int64]$prepared.plaintext_size) {
+        throw 'TARGET_CLEANUP_SIZE_MISMATCH'
+    }
+    $rawState = [IO.File]::ReadAllText($statePath, [Text.Encoding]::UTF8)
+    $stateRecord = $rawState | ConvertFrom-Json
+    if ($stateRecord -is [string]) {
+        if (-not $AllowMalformedManifest -or $stateRecord -ne 'System.Collections.Specialized.OrderedDictionary') {
+            throw 'TARGET_CLEANUP_MANIFEST_INVALID'
+        }
+    } elseif ([string]$stateRecord.job_id -ne $CleanupJobId -or
+        [string]$stateRecord.version_id -ne $CleanupVersionId -or
+        [Int64]$stateRecord.fencing_token -ne $CleanupFencingToken -or
+        [string]$stateRecord.state -ne 'ACKNOWLEDGED' -or
+        (ConvertTo-DocMindDateTimeOffset -Value ([string]$stateRecord.lease_expires_at) -Name 'lease_expires_at') -ne $expiry) {
+        throw 'TARGET_CLEANUP_MANIFEST_MISMATCH'
+    }
+    $exclusive = [IO.File]::Open($plainPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $exclusive.Dispose()
+    [void](Write-DocMindCleanupReceiptAtomic -ReceiptRoot $receiptRoot -JobId $CleanupJobId -VersionId $CleanupVersionId -FencingToken $CleanupFencingToken -FinalState 'CLEANUP_PENDING' -ErrorCode $null)
+    Remove-Item -LiteralPath $directory.FullName -Recurse -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $directory.FullName) { throw 'TARGET_CLEANUP_DELETE_FAILED' }
+    $receiptPath = Write-DocMindCleanupReceiptAtomic -ReceiptRoot $receiptRoot -JobId $CleanupJobId -VersionId $CleanupVersionId -FencingToken $CleanupFencingToken -FinalState 'CLEANED' -ErrorCode $null
+    $receipt = Read-DocMindCleanupReceipt -LiteralPath $receiptPath -ReceiptRoot $receiptRoot
+    Send-CleanupReceipt -Receipt $receipt
+    Remove-Item -LiteralPath $receiptPath -Force -ErrorAction Stop
+    Write-Output "Target host cleanup acknowledged: $CleanupJobId"
 }
 
 function Stop-WorkerProcessTree {
@@ -345,6 +434,7 @@ function Invoke-LeasedDecryptJob {
         try {
             $content = New-DocMindArtifactStreamContent -Stream $stream -Length $outputItem.Length
             $relativeUri = "$jobsPath/$([Uri]::EscapeDataString([string]$Lease.job_id))/artifact"
+            if ($MaxPdfPages -gt 0) { $relativeUri += "?max_pdf_pages=$MaxPdfPages" }
             $artifactHeaders = @{
                 'X-DocMind-Worker-Id' = [string]$config.worker_id
                 'X-DocMind-Version-Id' = [string]$Lease.version_id
@@ -423,6 +513,11 @@ function ConvertTo-PreviewLease {
 }
 
 [void](Assert-ExecutableIdentity)
+if (-not [string]::IsNullOrWhiteSpace($CleanupJobId)) {
+    Invoke-TargetHostCleanup
+    return
+}
+
 [IO.Directory]::CreateDirectory($workRoot) | Out-Null
 Protect-DocMindJobDirectory -LiteralPath $workRoot
 [IO.Directory]::CreateDirectory($receiptRoot) | Out-Null
@@ -468,7 +563,11 @@ do {
             $lastReceiptReplayAt = [DateTimeOffset]::UtcNow
         }
         $claimBody = [ordered]@{ worker_id = [string]$config.worker_id; protocol_version = 1; lease_seconds = $claimLeaseSeconds }
-        $claimOrder = if ($PreviewOnly) { @('preview') } elseif (-not $previewEnabled) { @('ingest') } elseif ($consecutivePreviewClaims -ge 3) { @('ingest', 'preview') } else { @('preview', 'ingest') }
+        if ($allowedClaimFormats.Count -gt 0) { $claimBody.allowed_formats = @($allowedClaimFormats) }
+        if ($SkipRetries) { $claimBody.skip_retries = $true }
+        if (-not [string]::IsNullOrWhiteSpace($ClaimSourceId)) { $claimBody.claim_source_id = $ClaimSourceId }
+        if (-not [string]::IsNullOrWhiteSpace($ClaimJobId)) { $claimBody.claim_job_id = $ClaimJobId; $claimBody.single_claim = $true }
+        $claimOrder = if ($PreviewOnly) { @('preview') } elseif ($ClaimJobId) { @('ingest') } elseif (-not $previewEnabled) { @('ingest') } elseif ($consecutivePreviewClaims -ge 3) { @('ingest', 'preview') } else { @('preview', 'ingest') }
         foreach ($purpose in $claimOrder) {
             $path = if ($purpose -eq 'preview') { $previewClaimPath } else { $claimPath }
             try {

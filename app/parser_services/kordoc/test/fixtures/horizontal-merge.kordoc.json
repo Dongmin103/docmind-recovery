@@ -1,0 +1,69 @@
+{
+  "schema_version": "docmind-kordoc-v2",
+  "patch_revision": "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b",
+  "parser_name": "kordoc",
+  "parser_version": "4.15.7",
+  "source_format": "xlsx",
+  "source_hash": "21cc87a7ac258c9f30b27e5bdc0a1dca1d0479ffa9a95a93b8c0f979c5235d83",
+  "blocks": [
+    {
+      "type": "heading",
+      "text": "HorizontalData",
+      "level": 2,
+      "pageNumber": 1
+    },
+    {
+      "type": "table",
+      "table": {
+        "rows": 2,
+        "cols": 3,
+        "cells": [
+          [
+            {
+              "text": "HORIZONTAL",
+              "colSpan": 3,
+              "rowSpan": 1
+            },
+            {
+              "text": "",
+              "colSpan": 1,
+              "rowSpan": 1
+            },
+            {
+              "text": "",
+              "colSpan": 1,
+              "rowSpan": 1
+            }
+          ],
+          [
+            {
+              "text": "Visible cell",
+              "colSpan": 1,
+              "rowSpan": 1
+            },
+            {
+              "text": "SECOND",
+              "colSpan": 1,
+              "rowSpan": 1
+            },
+            {
+              "text": "THIRD",
+              "colSpan": 1,
+              "rowSpan": 1
+            }
+          ]
+        ],
+        "hasHeader": true
+      },
+      "pageNumber": 1
+    }
+  ],
+  "markdown": "## HorizontalData\n\n<table>\n<tr><th colspan=\"3\">HORIZONTAL</th></tr>\n<tr><td>Visible cell</td><td>SECOND</td><td>THIRD</td></tr>\n</table>",
+  "metadata": {
+    "pageCount": 1,
+    "author": "openpyxl",
+    "createdAt": "2026-09-29T09:11:29Z",
+    "modifiedAt": "2026-09-29T09:11:29Z"
+  },
+  "warnings": []
+}
