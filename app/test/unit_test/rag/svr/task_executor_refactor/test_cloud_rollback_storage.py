@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,7 +12,9 @@ if pdf_parser_stub is not None and not hasattr(pdf_parser_stub, "PlainParser"):
     pdf_parser_stub.VisionParser = pdf_parser_stub.RAGFlowPdfParser
     pdf_parser_stub.MAXIMUM_PAGE_NUMBER = 1000000
 
-from rag.svr.task_executor_refactor.chunk_service import ChunkService
+from common import settings
+from common.storage_attempt_audit import StorageAttemptAudit
+from rag.svr.task_executor_refactor.chunk_service import ChunkService, chunk_parser_platform_document
 
 
 @pytest.mark.parametrize("ephemeral, expected_storage_calls", [(True, []), (False, [("kb_test", "chunk-1")])])
@@ -53,3 +56,21 @@ def test_failed_chunk_checkpoint_rolls_back_index_without_cloud_storage_delete(
     assert inserted == ["chunk-1"]
     assert deleted == ["chunk-1"]
     assert storage_calls == expected_storage_calls
+
+
+def test_kordoc_chunk_boundary_records_its_own_duration(tmp_path, monkeypatch):
+    document = SimpleNamespace(parser_name="kordoc", parse_run_id="d" * 32)
+    expected = [{"id": "chunk-1"}]
+    monkeypatch.setattr("rag.parser_platform.office_chunker.OfficeChunker.chunk", lambda self, *args, **kwargs: expected)
+    audit = StorageAttemptAudit(object(), tmp_path)
+    monkeypatch.setattr(settings, "STORAGE_IMPL", audit, raising=False)
+
+    with audit.attempt("c" * 32, 1):
+        chunks = asyncio.run(
+            chunk_parser_platform_document(document, config=None, parser_config={}, source_bytes=b"synthetic")
+        )
+
+    report = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert chunks == expected
+    assert [(stage["name"], stage["parse_run_id"]) for stage in report["stages"]] == [("chunk", "d" * 32)]
+    assert report["stages"][0]["duration_ns"] >= 0

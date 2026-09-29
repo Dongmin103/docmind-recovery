@@ -34,6 +34,7 @@ from typing import Any, Dict, List
 
 import xxhash
 from common import settings
+from common.storage_attempt_audit import stage_scope
 from common.connection_utils import timeout
 from common.constants import PAGERANK_FLD, TAG_FLD
 from common.misc_utils import thread_pool_exec
@@ -115,10 +116,11 @@ async def chunk_parser_platform_document(document, *, config, parser_config: dic
 
     if document.parser_name != "kordoc":
         raise ValueError("search parser must be Kordoc")
-    return await asyncio.to_thread(
-        OfficeChunker().chunk, document,
-        parser_config=parser_config, source_bytes=source_bytes,
-    )
+    with stage_scope(getattr(settings, "STORAGE_IMPL", None), "chunk", document.parse_run_id):
+        return await asyncio.to_thread(
+            OfficeChunker().chunk, document,
+            parser_config=parser_config, source_bytes=source_bytes,
+        )
 
 
 class ChunkService:

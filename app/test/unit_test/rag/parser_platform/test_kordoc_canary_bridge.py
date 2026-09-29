@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
+from common import settings
+from common.storage_attempt_audit import StorageAttemptAudit
 
 from rag.parser_platform.config import ParserPlatformConfig
 from rag.parser_platform.coordinator import PreparedParserRun
@@ -54,11 +57,14 @@ def test_kordoc_bridge_stores_v2_raw_and_normalized_artifacts(monkeypatch, tmp_p
     progress = []
     config = ParserPlatformConfig(artifact_root=str(tmp_path), kordoc_service_url="http://kordoc-parser-pilot:8095")
     bridge = ParserPlatformStandardBridge.from_config(config, progress=lambda phase, details: progress.append(phase))
-    document = bridge.parse(
-        prepared=prepared, source_bytes=source, source_document_id="doc-a",
-        source_format=source_format, expected_page_count=1 if source_format == SourceFormat.PDF else 0,
-        trace_id="trace-a",
-    )
+    audit = StorageAttemptAudit(object(), tmp_path)
+    monkeypatch.setattr(settings, "STORAGE_IMPL", audit, raising=False)
+    with audit.attempt("c" * 32, 1):
+        document = bridge.parse(
+            prepared=prepared, source_bytes=source, source_document_id="doc-a",
+            source_format=source_format, expected_page_count=1 if source_format == SourceFormat.PDF else 0,
+            trace_id="trace-a",
+        )
     assert calls == [(source, source_format.value, config.kordoc_service_url, config.kordoc_deadline_seconds,
                       config.max_pdf_pages if source_format == SourceFormat.PDF else None)]
     assert document.parser_name == "kordoc"
@@ -66,6 +72,9 @@ def test_kordoc_bridge_stores_v2_raw_and_normalized_artifacts(monkeypatch, tmp_p
     assert any("Alpha funding 123" in block.text for block in document.blocks)
     assert progress == ["PARSING_KORDOC", "NORMALIZING"]
     assert (tmp_path / "runs" / prepared.parse_run_id / "normalized-document.json").is_file()
+    report = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert [stage["name"] for stage in report["stages"]] == ["parse_http", "normalize_artifacts"]
+    assert all(stage["duration_ns"] >= 0 for stage in report["stages"])
 
 
 def test_kordoc_bridge_rejects_wrong_parser_version_before_writing_artifacts(monkeypatch, tmp_path) -> None:

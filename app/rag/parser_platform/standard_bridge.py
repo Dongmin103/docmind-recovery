@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 
+from common import settings
+from common.storage_attempt_audit import stage_scope
 from rag.parser_platform.artifact_repository import ParserArtifactRepository
 from rag.parser_platform.chunk_adapter import CommonToStandardChunkAdapter
 from rag.parser_platform.config import ParserPlatformConfig
@@ -57,46 +59,49 @@ class ParserPlatformStandardBridge:
             if source_format not in SourceFormat:
                 raise ValueError("unsupported Kordoc source format")
             self._emit("PARSING_KORDOC", {"source_format": source_format.value})
-            result = parse_pilot_service(
-                source_bytes,
-                source_format.value,
-                service_url=self.config.kordoc_service_url,
-                timeout=self.config.kordoc_deadline_seconds,
-                max_pdf_pages=self.config.max_pdf_pages if source_format == SourceFormat.PDF else None,
-            )
-            if (result.get("schema_version") != "docmind-kordoc-v2"
-                    or result.get("parser_version") != prepared.parser_version
-                    or result.get("patch_revision") != self.config.kordoc_patch_revision
-                    or result.get("source_format") != source_format.value
-                    or result.get("source_hash") != hashlib.sha256(source_bytes).hexdigest()):
-                raise ValueError("Kordoc response identity mismatch")
-            pdf_page_count = 0
-            if source_format == SourceFormat.PDF:
-                pdf_page_count = (result.get("metadata") or {}).get("pageCount")
-                if not isinstance(pdf_page_count, int) or pdf_page_count < 1:
-                    raise ValueError("Kordoc PDF page count missing")
-                if pdf_page_count > self.config.max_pdf_pages:
-                    raise ValueError("Kordoc PDF exceeds page limit")
-                if expected_page_count and pdf_page_count != expected_page_count:
-                    raise ValueError("Kordoc PDF page count mismatch")
-                if len(result.get("pdf_pages") or []) != pdf_page_count:
-                    raise ValueError("Kordoc PDF page metadata incomplete")
-            raw_ref = self.artifacts.write_json(
-                parse_run_id=prepared.parse_run_id, name="kordoc-raw", payload=result,
-            )
-            document = normalize_pilot_document(
-                result, source_bytes,
-                source_document_id=source_document_id,
-                parse_run_id=prepared.parse_run_id,
-                chunk_set_id=prepared.chunk_set_id,
-            ).model_copy(update={"raw_artifact_ref": raw_ref, "backend": prepared.backend})
-            if document.status in {ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL}:
-                raise ValueError("Kordoc produced an incomplete document")
-            self.artifacts.write_json(
-                parse_run_id=prepared.parse_run_id,
-                name="normalized-document",
-                payload=document.model_dump(mode="json"),
-            )
+            storage = getattr(settings, "STORAGE_IMPL", None)
+            with stage_scope(storage, "parse_http", prepared.parse_run_id):
+                result = parse_pilot_service(
+                    source_bytes,
+                    source_format.value,
+                    service_url=self.config.kordoc_service_url,
+                    timeout=self.config.kordoc_deadline_seconds,
+                    max_pdf_pages=self.config.max_pdf_pages if source_format == SourceFormat.PDF else None,
+                )
+            with stage_scope(storage, "normalize_artifacts", prepared.parse_run_id):
+                if (result.get("schema_version") != "docmind-kordoc-v2"
+                        or result.get("parser_version") != prepared.parser_version
+                        or result.get("patch_revision") != self.config.kordoc_patch_revision
+                        or result.get("source_format") != source_format.value
+                        or result.get("source_hash") != hashlib.sha256(source_bytes).hexdigest()):
+                    raise ValueError("Kordoc response identity mismatch")
+                pdf_page_count = 0
+                if source_format == SourceFormat.PDF:
+                    pdf_page_count = (result.get("metadata") or {}).get("pageCount")
+                    if not isinstance(pdf_page_count, int) or pdf_page_count < 1:
+                        raise ValueError("Kordoc PDF page count missing")
+                    if pdf_page_count > self.config.max_pdf_pages:
+                        raise ValueError("Kordoc PDF exceeds page limit")
+                    if expected_page_count and pdf_page_count != expected_page_count:
+                        raise ValueError("Kordoc PDF page count mismatch")
+                    if len(result.get("pdf_pages") or []) != pdf_page_count:
+                        raise ValueError("Kordoc PDF page metadata incomplete")
+                raw_ref = self.artifacts.write_json(
+                    parse_run_id=prepared.parse_run_id, name="kordoc-raw", payload=result,
+                )
+                document = normalize_pilot_document(
+                    result, source_bytes,
+                    source_document_id=source_document_id,
+                    parse_run_id=prepared.parse_run_id,
+                    chunk_set_id=prepared.chunk_set_id,
+                ).model_copy(update={"raw_artifact_ref": raw_ref, "backend": prepared.backend})
+                if document.status in {ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL}:
+                    raise ValueError("Kordoc produced an incomplete document")
+                self.artifacts.write_json(
+                    parse_run_id=prepared.parse_run_id,
+                    name="normalized-document",
+                    payload=document.model_dump(mode="json"),
+                )
             details = {"blocks": len(document.blocks)}
             if pdf_page_count:
                 details.update(expected_pages=pdf_page_count, completed_pages=pdf_page_count,

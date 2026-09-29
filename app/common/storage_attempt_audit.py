@@ -7,10 +7,12 @@ import os
 import re
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
+from time import perf_counter_ns
 
 
 _METHODS = ("get", "put", "delete", "rm", "obj_exist", "health")
@@ -46,20 +48,62 @@ class StorageAttemptAudit:
             raise ValueError("storage audit requires a nonnegative fence")
         if not self._root.is_dir():
             raise ValueError("storage audit root is unavailable")
-        state = {"lock": threading.Lock(), "methods": dict.fromkeys(_METHODS, 0)}
+        state = {"lock": threading.Lock(), "methods": dict.fromkeys(_METHODS, 0), "stages": []}
         token = self._active.set(state)
+        started_ns = perf_counter_ns()
+        started_utc = datetime.now(UTC).isoformat()
+        status = "ok"
         try:
             yield
+        except BaseException:
+            status = "error"
+            raise
         finally:
             self._active.reset(token)
             record = {
                 "job_id": job_id,
                 "fencing_token": fencing_token,
                 "attempt_id": uuid.uuid4().hex,
+                "started_utc": started_utc,
+                "finished_utc": datetime.now(UTC).isoformat(),
+                "duration_ns": perf_counter_ns() - started_ns,
+                "status": status,
                 "methods": state["methods"],
+                "stages": state["stages"],
             }
             destination = self._root / f"{job_id}-{fencing_token}-{record['attempt_id']}.json"
             descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 json.dump(record, stream, sort_keys=True, separators=(",", ":"))
                 stream.write("\n")
+
+    @contextmanager
+    def stage(self, name: str, parse_run_id: str):
+        if not re.fullmatch(r"[a-z_]{1,32}", name) or not re.fullmatch(r"[0-9a-f]{32}", parse_run_id):
+            raise ValueError("storage audit stage requires safe identifiers")
+        state = self._active.get()
+        if state is None:
+            yield
+            return
+        started_ns = perf_counter_ns()
+        status = "ok"
+        try:
+            yield
+        except BaseException:
+            status = "error"
+            raise
+        finally:
+            stage = {
+                "name": name,
+                "parse_run_id": parse_run_id,
+                "duration_ns": perf_counter_ns() - started_ns,
+                "status": status,
+            }
+            with state["lock"]:
+                state["stages"].append(stage)
+
+
+def stage_scope(storage, name: str, parse_run_id: str):
+    if isinstance(storage, StorageAttemptAudit):
+        return storage.stage(name, parse_run_id)
+    return nullcontext()
