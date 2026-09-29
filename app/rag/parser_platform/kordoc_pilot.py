@@ -1,4 +1,4 @@
-"""Isolated HWP/HWPX pilot that feeds kordoc IR into the current HWP chunker.
+"""Isolated kordoc client and HWP/HWPX chunking pilot.
 
 IR locators are parser positions, not fabricated HWP section/paragraph positions.
 This module does not select production parser runs or activate search chunks.
@@ -17,6 +17,8 @@ import urllib.request
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+PILOT_FORMATS = frozenset({"hwp", "hwpx", "docx", "pdf", "xlsx"})
 
 
 def blocks_for_hwp_chunker(ir_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -76,10 +78,10 @@ def blocks_for_hwp_chunker(ir_blocks: list[dict[str, Any]]) -> list[dict[str, An
     return blocks
 
 
-def parse_hwp_pilot(source_bytes: bytes, source_format: str, *, node: str | None = None, timeout: int = 900) -> dict[str, Any]:
+def parse_pilot(source_bytes: bytes, source_format: str, *, node: str | None = None, timeout: int = 900) -> dict[str, Any]:
     """Run a separate Node process so a timeout stops the parser itself."""
-    if source_format not in {"hwp", "hwpx"}:
-        raise ValueError("HWP/HWPX pilot only")
+    if source_format not in PILOT_FORMATS:
+        raise ValueError("unsupported kordoc pilot format")
     if not source_bytes or len(source_bytes) > 64 * 1024 * 1024:
         raise ValueError("source is empty or exceeds the pilot limit")
     node_binary = node or os.environ.get("DOCMIND_KORDOC_NODE") or shutil.which("node")
@@ -112,12 +114,12 @@ def parse_hwp_pilot(source_bytes: bytes, source_format: str, *, node: str | None
     return result
 
 
-def parse_hwp_pilot_service(
+def parse_pilot_service(
     source_bytes: bytes, source_format: str, *, service_url: str, timeout: int = 900,
 ) -> dict[str, Any]:
     """Call the isolated kordoc HTTP service without retaining a source path."""
-    if source_format not in {"hwp", "hwpx"}:
-        raise ValueError("HWP/HWPX pilot only")
+    if source_format not in PILOT_FORMATS:
+        raise ValueError("unsupported kordoc pilot format")
     if not source_bytes or len(source_bytes) > 64 * 1024 * 1024:
         raise ValueError("source is empty or exceeds the pilot limit")
     if not service_url.startswith("http://"):
@@ -144,6 +146,11 @@ def parse_hwp_pilot_service(
             or result.get("parser_name") != "kordoc"):
         raise ValueError("kordoc pilot response identity mismatch")
     return result
+
+
+# Preserve the original HWP pilot entry points for existing benchmark scripts.
+parse_hwp_pilot = parse_pilot
+parse_hwp_pilot_service = parse_pilot_service
 
 
 @lru_cache(maxsize=4)

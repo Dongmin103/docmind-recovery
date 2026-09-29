@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -96,4 +97,12 @@ def test_pilot_http_client_rejects_response_for_another_source(monkeypatch) -> N
         }).encode()),
     )
     with pytest.raises(ValueError, match="identity mismatch"):
-        pilot.parse_hwp_pilot_service(b"synthetic", "hwpx", service_url="http://127.0.0.1:8095")
+        pilot.parse_pilot_service(b"synthetic", "hwpx", service_url="http://127.0.0.1:8095")
+
+
+def test_pilot_http_client_accepts_docx(monkeypatch) -> None:
+    source = b"synthetic docx"
+    expected = {"parser_name": "kordoc", "source_format": "docx",
+                "source_hash": hashlib.sha256(source).hexdigest(), "blocks": [{}]}
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: io.BytesIO(json.dumps(expected).encode()))
+    assert pilot.parse_pilot_service(source, "docx", service_url="http://127.0.0.1:8095") == expected
