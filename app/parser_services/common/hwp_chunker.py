@@ -45,6 +45,11 @@ class MarkdownChunkingSerializerProvider(BaseSerializerProvider):
 
 
 def _table_key(block: dict[str, Any]) -> str:
+    group_id = block.get("table_group_id")
+    if group_id:
+        if block["locator"].startswith(group_id + "/cell/"):
+            return group_id
+        raise ValueError("table cell group does not match its locator")
     match = TABLE_LOCATOR.match(block["locator"])
     if match is None:
         raise ValueError("table cell locator is invalid")

@@ -19,7 +19,7 @@ def load(name, path):
     spec.loader.exec_module(module)
     return module
 
-hybrid = load("rhwp_chunker_under_test", SERVICE_DIR / "hybrid_chunker.py")
+hybrid = load("rhwp_chunker_under_test", ROOT / "parser_services" / "common" / "hwp_chunker.py")
 
 def fixture(rows=9, spans=(), words=16):
     blocks = [{
@@ -135,8 +135,8 @@ class RhwpChunkerTest(unittest.TestCase):
         self.assert_preserved(blocks, result)
 
     def test_health_and_chunk_manifest_use_same_policy_identity(self):
-        previous = sys.modules.get("hybrid_chunker")
-        sys.modules["hybrid_chunker"] = hybrid
+        previous = sys.modules.get("hwp_chunker")
+        sys.modules["hwp_chunker"] = hybrid
         service = load("rhwp_service_under_test", SERVICE_DIR / "service.py")
         import os
         old_path = os.environ.get("RHWP_CHUNK_TOKENIZER_PATH")
@@ -157,9 +157,9 @@ class RhwpChunkerTest(unittest.TestCase):
             else:
                 os.environ["RHWP_CHUNK_TOKENIZER_PATH"] = old_path
             if previous is None:
-                sys.modules.pop("hybrid_chunker", None)
+                sys.modules.pop("hwp_chunker", None)
             else:
-                sys.modules["hybrid_chunker"] = previous
+                sys.modules["hwp_chunker"] = previous
 
 if __name__ == "__main__":
     unittest.main()

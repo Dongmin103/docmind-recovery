@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     groupadd --gid 10001 parser && \
     useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser
 
-COPY parser_services/rhwp/service.py parser_services/rhwp/hybrid_chunker.py /opt/rhwp/
+COPY parser_services/rhwp/service.py parser_services/common/hwp_chunker.py /opt/rhwp/
 COPY parser_services/rhwp/tokenizer/ /opt/rhwp/tokenizer/
 
 ENV PATH="/opt/rhwp/.venv/bin:${PATH}" \

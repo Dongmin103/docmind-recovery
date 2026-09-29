@@ -131,7 +131,7 @@ class RhwpEngine:
     def __init__(self) -> None:
         self.parser_version = importlib.metadata.version("rhwp-python")
         self.docling_core_version = importlib.metadata.version("docling-core")
-        from hybrid_chunker import HwpHybridChunker
+        from hwp_chunker import HwpHybridChunker
         from rhwp import rhwp_core_version
 
         self.backend = f"rhwp-core-{rhwp_core_version()}"
