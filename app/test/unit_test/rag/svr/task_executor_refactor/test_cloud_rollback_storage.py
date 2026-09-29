@@ -36,9 +36,13 @@ def test_failed_chunk_checkpoint_rolls_back_index_without_cloud_storage_delete(
     monkeypatch.setattr(service, "_intercept_doc_store_insert", insert)
     monkeypatch.setattr(service, "_intercept_doc_store_delete", delete)
     monkeypatch.setattr(service, "_update_task_chunk_ids", AsyncMock(return_value=False))
+    from rag.svr.task_executor_refactor import chunk_service
+
     monkeypatch.setattr(
-        "rag.svr.task_executor_refactor.chunk_service.settings.STORAGE_IMPL",
+        chunk_service.settings,
+        "STORAGE_IMPL",
         SimpleNamespace(delete=lambda kb_id, chunk_id: storage_calls.append((kb_id, chunk_id))),
+        raising=False,
     )
 
     result = asyncio.run(

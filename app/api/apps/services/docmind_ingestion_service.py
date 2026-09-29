@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +32,7 @@ from common.docmind_source_path import (
     normalize_logical_relative_path,
 )
 from common.time_utils import current_timestamp
+from common.storage_attempt_audit import StorageAttemptAudit
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -1117,6 +1118,14 @@ def process_decrypted_artifact(
     receipt = receipt_holder[0]
 
     def parse_and_activate(workspace: TemporaryParserWorkspace):
+        from common import settings
+
+        storage = getattr(settings, "STORAGE_IMPL", None)
+        audit = storage.attempt(job_id, fencing_token) if isinstance(storage, StorageAttemptAudit) else nullcontext()
+        with audit:
+            return run_and_activate(workspace)
+
+    def run_and_activate(workspace: TemporaryParserWorkspace):
         if _now() >= deadline_at:
             raise DocmindIngestionError("DOCMIND_INGESTION_PIPELINE_TIMEOUT")
         staged = runner.run(
