@@ -1,0 +1,22 @@
+FROM node:24.19.0-bookworm-slim@sha256:e5a8dee7bc1e6a215d224a7ef8206f7e77271bc3cabd5febf2beafac0674f174
+
+WORKDIR /opt/kordoc
+RUN npm install --global pnpm@11.19.0
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts --prod && \
+    groupadd --gid 10001 parser && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parser
+COPY src/ ./src/
+
+ENV KORDOC_OFFLINE=1 \
+    KORDOC_HOST=0.0.0.0 \
+    KORDOC_PORT=8095 \
+    KORDOC_MAX_SOURCE_BYTES=67108864 \
+    KORDOC_TIMEOUT_MS=900000 \
+    NODE_ENV=production
+
+USER 10001:10001
+EXPOSE 8095
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=12 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8095/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+ENTRYPOINT ["node", "/opt/kordoc/src/server.mjs"]

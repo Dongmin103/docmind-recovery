@@ -206,6 +206,29 @@ services:
     pids_limit: 64
     restart: unless-stopped
 
+  kordoc-parser-pilot:
+    profiles: [parser-platform-kordoc-pilot]
+    platform: linux/amd64
+    image: ${KORDOC_PILOT_IMAGE:-docmind-kordoc-parser:4.15.7-pilot-amd64}
+    build:
+      context: ../parser_services/kordoc
+      dockerfile: Containerfile
+    environment:
+      KORDOC_OFFLINE: "1"
+      KORDOC_MAX_SOURCE_BYTES: "67108864"
+    networks:
+      parser_internal:
+        aliases: [kordoc-parser-pilot]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${KORDOC_PILOT_MEMORY_LIMIT:-2g}
+    cpus: ${KORDOC_PILOT_CPUS:-2}
+    pids_limit: 64
+    restart: unless-stopped
+
 networks:
   parser_internal:
     internal: true

@@ -1,0 +1,14 @@
+{
+  "name": "docmind-kordoc-parser",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "kordoc": "4.15.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
