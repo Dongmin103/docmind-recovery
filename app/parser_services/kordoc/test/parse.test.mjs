@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { compare, diffBlocks, markdownToHwpx } from 'kordoc';
 import { parseDocument } from '../src/parse.mjs';
@@ -44,3 +45,20 @@ test('compare API finds a changed cell in two synthetic HWPX versions', async ()
   assert.ok(result.diffs.some(diff => diff.cellDiffs?.flat().some(cell =>
     cell.before === '100' && cell.after === '200' && cell.type === 'modified')));
 });
+
+for (const format of ['docx', 'pdf', 'xlsx']) {
+  test(`${format.toUpperCase()} pilot returns source-identified blocks`, async () => {
+    const source = readFileSync(new URL(`./fixtures/office-sample.${format}`, import.meta.url));
+    const hash = createHash('sha256').update(source).digest('hex');
+    const result = await parseDocument({
+      source_base64: source.toString('base64'), source_hash: hash, source_format: format,
+    });
+    assert.equal(result.source_format, format);
+    assert.equal(result.source_hash, hash);
+    assert.ok(result.blocks.length > 0);
+    assert.ok(JSON.stringify(result.blocks).includes('Alpha'));
+    if (format === 'pdf') {
+      assert.ok(result.blocks.some(block => block.bbox && block.pageNumber === 1));
+    }
+  });
+}

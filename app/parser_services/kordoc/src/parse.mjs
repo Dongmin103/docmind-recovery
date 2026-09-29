@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { VERSION, parse } from 'kordoc';
 
 const MAX_SOURCE_BYTES = Number(process.env.KORDOC_MAX_SOURCE_BYTES || 64 * 1024 * 1024);
+const PILOT_FORMATS = new Set(['hwp', 'hwpx', 'docx', 'pdf', 'xlsx']);
 
 export async function parseDocument(payload) {
-  if (!payload || !['hwp', 'hwpx'].includes(payload.source_format)) {
+  if (!payload || !PILOT_FORMATS.has(payload.source_format)) {
     throw new Error('unsupported source format');
   }
   if (typeof payload.source_base64 !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(payload.source_base64)) {
