@@ -648,7 +648,11 @@ class ChunkService:
         """Roll back an insertion by deleting chunks and images."""
         await self._intercept_doc_store_delete({"id": chunk_ids}, search.index_name(task_tenant_id), task_dataset_id)
 
-        # Delete associated images
+        # Cloud source chunks never persist images in object storage.
+        if getattr(self._task_context, "_docmind_ephemeral_workspace", None) is not None:
+            return
+
+        # Delete associated images for ordinary tasks.
         tasks = []
         for chunk_id in chunk_ids:
             tasks.append(asyncio.create_task(self._delete_image(task_dataset_id, chunk_id)))
