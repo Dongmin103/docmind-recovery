@@ -4,7 +4,8 @@ param(
     [string]$EnvironmentPath,
     [string]$DockerStoragePath,
     [switch]$RequireModelCredentials,
-    [switch]$RequireEncryptedHostStorage
+    [switch]$RequireEncryptedHostStorage,
+    [switch]$ApprovedDept2Reindex
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,8 +91,11 @@ function Require-SecretFile($Values, [string]$Name, [int]$MinimumLength) {
 }
 
 $values = Read-DotEnv $resolvedEnvironment
-Require-Exact $values 'DOCMIND_DEV_SECURITY_MODE' 'isolated-synthetic-only'
-Require-Exact $values 'DOCMIND_DEV_DATA_CLASS' 'synthetic-only'
+Require-Exact $values 'DOCMIND_DEV_SECURITY_MODE' $(if ($ApprovedDept2Reindex) { 'isolated-approved-dept2-reindex' } else { 'isolated-synthetic-only' })
+Require-Exact $values 'DOCMIND_DEV_DATA_CLASS' $(if ($ApprovedDept2Reindex) { 'approved-dept2-reindex' } else { 'synthetic-only' })
+if ($ApprovedDept2Reindex) {
+    Require-Exact $values 'DOCMIND_DEV_APPROVED_SOURCE_ID' 'dept-2-e2e'
+}
 Require-Exact $values 'DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK' '1'
 Require-Exact $values 'DOCMIND_DEV_EXTERNAL_API_POLICY' 'https-only'
 
@@ -142,9 +146,10 @@ try {
 
 & (Join-Path $PSScriptRoot 'Test-WindowsDevelopmentCompose.ps1') `
     -DockerCommand $DockerCommand `
-    -EnvironmentPath $resolvedEnvironment
+    -EnvironmentPath $resolvedEnvironment `
+    -ApprovedDept2Reindex:$ApprovedDept2Reindex
 
-$storageMessage = 'Host storage encryption was not asserted; this profile remains synthetic-data-only.'
+$storageMessage = 'Host storage encryption was not asserted; this is not a production security profile.'
 if ($RequireEncryptedHostStorage) {
     $command = Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue
     if (-not $command) {
@@ -175,5 +180,5 @@ if ($RequireEncryptedHostStorage) {
 }
 
 Write-Output 'Windows development security validation passed.'
-Write-Output 'Verified: synthetic-only mode, unique non-placeholder secrets, restricted ACL, Git ignore, runtime gates, and loopback-only ports.'
+Write-Output "Verified: $(if ($ApprovedDept2Reindex) { 'approved DEPT2 reindex' } else { 'synthetic-only' }) mode, unique non-placeholder secrets, restricted ACL, Git ignore, runtime gates, and loopback-only ports."
 Write-Output $storageMessage

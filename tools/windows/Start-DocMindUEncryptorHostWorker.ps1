@@ -13,6 +13,7 @@ param(
     [Int64]$CleanupFencingToken,
     [string]$CleanupPlaintextExtension,
     [switch]$AllowMalformedManifest,
+    [string]$TimingRoot = '',
     [ValidateRange(1, 300)][int]$PollSeconds = 5
 )
 
@@ -93,6 +94,55 @@ foreach ($source in @($config.sources)) {
     $sources[[string]$source.source_id] = $sourceRoot
 }
 if ($sources.Count -eq 0) { throw 'At least one source is required.' }
+if (-not [string]::IsNullOrWhiteSpace($TimingRoot)) {
+    $TimingRoot = [IO.Path]::GetFullPath($TimingRoot)
+    if (-not $ClaimSourceId -or $ClaimSourceId -ne 'dept-2-e2e') { throw 'HOST_TIMING_REQUIRES_DEPT2_SCOPE' }
+    [IO.Directory]::CreateDirectory($TimingRoot) | Out-Null
+    Protect-DocMindJobDirectory -LiteralPath $TimingRoot
+}
+
+function Get-HostTimingNanoseconds {
+    param([Diagnostics.Stopwatch]$Clock)
+    return [Int64][Math]::Round($Clock.ElapsedTicks * (1000000000.0 / [Diagnostics.Stopwatch]::Frequency))
+}
+
+function Get-HostTimingSpan {
+    param($Start, $End)
+    if ($null -eq $Start -or $null -eq $End) { return $null }
+    return [Int64]($End - $Start)
+}
+
+function Save-HostTiming {
+    param($Lease, [string]$Extension, [string]$State, [string]$Code, [string]$StartedUtc, [hashtable]$Marks)
+    if ([string]::IsNullOrWhiteSpace($TimingRoot)) { return }
+    try {
+        $record = [ordered]@{
+            job_id = [string]$Lease.job_id
+            fencing_token = [Int64]$Lease.fencing_token
+            source_id = [string]$Lease.source_id
+            extension = $Extension.ToLowerInvariant()
+            started_utc = $StartedUtc
+            finished_utc = [DateTimeOffset]::UtcNow.ToString('o')
+            state = $State
+            error_code = $Code
+            durations_ns = [ordered]@{
+                source_verify = Get-HostTimingSpan $Marks.start $Marks.preflight
+                decrypt = Get-HostTimingSpan $Marks.preflight $Marks.decrypt
+                post_decrypt_verify = Get-HostTimingSpan $Marks.decrypt $Marks.verify
+                delivery_roundtrip = Get-HostTimingSpan $Marks.verify $Marks.delivery
+                host_cleanup = Get-HostTimingSpan $Marks.cleanup_start $Marks.cleanup_end
+                status_ack = Get-HostTimingSpan $Marks.cleanup_end $Marks.end
+                host_total = Get-HostTimingSpan $Marks.start $Marks.end
+            }
+        }
+        $destination = Join-Path $TimingRoot ('{0}-{1}.json' -f $record.job_id, $record.fencing_token)
+        $bytes = [Text.Encoding]::UTF8.GetBytes(($record | ConvertTo-Json -Compress -Depth 5) + [Environment]::NewLine)
+        $stream = [IO.File]::Open($destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    } catch {
+        Write-Warning 'Host timing record could not be written.'
+    }
+}
 foreach ($sourceRoot in $sources.Values) {
     $sourcePrefix = $sourceRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     $workPrefix = $workRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -364,6 +414,9 @@ function Stop-WorkerProcessTree {
 
 function Invoke-LeasedDecryptJob {
     param($Lease, [ValidateSet('ingest', 'preview')][string]$Purpose = 'ingest')
+    $hostClock = [Diagnostics.Stopwatch]::StartNew()
+    $hostStartedUtc = [DateTimeOffset]::UtcNow.ToString('o')
+    $marks = @{ start = [Int64]0; preflight = $null; decrypt = $null; verify = $null; delivery = $null; cleanup_start = $null; cleanup_end = $null; end = $null }
     if ($Purpose -eq 'preview') {
         $workRoot = $previewWorkRoot
         $receiptRoot = $previewReceiptRoot
@@ -377,6 +430,7 @@ function Invoke-LeasedDecryptJob {
     if (-not (Test-DocMindFixedTimeHexEqual $sourceHashBefore ([string]$Lease.ciphertext_sha256).ToLowerInvariant())) { throw 'SOURCE_FINGERPRINT_MISMATCH' }
     if ($Purpose -eq 'preview' -and $Lease.PSObject.Properties.Name -contains 'ciphertext_size' -and (Get-Item -LiteralPath $sourceFile).Length -ne [Int64]$Lease.ciphertext_size) { throw 'SOURCE_FINGERPRINT_MISMATCH' }
     $executableHashBefore = Assert-ExecutableIdentity
+    $marks.preflight = Get-HostTimingNanoseconds $hostClock
 
     [IO.Directory]::CreateDirectory($workRoot) | Out-Null
     Assert-DocMindNoReparsePoint -LiteralPath $workRoot -Boundary $workRoot -Name 'Work root'
@@ -422,6 +476,7 @@ function Invoke-LeasedDecryptJob {
         $outputItem = Get-Item -LiteralPath $outputFile
         if ($outputItem.Length -le 0) { throw 'OUTPUT_EMPTY' }
         if ($Purpose -eq 'preview' -and $outputItem.Length -gt 64MB) { throw 'PREVIEW_INPUT_TOO_LARGE' }
+        $marks.decrypt = Get-HostTimingNanoseconds $hostClock
 
         $sourceHashAfter = Get-DocMindFileSha256 -LiteralPath $sourceFile
         $executableHashAfter = Assert-ExecutableIdentity
@@ -430,6 +485,7 @@ function Invoke-LeasedDecryptJob {
 
         Write-JobState -JobDirectory $jobDirectory -Lease $Lease -State 'DELIVERING'
         $plainHash = Get-DocMindFileSha256 -LiteralPath $outputFile
+        $marks.verify = Get-HostTimingNanoseconds $hostClock
         $stream = [IO.File]::Open($outputFile, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
         try {
             $content = New-DocMindArtifactStreamContent -Stream $stream -Length $outputItem.Length
@@ -451,11 +507,13 @@ function Invoke-LeasedDecryptJob {
         if ($ack.accepted -ne $true -or [string]$ack.job_id -ne [string]$Lease.job_id -or [string]$ack.version_id -ne [string]$Lease.version_id -or [Int64]$ack.fencing_token -ne [Int64]$Lease.fencing_token) { throw 'DELIVERY_ACK_MISMATCH' }
         if ($Purpose -eq 'preview' -and $ack.cleanup_required -ne $true) { throw 'DELIVERY_ACK_MISMATCH' }
         $jobSucceeded = $true
+        $marks.delivery = Get-HostTimingNanoseconds $hostClock
         Write-JobState -JobDirectory $jobDirectory -Lease $Lease -State 'ACKNOWLEDGED'
     } catch {
         $errorCode = $_.Exception.Message
         if ($errorCode -notmatch '^[A-Z0-9_]+$') { $errorCode = 'HOST_WORKER_ERROR' }
     } finally {
+        $marks.cleanup_start = Get-HostTimingNanoseconds $hostClock
         if ($process) {
             try { Stop-WorkerProcessTree -Process $process } catch { $errorCode = 'PROCESS_TERMINATION_FAILED' }
             $process.Dispose()
@@ -473,6 +531,7 @@ function Invoke-LeasedDecryptJob {
         }
         $cleanupComplete = -not (Test-Path -LiteralPath $jobDirectory)
         if (-not $cleanupComplete) { $errorCode = 'PLAINTEXT_CLEANUP_FAILED'; $jobSucceeded = $false }
+        $marks.cleanup_end = Get-HostTimingNanoseconds $hostClock
     }
     $finalState = if ($jobSucceeded -and $cleanupComplete) { 'COMPLETE' } elseif (-not $cleanupComplete) { 'CLEANUP_FAILED' } else { 'FAILED' }
     if ($cleanupComplete) {
@@ -488,6 +547,8 @@ function Invoke-LeasedDecryptJob {
             Remove-Item -LiteralPath $receiptPath -Force -ErrorAction Stop
         }
     } catch { if ($jobSucceeded) { $jobSucceeded = $false; $errorCode = 'STATUS_ACK_FAILED' } }
+    $marks.end = Get-HostTimingNanoseconds $hostClock
+    Save-HostTiming -Lease $Lease -Extension $outputExtension -State $finalState -Code $errorCode -StartedUtc $hostStartedUtc -Marks $marks
     if (-not $jobSucceeded) { throw $errorCode }
 }
 

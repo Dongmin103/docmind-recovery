@@ -14,6 +14,30 @@ The repository now contains two deliberately different checks:
 The second check is a prerequisite validator. Its Compose label explicitly says
 `com.docmind.production-tls-enabled=false`. It is not a production profile.
 
+## Opt-in DEPT2 reindex test
+
+The `docker-compose-windows-dev-dept2-reindex.yml` overlay permits a specific
+real-input test of the encrypted `dept-2-e2e` source. It requires the exact
+`isolated-approved-dept2-reindex` mode, `approved-dept2-reindex` data class,
+and `dept-2-e2e` source ID. The base Compose file remains synthetic-only.
+Select the overlay and a host worker restricted to `-ClaimSourceId dept-2-e2e`
+together. Keep other source watchers and workers disabled. The overlay does not
+mount a source directory into Docker; the Windows worker decrypts one job into
+its temporary workspace and must clean it after each attempt.
+
+Initialize and validate the ignored local env with the explicit switch:
+
+```powershell
+.\tools\windows\Initialize-WindowsDevelopmentSecurity.ps1 -ApprovedDept2Reindex -Force
+.\tools\windows\Test-WindowsDevelopmentSecurity.ps1 -ApprovedDept2Reindex
+```
+
+Include `-f app/docker/docker-compose-windows-dev-dept2-reindex.yml` after the
+base Compose file when starting this test. The existing loopback, secret, ACL,
+and no-source-mount checks still apply. This test profile does not add TLS or
+encryption to the database and index volumes. The test operator must account
+for those limitations when handling the indexed real documents.
+
 ## Enforced boundary
 
 The Windows development stack accepts only these policy values:
@@ -48,11 +72,12 @@ acknowledgement of that fact, not TLS. The `https-only` external policy is a
 fail-closed configuration boundary for this profile; it does not inspect or
 replace every model provider implementation.
 
-Consequently, only non-sensitive synthetic documents may enter this stack.
-Changing `DOCMIND_DEV_DATA_CLASS` does not upgrade it; the gates reject every
-other value. Before any operating, personal, confidential, decrypted, or
-customer document is introduced, create and verify a separate deployment
-profile with:
+Consequently, the base stack accepts only non-sensitive synthetic documents.
+Changing `DOCMIND_DEV_DATA_CLASS` alone does not upgrade it; the base gate
+rejects every other value. The explicit DEPT2 test overlay described above is
+limited to the approved reindex exercise. Before using this as a production
+deployment for operating, personal, confidential, decrypted, or customer
+documents, create and verify a separate deployment profile with:
 
 - TLS for browser/API and service-to-service paths, including certificate trust
   and rotation;

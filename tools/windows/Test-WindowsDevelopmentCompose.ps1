@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$DockerCommand = 'docker',
-    [string]$EnvironmentPath
+    [string]$EnvironmentPath,
+    [switch]$ApprovedDept2Reindex
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,7 +24,12 @@ try {
     }
     $relativeEnvironment = $resolvedEnvironment.Substring($repoPrefix.Length).Replace('\', '/')
     $relativeCompose = 'app/docker/docker-compose-windows-dev.yml'
-    $jsonText = (& $DockerCommand compose --env-file $relativeEnvironment -f $relativeCompose --profile full config --format json 2>&1 | Out-String)
+    $composeArgs = @('compose', '--env-file', $relativeEnvironment, '-f', $relativeCompose)
+    if ($ApprovedDept2Reindex) {
+        $composeArgs += @('-f', 'app/docker/docker-compose-windows-dev-dept2-reindex.yml')
+    }
+    $composeArgs += @('--profile', 'full', 'config', '--format', 'json')
+    $jsonText = (& $DockerCommand @composeArgs 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) {
         throw "docker compose config failed:`n$jsonText"
     }
@@ -57,11 +63,16 @@ foreach ($gateName in @('security-gate', 'model-secret-gate')) {
 }
 
 $securityEnvironment = $config.services.'security-gate'.environment
-if ($securityEnvironment.DOCMIND_DEV_SECURITY_MODE -ne 'isolated-synthetic-only' -or
-    $securityEnvironment.DOCMIND_DEV_DATA_CLASS -ne 'synthetic-only' -or
+$expectedMode = if ($ApprovedDept2Reindex) { 'isolated-approved-dept2-reindex' } else { 'isolated-synthetic-only' }
+$expectedClass = if ($ApprovedDept2Reindex) { 'approved-dept2-reindex' } else { 'synthetic-only' }
+if ($securityEnvironment.DOCMIND_DEV_SECURITY_MODE -ne $expectedMode -or
+    $securityEnvironment.DOCMIND_DEV_DATA_CLASS -ne $expectedClass -or
     $securityEnvironment.DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK -ne '1' -or
     $securityEnvironment.DOCMIND_DEV_EXTERNAL_API_POLICY -ne 'https-only') {
-    throw 'Resolved Compose does not enforce the synthetic-only development boundary.'
+    throw 'Resolved Compose does not enforce the selected development boundary.'
+}
+if ($ApprovedDept2Reindex -and $securityEnvironment.DOCMIND_DEV_APPROVED_SOURCE_ID -ne 'dept-2-e2e') {
+    throw 'Resolved Compose does not enforce the approved DEPT2 source.'
 }
 
 $application = $config.services.'ragflow-cpu'

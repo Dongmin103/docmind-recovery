@@ -1188,15 +1188,22 @@ class HuggingFaceEmbed(Base):
         self.key = key
         self.model_name = model_name.split("___")[0]
         self.base_url = base_url or "http://127.0.0.1:8080"
+        raw_timeout = os.getenv("DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS", "30")
+        try:
+            self.request_timeout_seconds = int(raw_timeout)
+        except ValueError as error:
+            raise ValueError("Invalid local embedding timeout") from error
+        if not 30 <= self.request_timeout_seconds <= 300:
+            raise ValueError("Local embedding timeout must be 30 to 300 seconds")
 
     def encode(self, texts: list):
-        response = requests.post(f"{self.base_url}/embed", json={"inputs": texts}, headers={"Content-Type": "application/json"}, timeout=30)
+        response = requests.post(f"{self.base_url}/embed", json={"inputs": texts}, headers={"Content-Type": "application/json"}, timeout=self.request_timeout_seconds)
         _raise_model_exception_if_failed(response)
         # TEI auto-truncates oversized inputs, so no client-side truncation is needed.
         return np.array(response.json()), sum([num_tokens_from_string(text) for text in texts])
 
     def encode_queries(self, text: str):
-        response = requests.post(f"{self.base_url}/embed", json={"inputs": text}, headers={"Content-Type": "application/json"}, timeout=30)
+        response = requests.post(f"{self.base_url}/embed", json={"inputs": text}, headers={"Content-Type": "application/json"}, timeout=self.request_timeout_seconds)
         _raise_model_exception_if_failed(response)
         return np.array(response.json()[0]), num_tokens_from_string(text)
 
