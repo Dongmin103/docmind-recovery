@@ -210,8 +210,8 @@ ephemeral-workspace metadata. Regression tests cover these cases.
   document-text files, and wrote no index data. It waited for idle ingestion
   before requests and checked for concurrent ingestion after each request.
 
-The fix is in source, not deployed to the running service, and existing indexed
-HWP documents still contain their old representation. Deploying v3 and selectively
+The fix was deployed to the running service on 2026-09-30 at 14:57 KST, and existing
+indexed HWP documents still contain their old representation. Selectively
 reindexing affected documents requires the normal clean activation and cleanup
 checks plus corpus-level retrieval validation. No 200 MB/600-second success is
 claimed. Exact-input vector reuse across the three identical bodies remains a
@@ -222,3 +222,18 @@ only with evidence from the next parse, not by deleting short headings blindly.
 Aggregate-only local evidence: `.local/kordoc-t-drive-cutover/hwp-root-cause-20260930.json`
 and `hwp-table-benchmark-20260930.jsonl`. The replay script is
 `benchmark-hwp-tables.py`; no document body or vector is written to its output.
+
+### Deployment verification (2026-09-30, 14:57 KST)
+
+- Deployed source commit `b86909b` as `docmind-ragflow:hwp-table-b86909b` with
+  `docmind-kordoc-normalizer-v3`. All three deployed source hashes match the commit.
+- Replaced only the API container after checking no in-flight ingestion. The host
+  worker was temporarily stopped and restored to its enabled/running state.
+- Verified the web endpoint returns 200, unauthenticated worker claims return 401,
+  and synthetic HWP/HWPX checks preserve single-copy table text, escaped literals,
+  URI cells, page locations and distinct identities for repeated source tables.
+- Existing infrastructure, OCR-off mode and PPTX indexing remain unchanged.
+  The separate PPTX text fallback remains disabled; activation was not confirmed.
+- No existing documents were reindexed. The previous API image remains available
+  as `docmind-ragflow:before-hwp-b86909b` for rollback. Local deployment metadata and
+  the Compose entry point are in `.local/kordoc-t-drive-cutover/hwp-fix-b86909b/`.
