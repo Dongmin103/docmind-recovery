@@ -4,6 +4,14 @@ services:
   ragflow-cpu:
     environment:
       DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS: "120"
+      # Distinguish OCR-free parser runs from earlier DEPT2 attempts.
+      PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION: "disabled-for-dept2-reindex"
+
+  kordoc-parser:
+    environment:
+      # Remaining DEPT2 documents are parsed without page or embedded-image OCR.
+      KORDOC_OCR_ENABLED: "0"
+      KORDOC_REQUIRE_OCR: "0"
 
   security-gate:
     environment:
