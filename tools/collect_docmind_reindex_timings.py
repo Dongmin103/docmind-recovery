@@ -22,6 +22,7 @@ FIELDS = (
     "parse_http_s", "normalize_artifacts_s", "chunk_s", "embedding_s",
     "index_staging_s", "activation_s", "container_cleanup_s",
     "app_total_s", "host_cleanup_s", "status_ack_s", "host_total_s",
+    "app_wall_s", "host_wall_s", "app_clock_gap_s", "host_clock_gap_s",
     "observation_to_last_update_s", "audit_status", "host_state",
 )
 DB_FIELDS = (
@@ -41,6 +42,16 @@ HOST_STAGES = (
 
 def seconds(value):
     return round(value / 1_000_000_000, 3) if isinstance(value, int) else ""
+
+
+def wall_seconds(record):
+    try:
+        started = datetime.fromisoformat(record["started_utc"])
+        finished = datetime.fromisoformat(record["finished_utc"])
+        elapsed = (finished - started).total_seconds()
+        return round(elapsed, 3) if elapsed >= 0 else ""
+    except (KeyError, TypeError, ValueError):
+        return ""
 
 
 def read_records(directory: Path):
@@ -96,6 +107,8 @@ def join(db_path: Path, app_dir: Path, host_dir: Path):
                 "chunk_count": "" if db["chunk_count"] == "NULL" else db["chunk_count"],
                 "token_count": "" if db["token_count"] == "NULL" else db["token_count"],
                 "app_total_s": seconds(attempt_app.get("duration_ns")),
+                "app_wall_s": wall_seconds(attempt_app),
+                "host_wall_s": wall_seconds(attempt_host),
                 "audit_status": attempt_app.get("status", ""),
                 "host_state": attempt_host.get("state", ""),
             })
@@ -103,6 +116,11 @@ def join(db_path: Path, app_dir: Path, host_dir: Path):
                 row[stage + "_s"] = seconds(stages.get(stage, {}).get("duration_ns"))
             for stage in HOST_STAGES:
                 row[stage + "_s"] = seconds(host_durations.get(stage))
+            for name in ("app", "host"):
+                elapsed = row[name + "_total_s"]
+                wall = row[name + "_wall_s"]
+                if elapsed != "" and wall != "":
+                    row[name + "_clock_gap_s"] = round(elapsed - wall, 3)
             if attempt_host.get("started_utc") and db["created"] != "NULL":
                 # App DB timestamps are naive local KST; host records are UTC.
                 from zoneinfo import ZoneInfo
