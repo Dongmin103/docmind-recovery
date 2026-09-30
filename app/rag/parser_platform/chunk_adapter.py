@@ -58,7 +58,10 @@ class CommonToStandardChunkAdapter:
                 continue
             attachment_texts = [item.text for item in attachments_by_parent.get(block.stable_block_id, []) if item.text]
             searchable_table_html = None if block.diagnostics.get("display_html_only") else block.table_html
-            content_parts = [part for part in (block.text, searchable_table_html, *attachment_texts) if part]
+            searchable_text = block.text
+            if searchable_table_html and block.diagnostics.get("table_html_contains_text"):
+                searchable_text = None
+            content_parts = [part for part in (searchable_text, searchable_table_html, *attachment_texts) if part]
             if not content_parts:
                 continue
             metadata = {

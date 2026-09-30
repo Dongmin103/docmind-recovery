@@ -73,7 +73,7 @@ searchable text; it does not measure end-to-end HWP speed.
    metrics only: normalized block count/type, heading boundaries, chunk length
    distribution, repeated-content hash frequency, number of TEI requests,
    tokens per request, TEI wait/inference time, and vector count. Check whether
-   128-token chunk budget, atomic blocks, repeated headers, or overlapping text
+   the persisted chunk budget, atomic blocks, repeated headers, or overlapping text
    causes unnecessary chunks. Do not merge across provenance boundaries or
    silently remove searchable content.
 2. **Benchmark model throughput on identical extracted text.** When the live
@@ -86,7 +86,7 @@ searchable text; it does not measure end-to-end HWP speed.
    alone is not assumed to deliver the required ~13x end-to-end gain.
 3. **Measure higher-capacity embedding options.** Benchmark BGE-M3 on a
    suitable GPU or dedicated inference host before any production switch.
-   This workstation has a 4 GB GTX 1080; model fit and WSL inference support
+   This workstation has an 8 GB GTX 1080 (verified with `nvidia-smi`); model fit and WSL inference support
    must be tested rather than assumed. An external HTTPS embedding provider
    would require an explicit data-handling decision and a full reindex because
    model vectors cannot be mixed. The representative 200 MB sample needs at
@@ -95,7 +95,7 @@ searchable text; it does not measure end-to-end HWP speed.
    The current completed sample averages about 514 reported tokens/s during
    embedding. These are planning estimates, not hardware promises.
 4. **Reduce chunk work only where content-preserving evidence supports it.**
-   Replay the same normalized HWP blocks with current 128-token chunking and
+   Replay the same normalized HWP blocks with the measured 512-token chunking and
    candidate larger budgets; compare chunk count, total embedded tokens,
    heading/source locators, exact search hits, and retrieval recall. Test
    content-hash vector caching only for truly identical model inputs. Keep a
@@ -134,3 +134,91 @@ searchable text; it does not measure end-to-end HWP speed.
 Evidence lives in ignored `.local/kordoc-t-drive-cutover` CSV/JSON records;
 the collector adds wall-clock spans and monotonic-versus-wall gaps to expose
 clock anomalies rather than concealing them.
+
+## Follow-up: specific HWP outliers and a verified duplication fix
+
+The initial snapshot above is historical. A later read-only database/active-index
+inspection found that all 190 then-completed jobs persisted `chunk_token_num=512`
+and a newline delimiter, without an Excel override. The earlier assumption of
+a live 128-token budget was incorrect; C128 is the retrieval candidate contract.
+The embedding token counters use `cl100k_base`, not the BGE tokenizer's actual
+inference-token count.
+
+The three 1,143-chunk HWP documents have identical ordered prepared-content
+hash sequences, not merely equal chunk counts. Their encrypted source hashes
+can still differ. Each has 3,738 distinct normalized source locators and 311
+distinct persisted layout-page locators; the 36-chunk control has 38 source
+locators and 13 layout-page locators. The 137 completed HWP documents have a
+median of 10 chunks and a p95 of 193. These three outliers account for 46.75%
+of HWP chunks and 44.23% of reported HWP embedding tokens.
+
+Each large document contains 846 text chunks (200,300 prepared tokens) and 297
+table chunks (153,147 prepared tokens before client truncation). All 297 tables
+contain the same cell content twice: plain text followed by equivalent HTML.
+There are 632 heading-started chunks, including 314 single-source chunks and
+210 shorter than 32 tokens. Every source locator is used once; there is no
+evidence of recursive child normalization multiplying the source blocks.
+Heading boundaries and atomic tables explain additional chunking behavior;
+whether the heading classifier over-classified the actual document is unproven.
+
+This is not an HWP-specific model-speed defect. HWP and DOCX use the same word
+chunker, and other non-Excel formats can also use text-plus-HTML table inputs.
+XLSX instead groups rows within a budget and separates display HTML. The
+measured HWP outliers expose far more searchable content than the fast control.
+
+### Implemented change
+
+HWP/HWPX normalization now explicitly marks when the generated table HTML
+contains all cell text. The chunk adapter keeps that HTML once rather than
+prepending the redundant plain-text representation. Normalized plain cells,
+row/column spans, escaped literal text, atomic table boundaries, source
+locators, and independently repeated source tables remain intact. OCR, BGE-M3,
+512-token chunking, heading boundaries, filename-vector mixing, and retrieval
+settings are unchanged. Normalizer revision v3 distinguishes new parse runs.
+
+Keeping one HTML representation also preserves the existing display path and
+avoids treating literal table tags as removable markup or source URI prose as
+ephemeral-workspace metadata. Regression tests cover these cases.
+
+### Measured scope and limits
+
+- On all 1,143 indexed chunks of one heavy HWP, replaying the same client input
+  preparation reduces 351,687 content tokens to 276,902: **21.3% fewer**. The
+  filename embedding is excluded. This preserves 1,143 chunks and their locators.
+- A deterministic size-stratified selection of 64 of its 297 tables was replayed
+  through the unchanged local CPU TEI service in old/new then new/old order,
+  using batches of 16. Old request-time sums were 59.457 and 53.022 seconds;
+  corrected sums were 31.871 and 30.416 seconds: **44.6% lower on average for
+  this table subset**. Wall-clock sums were 58.131/52.368 versus 31.211/29.760
+  seconds (44.8% lower); both clock measures are retained rather than hiding
+  their discrepancies. Prepared subset tokens fell 36,597 to 19,242.
+- Six deterministic cell-text dense-retrieval probes against these 64 vectors
+  retained top-1 hits of 3/6 and top-5 hits of 5/6 in both variants. This small
+  within-document check is **not** full-corpus hybrid/reranker recall validation.
+- TEI `/info` reports float32 BGE-M3, the pinned model revision, CLS pooling,
+  `max_input_length=2048`, and `max_batch_tokens=2048`. Its own tokenization and
+  truncation remain distinct from the client counter; the replay retains these
+  existing limits. No shorter input limit was introduced to obtain the speedup.
+- Relevant parser-platform and embedding-input tests: **186 passed**. Tests
+  first reproduced the duplicate input, then passed after the fix. Independent
+  review verified adapter fallback, attachment text, literal tags, URI cell
+  content, display and source identity behavior.
+- Focused Ruff E4/E7/E9/F/ASYNC checks passed. Unfiltered Ruff 0.16.8 reports
+  18 pre-existing EXE002/I001/TRY004/SIM114 findings; comparison against HEAD
+  showed identical per-file/per-code counts, with no new lint findings.
+- The benchmark read existing active chunks into process memory, created no
+  document-text files, and wrote no index data. It waited for idle ingestion
+  before requests and checked for concurrent ingestion after each request.
+
+The fix is in source, not deployed to the running service, and existing indexed
+HWP documents still contain their old representation. Deploying v3 and selectively
+reindexing affected documents requires the normal clean activation and cleanup
+checks plus corpus-level retrieval validation. No 200 MB/600-second success is
+claimed. Exact-input vector reuse across the three identical bodies remains a
+separate, unimplemented optimization; it must preserve model identity, filename
+mixing, and independent document/source locators. Investigate heading heuristics
+only with evidence from the next parse, not by deleting short headings blindly.
+
+Aggregate-only local evidence: `.local/kordoc-t-drive-cutover/hwp-root-cause-20260930.json`
+and `hwp-table-benchmark-20260930.jsonl`. The replay script is
+`benchmark-hwp-tables.py`; no document body or vector is written to its output.

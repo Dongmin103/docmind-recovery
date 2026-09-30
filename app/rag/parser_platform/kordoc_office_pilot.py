@@ -317,6 +317,8 @@ def _normalize_hwp_document(
                 source_item_id=locator, block_type=mapped, reading_order=len(blocks),
                 text=text, table_html=table_html, provenance=(provenance,),
                 diagnostics={"kordoc_page_mode": page_mode,
+                             # Both representations contain every cell; index the table only once.
+                             "table_html_contains_text": mapped == BlockType.TABLE,
                              "kordoc_approximate_page": page_number if page_mode == "section" else None},
             ))
         for index, child in enumerate(raw.get("children") or []):

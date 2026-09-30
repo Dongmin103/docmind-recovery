@@ -54,7 +54,7 @@ class ParserPlatformConfig:
     kordoc_parser_version: str = "4.15.7"
     kordoc_patch_revision: str = "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b"
     kordoc_ocr_model_revision: str = "kordoc-4.15.7-default"
-    kordoc_normalizer_revision: str = "docmind-kordoc-normalizer-v2"
+    kordoc_normalizer_revision: str = "docmind-kordoc-normalizer-v3"
     kordoc_chunker_revision: str = "docmind-kordoc-chunker-v2"
     libreoffice_converter_revision: str = "libreoffice-4:7.4.7-1+deb12u14"
     hwp_enabled: bool = True
@@ -95,7 +95,7 @@ class ParserPlatformConfig:
             kordoc_parser_version=source.get("PARSER_PLATFORM_KORDOC_PARSER_VERSION", "4.15.7").strip(),
             kordoc_patch_revision=source.get("PARSER_PLATFORM_KORDOC_PATCH_REVISION", "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b").strip(),
             kordoc_ocr_model_revision=source.get("PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION", "kordoc-4.15.7-default").strip(),
-            kordoc_normalizer_revision=source.get("PARSER_PLATFORM_KORDOC_NORMALIZER_REVISION", "docmind-kordoc-normalizer-v2").strip(),
+            kordoc_normalizer_revision=source.get("PARSER_PLATFORM_KORDOC_NORMALIZER_REVISION", "docmind-kordoc-normalizer-v3").strip(),
             kordoc_chunker_revision=source.get("PARSER_PLATFORM_KORDOC_CHUNKER_REVISION", "docmind-kordoc-chunker-v2").strip(),
             libreoffice_converter_revision=source.get("PARSER_PLATFORM_LIBREOFFICE_CONVERTER_REVISION", "libreoffice-4:7.4.7-1+deb12u14").strip(),
             hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_HWP_ENABLED", True),
