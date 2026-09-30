@@ -2,6 +2,12 @@
 
 작성일: 2026-09-28. 대상: 현재 Windows 개발/시험 서버의 DocMind 공유 workspace.
 
+## 2026-09-30 현재 workspace 재적용
+
+DB 재생성 후 현재 `DocMind Canary` 데이터셋은 로컬 BGE-M3를 사용하고 있었고 Cloudflare 모델 등록도 사라져 있었다. Git에서 제외된 로컬 자격증명으로 같은 BGE-M3의 Cloudflare API 모델을 다시 등록한 뒤, 현재 공유 데이터셋과 tenant 기본 임베딩을 등록 모델 ID로 연결했다. 전환 도구의 `-VerifyOnly`가 두 바인딩을 읽어 확인했다.
+
+합성 문장 6개에 대한 Cloudflare 직접 호출은 1024차원 벡터를 반환했다. 전환 후 앱의 전체 범위 검색도 성공해 BM25 128개, dense 128개 후보에서 결과 5개를 반환했다(2.39초). 이는 외부 API 연결과 검색 경로의 확인이며, 보류 중인 문서를 재색인한 측정은 아니다. 호스트 워커는 `-SkipRetries` 설정으로 다시 실행했고 기존 재시도 작업은 재개하지 않았다. 기존 벡터와 인덱스는 변경하지 않았으며 자격증명 값은 기록하지 않았다.
+
 ## 적용 결과
 
 - 기존 `OpenAI-API-Compatible` 공급자에 `cloudflare` 인스턴스와 `@cf/baai/bge-m3` 모델을 등록했다. 별도 프록시나 임베딩 컨테이너를 추가하지 않았다.
@@ -29,7 +35,7 @@
 | 제목 가중치 0.1을 적용한 Cloudflare 벡터와 기존 저장 벡터 비교 | 최소 코사인 0.99999307642. 색인은 읽기만 수행 |
 | 전환 후 선택 문서 검색 | HTTP 성공, BM25 40 / dense 40, 후보 8, 결과 5, 2.407초 |
 | 전환 후 폴더 범위 검색 | HTTP 성공, BM25 40 / dense 40, 후보 8, 결과 5, 2.398초. 지정 엑셀만 반환 |
-| 설정 전환·보상 롤백·tenant 경계 등 mock 검사 | 6개 통과. 실제 네트워크/DB 쓰기 없음 |
+| 설정 전환·보상 롤백·tenant 경계 등 mock 검사 | 19개 통과. 실제 네트워크/DB 쓰기 없음 |
 
 위 임베딩 시간은 이미 파싱된 실제 엑셀 청크를 **읽기 전용으로 재계산**한 측정이다. 복호화·파싱·전체 색인 시간이 1.985초라는 뜻이 아니다. API/모델 ID 읽기 확인과 검색은 실제 실행했지만, 이번 작업에서 원본을 새로 업로드하거나 이동해 전체 수집 E2E를 다시 실행하지는 않았다. 장문/모든 형식/대량 동시 처리 성능을 보증하지 않는다. 원문과 벡터, 키는 비교 결과 로그에 출력하지 않았다.
 
@@ -37,11 +43,17 @@
 
 ## 운영 및 되돌리기
 
-실행 위치: `C:\DocMindDev\docmind`. 진행 중 색인 작업이 없는지 확인하고 전환한다.
+실행 위치: `C:\DocMindDev\docmind`. PowerShell 7(`pwsh`)에서 실행한다. Windows PowerShell 5.1의 `Invoke-RestMethod`에는 이 도구가 사용하는 `-NoProxy` 옵션이 없다. 진행 중 색인 작업이 없는지 확인하고 전환한다.
+아래 2026-09-28 적용 기록은 당시 DB 기준이다. DB/데이터셋이 재생성되면 등록 모델과 연결이 사라질 수 있으므로 이전 성공 기록을 현재 설정의 증거로 사용하지 않는다.
+
+현재 전환 도구는 로그인된 DocMind 공용 workspace의 데이터셋을 `/docmind/folders`에서 조회하고, 데이터셋 소유 tenant와 세션 사용자가 같은지 확인한다. 이전 데이터셋/tenant ID를 내장하지 않는다. 현재 tenant에 Cloudflare BGE-M3 모델이 정확히 하나 등록돼 있어야 하며, 등록되지 않았으면 **아무 바인딩도 변경하지 않고 실패**한다. API 키는 이 도구에 넣지 않는다. 재생성된 DB에서 모델 등록이 필요한 경우, Git에서 제외된 `.local/docker/Register-CloudflareEmbedding.ps1`와 그 파일이 참조하는 로컬 자격증명 파일을 해당 서버에서만 사용한다. 등록 결과와 자격증명 내용은 로그·PR에 붙이지 않는다.
 
 ```powershell
-# 현재 등록된 Cloudflare 모델로 연결 (자격증명을 출력하거나 재등록하지 않음)
+# 등록 확인 뒤 현재 공용 workspace의 데이터셋과 tenant 기본값 연결
 & tools/windows/Set-DocMindCloudflareEmbedding.ps1 -Target Cloudflare
+
+# 쓰기 없는 배포 게이트: 이 명령이 성공하기 전에는 watcher/재시도를 재개하지 않음
+& tools/windows/Set-DocMindCloudflareEmbedding.ps1 -Target Cloudflare -VerifyOnly
 
 # 로컬 모델로 되돌릴 때: 먼저 기존 컨테이너를 실행/health 확인
 & C:\Users\uplex\bin\docker.cmd start docmind-windows-dev-bge-m3-cpu-1
@@ -53,6 +65,9 @@
 ```
 
 전환 도구는 dataset 먼저, tenant 기본값을 다음에 설정한다. 두 번째 요청 실패 시 dataset을 원래 값으로 보상 복원한다. 두 HTTP 요청은 하나의 DB 트랜잭션이 아니므로 동시 관리자 변경이나 통신 단절 후에는 DB/API 값을 다시 확인한다. 정상 적용은 두 곳을 읽어 검증했다. 실제 운영 롤백 재전환은 대량 수집이 시작되어 실행하지 않았고, mock으로 검증했다.
+
+`-VerifyOnly`는 Cloudflare 등록 모델 ID, 현재 데이터셋의 `tenant_embd_id`, tenant 기본 모델 ID를 다시 읽고 불일치 시 종료 코드 오류로 중단한다. 재배포·DB 복구·새 공용 workspace bootstrap 뒤마다 이 게이트를 재실행한다. 새 tenant는 별도의 Cloudflare 등록·전환·검증이 필요하다. 이 스크립트는 서비스 시작 자체를 차단하지 않으므로, 배포 절차에서 게이트가 성공하기 전 watcher와 RETRY_WAIT 재시도를 중지한 상태로 유지해야 한다. 기존 벡터를 다시 계산하거나 실패 작업을 자동 재개하지 않는다.
+데이터셋 조회 응답의 `embedding_model`은 등록 모델 ID로 돌아올 수 있다. 전환 도구는 등록된 Cloudflare ID와 `tenant_embd_id`, tenant 기본 모델 ID의 일치를 함께 확인하며, 이미 연결됐다면 재실행해도 쓰지 않는다.
 
 현재 글로벌 신규 사용자용 서비스 설정은 로컬 TEI 기본값을 유지한다. 이번 범위는 현재 공유 tenant와 그 dataset이다. 별도 tenant를 만드는 경우 모델 등록/기본값 적용이 별도로 필요하다. 로컬 컨테이너는 롤백 및 기존 글로벌 기본 설정을 위해 제거하지 않았다.
 
