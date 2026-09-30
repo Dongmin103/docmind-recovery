@@ -268,7 +268,9 @@ def _normalize_pptx_document(
         parser_name="kordoc", parser_version=result["parser_version"],
         backend="kordoc-offline", status=ParserRunStatus.NORMALIZING,
         warnings=warning_codes, blocks=tuple(blocks),
-        diagnostics={"conversion": "pptx-to-pdf", "ocr_engine": "kordoc"},
+        diagnostics=({"conversion": "pptx-xml-text", "ocr_engine": "none"}
+                     if "PPTX_XML_TEXT_FALLBACK" in warning_codes
+                     else {"conversion": "pptx-to-pdf", "ocr_engine": "kordoc"}),
     )
 
 

@@ -6,6 +6,7 @@ services:
       DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS: "120"
       # Distinguish OCR-free parser runs from earlier DEPT2 attempts.
       PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION: "disabled-for-dept2-reindex"
+      PARSER_PLATFORM_PPTX_TEXT_FALLBACK_ENABLED: "1"
 
   kordoc-parser:
     environment:

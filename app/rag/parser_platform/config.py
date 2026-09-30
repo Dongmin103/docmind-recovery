@@ -47,6 +47,7 @@ class ParserPlatformConfig:
     kordoc_excel_enabled: bool = True
     kordoc_pptx_enabled: bool = True
     kordoc_hwp_enabled: bool = True
+    pptx_text_fallback_enabled: bool = False
     kordoc_service_url: str = "http://kordoc-parser:8095"
     kordoc_deadline_seconds: int = 900
     kordoc_max_source_bytes: int = 64 * 1024 * 1024
@@ -85,6 +86,7 @@ class ParserPlatformConfig:
             kordoc_excel_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_EXCEL_ENABLED", True),
             kordoc_pptx_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_PPTX_ENABLED", True),
             kordoc_hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_HWP_ENABLED", True),
+            pptx_text_fallback_enabled=_strict_bool(source, "PARSER_PLATFORM_PPTX_TEXT_FALLBACK_ENABLED", False),
             kordoc_service_url=source.get(
                 "PARSER_PLATFORM_KORDOC_URL", "http://kordoc-parser:8095"
             ).rstrip("/"),
@@ -172,4 +174,6 @@ class ParserPlatformConfig:
             settings["max_pdf_pages"] = self.max_pdf_pages
         if source_format in {"doc", "pptx"}:
             settings["converter_revision"] = self.libreoffice_converter_revision
+        if source_format == "pptx":
+            settings["text_fallback_enabled"] = self.pptx_text_fallback_enabled
         return canonical_sha256(settings)

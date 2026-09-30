@@ -18,6 +18,12 @@ class KordocPageLimitExceeded(RuntimeError):
         super().__init__("Kordoc PDF page limit exceeded")
 
 
+class KordocServiceError(RuntimeError):
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__("kordoc service failed")
+
+
 def parse_pilot_service(
     source_bytes: bytes, source_format: str, *, service_url: str, timeout: int = 900,
     max_pdf_pages: int | None = None,
@@ -58,7 +64,8 @@ def parse_pilot_service(
             if isinstance(page_count, bool) or not isinstance(page_count, int) or page_count < 1:
                 page_count = None
             raise KordocPageLimitExceeded(page_count) from error
-        raise RuntimeError("kordoc service failed") from error
+        code = failure.get("code") if isinstance(failure, dict) else None
+        raise KordocServiceError(code if isinstance(code, str) else "UNKNOWN") from error
     except urllib.error.URLError as error:
         raise RuntimeError("kordoc pilot service failed") from error
     if len(content) > 256 * 1024 * 1024:

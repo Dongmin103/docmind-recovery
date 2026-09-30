@@ -51,7 +51,7 @@ class ParserPlatformStandardBridge:
     ) -> ParsedDocument:
         """Parse one source and persist its raw and normalized evidence."""
         from rag.parser_platform.kordoc_office_pilot import normalize_pilot_document
-        from rag.parser_platform.kordoc_pilot import KordocPageLimitExceeded, parse_pilot_service
+        from rag.parser_platform.kordoc_pilot import KordocPageLimitExceeded, KordocServiceError, parse_pilot_service
 
         try:
             if prepared.parser_name != "kordoc" or prepared.selection.source_format != source_format:
@@ -61,13 +61,26 @@ class ParserPlatformStandardBridge:
             self._emit("PARSING_KORDOC", {"source_format": source_format.value})
             storage = getattr(settings, "STORAGE_IMPL", None)
             with stage_scope(storage, "parse_http", prepared.parse_run_id):
-                result = parse_pilot_service(
-                    source_bytes,
-                    source_format.value,
-                    service_url=self.config.kordoc_service_url,
-                    timeout=self.config.kordoc_deadline_seconds,
-                    max_pdf_pages=self.config.max_pdf_pages if source_format == SourceFormat.PDF else None,
-                )
+                try:
+                    result = parse_pilot_service(
+                        source_bytes,
+                        source_format.value,
+                        service_url=self.config.kordoc_service_url,
+                        timeout=self.config.kordoc_deadline_seconds,
+                        max_pdf_pages=self.config.max_pdf_pages if source_format == SourceFormat.PDF else None,
+                    )
+                except KordocServiceError as error:
+                    if (source_format != SourceFormat.PPTX or not self.config.pptx_text_fallback_enabled
+                            or error.code != "PARSER_INVALID_INPUT"):
+                        raise
+                    from rag.parser_platform.kordoc_pptx_text_fallback import pptx_text_result
+                    try:
+                        result = pptx_text_result(
+                            source_bytes, parser_version=prepared.parser_version,
+                            patch_revision=self.config.kordoc_patch_revision,
+                        )
+                    except ValueError:
+                        raise error
             with stage_scope(storage, "normalize_artifacts", prepared.parse_run_id):
                 if (result.get("schema_version") != "docmind-kordoc-v2"
                         or result.get("parser_version") != prepared.parser_version
