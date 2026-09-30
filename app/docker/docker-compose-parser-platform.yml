@@ -35,6 +35,7 @@ services:
 
   kordoc-parser:
     platform: linux/amd64
+    init: true
     image: ${KORDOC_IMAGE:-docmind-kordoc-parser:4.15.7-cutover-amd64}
     build:
       context: ../parser_services/kordoc
