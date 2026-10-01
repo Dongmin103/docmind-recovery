@@ -598,19 +598,6 @@ $previewReceiptReplay = Invoke-DocMindCleanupReceiptReplay -ReceiptRoot $preview
 $lastReceiptReplayAt = [DateTimeOffset]::UtcNow
 Write-Output ("Host worker ready; stale job directories removed: {0}; preview directories removed: {1}; cleanup receipts acknowledged: {2}; preview receipts acknowledged: {3}." -f $removed, $previewRemoved, $receiptReplay.acknowledged, $previewReceiptReplay.acknowledged)
 
-$runInitialScan = $true
-if ($config.PSObject.Properties.Name -contains 'initial_scan_on_startup') { $runInitialScan = [bool]$config.initial_scan_on_startup }
-if ($PreviewOnly) { $runInitialScan = $false }
-if ($runInitialScan) {
-    try {
-        & (Join-Path $PSScriptRoot 'Invoke-DocMindSourceReconciliation.ps1') -ConfigPath $configFile -Reason startup
-    } catch {
-        $scanError = $_.Exception.Message
-        if ($scanError -notmatch '^[A-Z0-9_]+$') { $scanError = 'SOURCE_RECONCILIATION_FAILED' }
-        Write-Warning ("Startup reconciliation failed without deletion authority: {0}" -f $scanError)
-    }
-}
-
 $consecutivePreviewClaims = 0
 do {
     try {

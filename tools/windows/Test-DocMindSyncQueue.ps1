@@ -2,7 +2,7 @@
 param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Add-Type -Path (Join-Path $PSScriptRoot 'DocMindSyncQueue.cs')
+Add-Type -Path @((Join-Path $PSScriptRoot 'DocMindSyncQueue.cs'), (Join-Path $PSScriptRoot 'DocMindUnicodeCaseFold.cs'))
 function Assert-True([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message } }
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.local/sync-queue-tests'))
 $testRoot = Join-Path $root ([Guid]::NewGuid().ToString('N'))
@@ -44,6 +44,27 @@ try {
     Assert-True ($queue.Due('other', 3000, 250).Length -eq 1) 'Absence recheck was lost.'
     $null = $queue.Enqueue('other', 'deleted.pdf', 'upsert', $null, 3001)
     Assert-True ($queue.Due('other', 3001, 250).Length -eq 0) 'Reappearing file kept deletion timing.'
+    $null = $queue.Enqueue('unicode', ('Stra' + [char]0x00df + 'e.pdf'), 'upsert', $null, 0)
+    $null = $queue.Enqueue('unicode', 'STRASSE.PDF', 'upsert', $null, 1)
+    Assert-True ($queue.Count('unicode') -eq 1) 'Queue normalization differs from server Unicode casefold.'
+    $entry = $queue.Due('unicode', 120001, 1)[0]
+    Assert-True ($queue.Freeze('unicode', 1, 1, 'retry-1', '{}', [DocMind.SyncEntry[]]@($entry))) 'Retry fixture could not freeze.'
+    foreach ($delay in @(5000,10000,20000,40000,80000,160000,300000,300000)) {
+        $queue.Retry('unicode', 'retry-1', 1000000, $false)
+        Assert-True ($queue.Outbox('unicode').NextAttemptAt -eq (1000000 + $delay)) 'Retry delay did not follow bounded exponential backoff.'
+    }
+    $queue.Retry('unicode', 'retry-1', 1000000, $true)
+    $queue.Dispose()
+    $queue = [DocMind.SyncQueue]::new($dbPath)
+    Assert-True ($queue.Outbox('unicode').Held) 'Permanent error hold did not survive restart.'
+    $fingerprint = 'a' * 64
+    $entry = $queue.Due('other', 123001, 1)[0]
+    Assert-True ($queue.RememberFingerprint($entry, $fingerprint)) 'First fingerprint was not persisted.'
+    $queue.Dispose(); $queue = [DocMind.SyncQueue]::new($dbPath)
+    Assert-True ($queue.Due('other', 123001, 1)[0].Fingerprint -eq $fingerprint) 'Fingerprint did not survive restart.'
+    $queue.ResetForNewEpoch('unicode', 2000000)
+    Assert-True ($null -eq $queue.Outbox('unicode')) 'Stale epoch outbox survived fencing.'
+    Assert-True ($queue.Count('unicode') -eq 1) 'Epoch reset dropped unresolved observation.'
     Write-Output 'PASS: durable queue, 100 autosaves, 120s/10s/2s timing, immutable outbox, generation-safe ACK, restart, reappearance.'
 } finally {
     if ($null -ne $queue) { $queue.Dispose() }

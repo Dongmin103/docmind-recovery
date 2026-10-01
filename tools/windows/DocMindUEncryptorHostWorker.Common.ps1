@@ -280,13 +280,14 @@ function Get-DocMindSourceSnapshotEntries {
             $identityAfter = Get-DocMindHostFileIdentity -LiteralPath $child.FullName
             if (-not (Test-DocMindFixedTimeHexEqual $hashBefore $hashAfter)) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
             if ($identityBefore -ne $identityAfter) { throw 'SOURCE_FILE_CHANGED_DURING_SCAN' }
-            [pscustomobject][ordered]@{
+            $snapshotEntry = [ordered]@{
                 relative_path = $relativePath
                 ciphertext_sha256 = $hashAfter
                 size = [Int64]$after.Length
                 mtime_ns = ([Int64]$after.LastWriteTimeUtc.Ticks - 621355968000000000L) * 100L
-                host_file_id = $identityAfter
             }
+            if (-not [string]::IsNullOrWhiteSpace($identityAfter)) { $snapshotEntry.host_file_id = $identityAfter }
+            [pscustomobject]$snapshotEntry
         }
     }
     foreach ($state in $directoryStates) {

@@ -8,7 +8,7 @@ namespace DocMind
 {
     public sealed class SyncEntry
     {
-        public string SourceId, RelativePath, PathKey, Kind, OldRelativePath;
+        public string SourceId, RelativePath, PathKey, Kind, OldRelativePath, Fingerprint;
         public long Generation, LastChangedAt, DueAt;
         public int StableCount;
     }
@@ -19,6 +19,12 @@ namespace DocMind
         public long Epoch, Sequence, NextAttemptAt;
         public int Attempts;
         public bool Held;
+    }
+
+    public sealed class SyncScope
+    {
+        public string SourceId, RelativePath, OldRelativePath, Kind;
+        public long Generation;
     }
 
     // The host owns this file outside watched roots. All values are bound, and
@@ -125,10 +131,14 @@ namespace DocMind
                 Query("CREATE TABLE IF NOT EXISTS counter(id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL)");
                 Query("INSERT OR IGNORE INTO counter VALUES(1,0)");
                 Query("CREATE TABLE IF NOT EXISTS pending(source TEXT NOT NULL,path_key TEXT NOT NULL,path TEXT NOT NULL,kind TEXT NOT NULL,old_path TEXT,generation INTEGER NOT NULL,changed_at INTEGER NOT NULL,due_at INTEGER NOT NULL,stable_count INTEGER NOT NULL DEFAULT 0,dirty_sent INTEGER NOT NULL DEFAULT 0,state INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(source,path_key))");
+                bool hasFingerprint = false;
+                foreach (object[] column in Query("PRAGMA table_info(pending)")) if ((string)column[1] == "fingerprint") hasFingerprint = true;
+                if (!hasFingerprint) Query("ALTER TABLE pending ADD COLUMN fingerprint TEXT");
                 Query("CREATE INDEX IF NOT EXISTS pending_due ON pending(source,state,due_at)");
                 Query("CREATE INDEX IF NOT EXISTS pending_dirty ON pending(source,state,dirty_sent)");
                 Query("CREATE TABLE IF NOT EXISTS outbox(source TEXT PRIMARY KEY,epoch INTEGER NOT NULL,sequence INTEGER NOT NULL,request_id TEXT NOT NULL,payload TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,held INTEGER NOT NULL DEFAULT 0)");
                 Query("CREATE TABLE IF NOT EXISTS outbox_item(source TEXT NOT NULL,ordinal INTEGER NOT NULL,path_key TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(source,ordinal))");
+                Query("CREATE TABLE IF NOT EXISTS scope(source TEXT NOT NULL,path_key TEXT NOT NULL,path TEXT NOT NULL,old_path TEXT,kind TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(source,path_key))");
             }
             catch { Dispose(); throw; }
         }
@@ -151,7 +161,7 @@ namespace DocMind
             path = NormalizePath(path);
             // PowerShell marshals a null string argument as String.Empty.
             oldPath = String.IsNullOrEmpty(oldPath) ? null : NormalizePath(oldPath);
-            string key = path.ToUpperInvariant();
+            string key = UnicodeCaseFold.Fold(path);
             lock (gate)
             {
                 long generation = 0;
@@ -162,6 +172,14 @@ namespace DocMind
                     // Preserve the earliest old path across autosave notifications.
                     List<object[]> previous = Query("SELECT old_path FROM pending WHERE source=? AND path_key=?", source, key);
                     if (oldPath == null && previous.Count != 0) oldPath = (string)previous[0][0];
+                    if (kind == "move" && oldPath != null)
+                    {
+                        string oldKey = UnicodeCaseFold.Fold(oldPath);
+                        List<object[]> old = Query("SELECT old_path FROM pending WHERE source=? AND path_key=?", source, oldKey);
+                        if (old.Count != 0 && old[0][0] != null) oldPath = (string)old[0][0];
+                        if (oldKey != key) Query("DELETE FROM pending WHERE source=? AND path_key=?", source, oldKey);
+                    }
+                    if (oldPath != null && kind == "upsert") kind = "move";
                     Query("INSERT OR REPLACE INTO pending(source,path_key,path,kind,old_path,generation,changed_at,due_at) VALUES(?,?,?,?,?,?,?,?)",
                         source, key, path, kind, oldPath, generation, now, kind == "delete" ? now : checked(now + 120000));
                 });
@@ -173,11 +191,11 @@ namespace DocMind
         {
             if (limit < 1 || limit > 250) throw new ArgumentOutOfRangeException("limit");
             string condition = dirty ? "dirty_sent=0" : "due_at<=?";
-            string sql = "SELECT source,path_key,path,kind,old_path,generation,changed_at,due_at,stable_count FROM pending WHERE source=? AND state=0 AND " + condition + " AND NOT EXISTS(SELECT 1 FROM outbox WHERE source=?) ORDER BY due_at,path_key LIMIT ?";
+            string sql = "SELECT source,path_key,path,kind,old_path,generation,changed_at,due_at,stable_count,fingerprint FROM pending WHERE source=? AND state=0 AND " + condition + " AND NOT EXISTS(SELECT 1 FROM outbox WHERE source=?) ORDER BY due_at,path_key LIMIT ?";
             List<object[]> rows = dirty ? Query(sql, source, source, limit) : Query(sql, source, now, source, limit);
             List<SyncEntry> result = new List<SyncEntry>();
             foreach (object[] row in rows)
-                result.Add(new SyncEntry { SourceId = (string)row[0], PathKey = (string)row[1], RelativePath = (string)row[2], Kind = (string)row[3], OldRelativePath = (string)row[4], Generation = (long)row[5], LastChangedAt = (long)row[6], DueAt = (long)row[7], StableCount = (int)(long)row[8] });
+                result.Add(new SyncEntry { SourceId = (string)row[0], PathKey = (string)row[1], RelativePath = (string)row[2], Kind = (string)row[3], OldRelativePath = (string)row[4], Generation = (long)row[5], LastChangedAt = (long)row[6], DueAt = (long)row[7], StableCount = (int)(long)row[8], Fingerprint = (string)row[9] });
             return result.ToArray();
         }
 
@@ -190,6 +208,26 @@ namespace DocMind
             lock (gate)
                 Query("UPDATE pending SET due_at=?,stable_count=? WHERE source=? AND path_key=? AND generation=?",
                     checked(now + milliseconds), stableCount, entry.SourceId, entry.PathKey, entry.Generation);
+        }
+
+        public bool RememberFingerprint(SyncEntry entry, string fingerprint)
+        {
+            if (fingerprint == null || fingerprint.Length != 64) throw new ArgumentException("Invalid fingerprint.");
+            lock (gate)
+            {
+                Query("UPDATE pending SET fingerprint=? WHERE source=? AND path_key=? AND generation=?", fingerprint, entry.SourceId, entry.PathKey, entry.Generation);
+                return (long)Query("SELECT count(*) FROM pending WHERE source=? AND path_key=? AND generation=? AND fingerprint=?", entry.SourceId, entry.PathKey, entry.Generation, fingerprint)[0][0] == 1;
+            }
+        }
+
+        public void ResetForNewEpoch(string source, long now)
+        {
+            lock (gate) Transaction(delegate
+            {
+                Query("DELETE FROM outbox_item WHERE source=?", source);
+                Query("DELETE FROM outbox WHERE source=?", source);
+                Query("UPDATE pending SET dirty_sent=0,stable_count=0,fingerprint=NULL,due_at=CASE WHEN changed_at+120000>? THEN changed_at+120000 ELSE ? END WHERE source=?", now, now, source);
+            });
         }
 
         public bool Freeze(string source, long epoch, long sequence, string requestId, string payload, SyncEntry[] entries)
@@ -270,6 +308,38 @@ namespace DocMind
                 Query("UPDATE outbox SET attempts=attempts+1,next_attempt_at=?,held=? WHERE source=? AND request_id=?",
                     checked(now + delay), permanent ? 1 : 0, source, requestId);
             }
+        }
+
+        public void EnqueueScope(string source, string path, string oldPath, string kind)
+        {
+            path = kind == "recovery" ? "" : NormalizePath(path);
+            oldPath = String.IsNullOrEmpty(oldPath) ? null : NormalizePath(oldPath);
+            lock (gate)
+            {
+                Transaction(delegate
+                {
+                    Query("UPDATE counter SET generation=generation+1 WHERE id=1");
+                    long generation = (long)Query("SELECT generation FROM counter WHERE id=1")[0][0];
+                    Query("INSERT OR REPLACE INTO scope VALUES(?,?,?,?,?,?)", source, UnicodeCaseFold.Fold(path), path, oldPath, kind, generation);
+                });
+            }
+        }
+
+        public SyncScope[] Scopes(string source, int limit)
+        {
+            if (limit < 1 || limit > 250) throw new ArgumentOutOfRangeException("limit");
+            lock (gate)
+            {
+                List<SyncScope> results = new List<SyncScope>();
+                foreach (object[] row in Query("SELECT path,old_path,kind,generation FROM scope WHERE source=? ORDER BY generation LIMIT ?", source, limit))
+                    results.Add(new SyncScope { SourceId = source, RelativePath = (string)row[0], OldRelativePath = (string)row[1], Kind = (string)row[2], Generation = (long)row[3] });
+                return results.ToArray();
+            }
+        }
+
+        public void CompleteScope(SyncScope scope)
+        {
+            lock (gate) Query("DELETE FROM scope WHERE source=? AND path_key=? AND generation=?", scope.SourceId, UnicodeCaseFold.Fold(scope.RelativePath), scope.Generation);
         }
 
         public void Dispose()
