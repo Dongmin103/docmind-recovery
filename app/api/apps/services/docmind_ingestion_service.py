@@ -21,6 +21,7 @@ from api.db.db_models import (
     DocmindIngestionJob,
     DocmindProject,
     DocmindSource,
+    DocmindSourceDeletion,
     DocmindSourceDocument,
     DocmindSourceSyncSession,
     DocmindSourceVersion,
@@ -1411,12 +1412,44 @@ def activate_indexed_version(
             raise DocmindIngestionError("DOCMIND_INGESTION_STALE_RESULT")
         if not _current_observation(source_document, job, version):
             raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_CHANGED")
+        restored_deletion = None
+        document = Document.get_or_none(Document.id == job.document_id)
+        if document is not None and document.status != "1":
+            deletion = (
+                DocmindSourceDeletion.select()
+                .where(
+                    (DocmindSourceDeletion.source_document_id == source_document.id)
+                    & (DocmindSourceDeletion.document_id == job.document_id)
+                )
+                .order_by(DocmindSourceDeletion.deletion_generation.desc(), DocmindSourceDeletion.confirmed_at.desc())
+                .first()
+            )
+            if (
+                document.status != "0"
+                or document.source_type != "docmind_cloud"
+                or deletion is None
+                or deletion.lifecycle_state not in {"INACTIVE_RETAINED", "CANCELLED_RECREATED"}
+                or deletion.deletion_generation >= source_document.generation
+            ):
+                raise DocmindIngestionError("DOCMIND_INGESTION_DOCUMENT_INACTIVE")
+            # Keep the search gate closed until the new chunk pointer commits.
+            # The enclosing transaction rolls this back on any activation error.
+            changed = Document.update(status="1").where(
+                (Document.id == job.document_id) & (Document.status == "0")
+            ).execute()
+            if changed != 1:
+                raise DocmindIngestionError("DOCMIND_INGESTION_ACTIVATION_CONFLICT")
+            restored_deletion = deletion
         activator.activate(
             document_id=job.document_id,
             parser_run_id=_valid_identifier(result.parser_run_id, max_length=32),
             chunk_set_id=_valid_identifier(result.chunk_set_id, max_length=32),
             expected_active_chunk_set_id=expected_active_chunk_set_id,
         )
+        if restored_deletion is not None:
+            DocmindSourceDeletion.update(lifecycle_state="RESTORED", **_updates()).where(
+                DocmindSourceDeletion.id == restored_deletion.id
+            ).execute()
         now = _now()
         DocmindSourceVersion.update(lifecycle_state="RETAINED").where(
             (DocmindSourceVersion.source_document_id == source_document.id)

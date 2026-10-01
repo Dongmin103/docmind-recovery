@@ -16,6 +16,7 @@ from api.db.db_models import (
     DocmindIngestionJob,
     DocmindProject,
     DocmindSource,
+    DocmindSourceDeletion,
     DocmindSourceDocument,
     DocmindSourceSyncSession,
     DocmindSourceVersion,
@@ -38,6 +39,7 @@ MODELS = [
     DocmindProject,
     DocmindFolder,
     DocmindSource,
+    DocmindSourceDeletion,
     DocmindSourceSyncSession,
     DocmindSourceDocument,
     DocmindSourceVersion,
@@ -800,6 +802,66 @@ def test_index_activation_uses_cas_adapter_then_switches_source_version(ingestio
     assert DocmindSourceDocument.get().active_source_version_id == claim.version_id
     assert DocmindSourceVersion.get().lifecycle_state == "ACTIVE"
     assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP"
+
+
+@pytest.mark.parametrize("activation_fails", [False, True])
+def test_recreated_document_restores_search_only_with_atomic_activation(ingestion_db, activation_fails):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", created_by="tenant-1", status="0", parser_id="naive", type="pdf", suffix="pdf", source_type="docmind_cloud")
+    DocmindIngestionJob.update(lifecycle_state="PARSING").execute()
+    DocmindSourceDocument.update(generation=3).execute()
+    mapping = DocmindSourceDocument.get()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    deletion = DocmindSourceDeletion.create(
+        id="deletion-1", project_id="project-1", source_id="home-test1",
+        source_document_id=mapping.id, document_id="document-1",
+        authority_kind="INCREMENTAL_ABSENCE", deletion_generation=1,
+        confirmed_at=now, search_excluded_at=now, retained_until=now + timedelta(days=30),
+        lifecycle_state="INACTIVE_RETAINED",
+    )
+
+    def activate(**kwargs):
+        # The real chunk-set store rejects status=0. Both writes must share
+        # the source transaction, including a failure after the pointer swap.
+        assert Document.get_by_id("document-1").status == "1"
+        Document.update(active_chunk_set_id=kwargs["chunk_set_id"]).execute()
+        if activation_fails:
+            raise RuntimeError("activation failed")
+
+    def attempt():
+        service.activate_indexed_version(
+            claim.job_id, fencing_token=claim.fencing_token,
+            result=service.IndexReadyResult("parser-run-1", "chunk-set-1"),
+            expected_active_chunk_set_id=None, activator=SimpleNamespace(activate=activate),
+        )
+
+    if activation_fails:
+        with pytest.raises(RuntimeError, match="activation failed"):
+            attempt()
+        assert Document.get().status == "0"
+        assert Document.get().active_chunk_set_id is None
+        assert DocmindSourceDeletion.get_by_id(deletion.id).lifecycle_state == "INACTIVE_RETAINED"
+        assert DocmindIngestionJob.get().lifecycle_state == "PARSING"
+    else:
+        attempt()
+        assert Document.get().status == "1"
+        assert Document.get().active_chunk_set_id == "chunk-set-1"
+        assert DocmindSourceDeletion.get_by_id(deletion.id).lifecycle_state == "RESTORED"
+        assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP"
+
+
+def test_inactive_document_without_source_deletion_cannot_be_restored(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", created_by="tenant-1", status="0", parser_id="naive", type="pdf", suffix="pdf", source_type="docmind_cloud")
+    DocmindIngestionJob.update(lifecycle_state="PARSING").execute()
+    with pytest.raises(service.DocmindIngestionError, match="DOCUMENT_INACTIVE"):
+        service.activate_indexed_version(
+            claim.job_id, fencing_token=claim.fencing_token,
+            result=service.IndexReadyResult("parser-run-1", "chunk-set-1"),
+            expected_active_chunk_set_id=None,
+            activator=SimpleNamespace(activate=lambda **_: pytest.fail("inactive document activated")),
+        )
+    assert Document.get().status == "0"
 
 
 def test_distinct_content_replacement_keeps_old_version_until_new_activation(ingestion_db):
