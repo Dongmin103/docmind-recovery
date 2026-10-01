@@ -32,7 +32,7 @@ export const useOAuthCallback = () => {
     if (error) {
       message.error(error);
       setTimeout(() => {
-        navigate('/login');
+        navigate('/docmind');
         newQueryParameters.delete('error');
         setSearchParams(newQueryParameters);
       }, 1000);

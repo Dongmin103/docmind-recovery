@@ -85,8 +85,9 @@ export const getAuthorization = () => {
 
 export default storage;
 
-// Will not jump to the login page
 export function redirectToLogin() {
-  // const env = import.meta.env;
-  window.location.href = location.origin + `/login`;
+  // Stay on DocMind after an API 401 so its workspace error can render
+  // without repeatedly loading the same page.
+  if (window.location.pathname === '/docmind') return;
+  window.location.href = location.origin + '/docmind';
 }

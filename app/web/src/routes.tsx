@@ -29,9 +29,7 @@ import { initializeDocMindSharedWorkspace } from './utils/docmind-shared-workspa
 
 export enum Routes {
   Root = '/',
-  Login = '/login-next',
   Logout = '/logout',
-  Home = '/home',
   Datasets = '/datasets',
   DatasetBase = '/dataset',
   Files = '/files',
@@ -127,17 +125,25 @@ const withLazyRoute = (
   return process.env.NODE_ENV === 'development' ? LazyComponent : memo(Wrapped);
 };
 
+const redirectLegacyEntry = ({ request }: { request: Request }) => {
+  const url = new URL(request.url);
+  const auth = url.searchParams.get('auth');
+  if (auth) {
+    authorizationUtil.setAuthorization(auth);
+    url.searchParams.delete('auth');
+  }
+  return redirect(`${Routes.DocMind}${url.search}`);
+};
+
 const routeConfigOptions = [
   {
-    path: '/login',
-    Component: () => import('@/pages/login-next'),
-    layout: false,
+    path: Routes.Root,
+    loader: redirectLegacyEntry,
   },
-  {
-    path: '/login-next',
-    Component: () => import('@/pages/login-next'),
-    layout: false,
-  },
+  ...['/home', '/login', '/login-next'].map((path) => ({
+    path,
+    loader: redirectLegacyEntry,
+  })),
   {
     path: Routes.ChatShare,
     Component: () => import('@/pages/next-chats/share'),
@@ -165,7 +171,16 @@ const routeConfigOptions = [
   {
     path: Routes.DocMind,
     Component: () => import('@/pages/docmind'),
-    loader: initializeDocMindSharedWorkspace,
+    loader: ({ request }: { request: Request }) => {
+      const url = new URL(request.url);
+      const auth = url.searchParams.get('auth');
+      if (auth) {
+        authorizationUtil.setAuthorization(auth);
+        url.searchParams.delete('auth');
+        return redirect(`${Routes.DocMind}${url.search}`);
+      }
+      return initializeDocMindSharedWorkspace();
+    },
     errorElement: <DocMindWorkspaceError />,
     layout: false,
   },
@@ -173,27 +188,6 @@ const routeConfigOptions = [
     path: '/*',
     Component: () => import('@/pages/404'),
     layout: false,
-  },
-  {
-    path: Routes.Root,
-    layout: false,
-    Component: () => import('@/layouts/root-layout'),
-    loader: ({ request }: { request: Request }) => {
-      const url = new URL(request.url);
-      const auth = url.searchParams.get('auth');
-      if (auth) {
-        authorizationUtil.setAuthorization(auth);
-        url.searchParams.delete('auth');
-        return redirect(`${url.pathname}${url.search}`);
-      }
-      return null;
-    },
-    children: [
-      {
-        path: Routes.Root,
-        Component: () => import('@/pages/home'),
-      },
-    ],
   },
   {
     path: Routes.Chat + '/:id',
