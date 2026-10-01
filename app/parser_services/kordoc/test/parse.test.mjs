@@ -240,9 +240,32 @@ test('disabled OCR skips PDF and PPTX page OCR and DOCX image OCR', async () => 
   }
 });
 
-test('scanned PDF uses local OCR with page geometry when models are provisioned', {
-  skip: !process.env.KORDOC_MODEL_CACHE,
-}, async () => {
+test('PDF OCR always stays off in Kordoc, including with the global switch on', async () => {
+  const source = readFileSync(new URL('./fixtures/office-sample.pdf', import.meta.url));
+  const previous = process.env.KORDOC_OCR_ENABLED;
+  process.env.KORDOC_OCR_ENABLED = '1';
+  try {
+    const observed = [];
+    const parseFn = async (bytes, options) => {
+      observed.push(options.ocr);
+      return parse(bytes, options);
+    };
+    await parseDocument(payloadFor(source, 'pdf'), { parseFn });
+    const pptx = readFileSync(new URL('./fixtures/three-slides.pptx', import.meta.url));
+    await parseDocument(payloadFor(pptx, 'pptx'), {
+      parseFn, convertOfficeFn: async () => source,
+    });
+    assert.deepEqual(observed, [false, false]);
+    await assert.rejects(parseDocument({ ...payloadFor(source, 'pdf'), pdf_ocr_requested: true }, { parseFn }));
+    await assert.rejects(parseDocument({ ...payloadFor(source, 'pdf'), pdf_ocr_requested: 'true' }, { parseFn }));
+    await assert.rejects(parseDocument({ ...payloadFor(source, 'docx'), pdf_ocr_requested: true }, { parseFn }));
+  } finally {
+    if (previous === undefined) delete process.env.KORDOC_OCR_ENABLED;
+    else process.env.KORDOC_OCR_ENABLED = previous;
+  }
+});
+
+test('scanned PDF leaves image text to the separate consented OCR engine', async () => {
   const source = readFileSync(new URL('./fixtures/scanned-ocr.pdf', import.meta.url));
   const result = await parseDocument({
     source_base64: source.toString('base64'),
@@ -250,11 +273,9 @@ test('scanned PDF uses local OCR with page geometry when models are provisioned'
     source_format: 'pdf',
   });
   const textBlocks = result.blocks.filter(block => block.type === 'paragraph');
-  assert.ok(textBlocks.some(block => block.text.includes('ALPHA FUNDING 123')));
-  assert.ok(textBlocks.some(block => block.text.includes('SECOND RECORD 456')));
-  assert.ok(textBlocks.every(block => block.pageNumber === 1 && block.bbox));
-  assert.ok(result.warnings.some(warning => warning.code === 'OCR_APPLIED'));
+  assert.ok(!textBlocks.some(block => block.text?.includes('ALPHA FUNDING 123')));
+  assert.ok(!textBlocks.some(block => block.text?.includes('SECOND RECORD 456')));
   assert.deepEqual(result.pdf_pages, [
-    { page: 1, width: 600, height: 800, has_images: true, ocr_applied: true },
+    { page: 1, width: 600, height: 800, has_images: true, ocr_applied: false },
   ]);
 });

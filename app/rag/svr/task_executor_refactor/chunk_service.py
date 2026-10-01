@@ -114,7 +114,7 @@ async def chunk_parser_platform_document(document, *, config, parser_config: dic
     """Route normalized parser results through their format's chunk policy."""
     from rag.parser_platform.office_chunker import OfficeChunker
 
-    if document.parser_name != "kordoc" and not (
+    if document.parser_name not in {"kordoc", "kordoc-surya"} and not (
         document.parser_name == "pptx-native" and document.source_format.value == "pptx"
         and config.pptx_native_enabled and (
             document.diagnostics.get("native_coverage_complete") is True or (
@@ -211,6 +211,7 @@ class ChunkService:
             def parser_progress(phase: str, details: dict) -> None:
                 lifecycle = {
                     "PARSING_KORDOC": "PARSING_KORDOC",
+                    "PARSING_SURYA": "PARSING_SURYA",
                     "PARSING_PPTX_NATIVE": "PARSING_PPTX_NATIVE",
                     "NORMALIZING": "NORMALIZING",
                 }.get(phase)

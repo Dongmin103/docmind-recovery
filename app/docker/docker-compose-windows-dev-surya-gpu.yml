@@ -1,0 +1,58 @@
+# Opt-in GPU OCR for user-consented PDF jobs on the isolated Windows stack.
+# Apply with docker-compose-windows-dev-generationless-e2e.yml, which provides
+# the internal parser network. No host port is published.
+services:
+  ragflow-cpu:
+    environment:
+      PARSER_PLATFORM_SURYA_URL: ${PARSER_PLATFORM_SURYA_URL:-http://surya2-ocr:8091}
+      PARSER_PLATFORM_SURYA_DEADLINE_SECONDS: ${PARSER_PLATFORM_SURYA_DEADLINE_SECONDS:-1200}
+      PARSER_PLATFORM_SURYA_PARSER_VERSION: ${PARSER_PLATFORM_SURYA_PARSER_VERSION:-0.22.1}
+      PARSER_PLATFORM_SURYA_MODEL_REVISION: ${PARSER_PLATFORM_SURYA_MODEL_REVISION:-6a3a4c30e5e74446d4f8b6afd05b2f2da970f470}
+      PARSER_PLATFORM_SURYA_BACKEND: ${PARSER_PLATFORM_SURYA_BACKEND:-llamacpp}
+
+  surya2-ocr:
+    profiles: [full]
+    platform: linux/amd64
+    init: true
+    image: ${SURYA_GPU_IMAGE:-docmind-surya-parser:gpu-0.22.1-cuda12.4-sm61-docmind}
+    build:
+      context: ../parser_services/surya
+      dockerfile: Containerfile
+      args:
+        SURYA_BASE_IMAGE: ${SURYA_BASE_IMAGE:-docmind-surya-parser:gpu-0.22.1-cuda12.4-sm61}
+    gpus: all
+    environment:
+      HOME: /home/surya
+      PYTHONDONTWRITEBYTECODE: "1"
+      SURYA_MODEL_REVISION: ${PARSER_PLATFORM_SURYA_MODEL_REVISION:-6a3a4c30e5e74446d4f8b6afd05b2f2da970f470}
+      SURYA_SERVICE_MAX_SOURCE_BYTES: ${PARSER_PLATFORM_KORDOC_MAX_SOURCE_BYTES:-67108864}
+      SURYA_SERVICE_MAX_PAGES: ${PARSER_PLATFORM_MAX_PDF_PAGES:-2000}
+      SURYA_SERVICE_PAGE_TIMEOUT_SECONDS: "600"
+      SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS: "1100"
+      LLAMA_CPP_NGL: "99"
+      LLAMA_CPP_EXTRA_ARGS: "--threads 8"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    networks:
+      docmind-parser-internal:
+        aliases: [surya2-ocr]
+    read_only: true
+    volumes:
+      - ${SURYA_MODEL_DIR:-../models/surya}:/models:ro
+    tmpfs:
+      - /tmp:rw,nosuid,size=2g,mode=1777
+      - /home/surya/.cache:rw,nosuid,size=1g,uid=10001,gid=10001
+    mem_limit: 8g
+    cpus: 8
+    pids_limit: 256
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/ready', timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      start_period: 900s
+      retries: 5
+
+networks:
+  docmind-parser-internal:
+    internal: true

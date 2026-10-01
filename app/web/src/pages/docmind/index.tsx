@@ -20,6 +20,7 @@ import {
   getDocMindHierarchy,
   getDocMindRegistrations,
   registerDocMindDocuments,
+  requestDocMindPdfOcr,
   retryDocMindRegistration,
   searchDocMind,
 } from '@/services/docmind-service';
@@ -37,6 +38,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useSearchParams } from 'react-router';
 import RegistrationPanel from './registration-panel';
+import { PdfOcrChoice } from './pdf-ocr-choice';
 import SourceTree from './source-tree';
 import {
   SourceDocumentStatus,
@@ -331,6 +333,15 @@ export default function DocMind() {
       return data.data;
     },
     onSuccess: async () => registrationQuery.refetch(),
+  });
+  const pdfOcrRequest = useMutation<unknown, Error, { documentId: string; versionId: string; key: string }>({
+    mutationKey: ['docmind-pdf-ocr-request'],
+    mutationFn: async ({ documentId, versionId, key }) => {
+      const { data } = await requestDocMindPdfOcr(documentId, versionId, key);
+      if (data.code !== 0) throw new Error(data.message || 'PDF OCR 요청 실패');
+      return data.data;
+    },
+    onSuccess: async () => hierarchyQuery.refetch(),
   });
 
   const folders = useMemo(
@@ -841,11 +852,19 @@ export default function DocMind() {
                     <SourceTree
                       nodes={hierarchyQuery.data?.nodes ?? []}
                       renderDocumentAction={(node: DocMindHierarchyNode) => (
-                        <InspectionLink
-                          datasetId={hierarchyQuery.data?.dataset_id}
-                          documentId={node.document_id}
-                          compact
-                        />
+                        <span className="flex items-center gap-2">
+                          <InspectionLink
+                            datasetId={hierarchyQuery.data?.dataset_id}
+                            documentId={node.document_id}
+                            compact
+                          />
+                          <PdfOcrChoice
+                            node={node}
+                            onConfirm={async (documentId, versionId, key) => {
+                              await pdfOcrRequest.mutateAsync({ documentId, versionId, key });
+                            }}
+                          />
+                        </span>
                       )}
                     />
                   )}

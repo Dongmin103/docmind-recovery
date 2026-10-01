@@ -86,7 +86,12 @@ class FormatDispatcher:
         if source_format == SourceFormat.PDF:
             if declared not in PDF_MIMES or sniffed not in PDF_MIMES or not source.content.startswith(b"%PDF-"):
                 raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
-            return ParserSelection(source_format, "kordoc", "pdf_document_parse", "file_format_pdf")
+            return ParserSelection(
+                source_format,
+                "kordoc-surya" if self.config.pdf_ocr_requested else "kordoc",
+                "pdf_document_parse",
+                "user_consented_pdf_ocr" if self.config.pdf_ocr_requested else "file_format_pdf",
+            )
 
         if source_format == SourceFormat.HWP:
             if (

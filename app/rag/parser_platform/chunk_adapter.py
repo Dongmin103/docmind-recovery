@@ -76,6 +76,7 @@ class CommonToStandardChunkAdapter:
                     "raw_artifact_ref": document.raw_artifact_ref,
                     "stable_block_id": block.stable_block_id,
                     "source_item_id": block.source_item_id,
+                    "ocr_engine": block.diagnostics.get("ocr_engine"),
                     "block_type": block.block_type.value,
                     "parent_id": block.parent_id,
                     "children_ids": list(block.children_ids),

@@ -26,6 +26,7 @@ async function previewRequest<T>(
     method,
     credentials: 'same-origin',
     cache: 'no-store',
+    keepalive: method === 'DELETE',
     signal,
     headers: {
       [Authorization]: getAuthorization(),

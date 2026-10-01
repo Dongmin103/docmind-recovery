@@ -119,6 +119,7 @@ class TemporaryParserInputRunner(Protocol):
         workspace: TemporaryParserWorkspace,
         deadline_at: datetime,
         max_pdf_pages: int | None = None,
+        pdf_ocr_requested: bool = False,
     ) -> ParserStageResult: ...
 
 
@@ -845,6 +846,121 @@ def request_cloud_source_reprocess(
     return {"job_id": job.id, "version_id": version.id, "fencing_token": new_fence}
 
 
+def request_pdf_ocr_consent(
+    tenant_id: str, *, document_id: str, expected_source_version_id: str,
+    actor_id: str, idempotency_key: str,
+) -> dict[str, str | int]:
+    """Queue OCR for one verified PDF source version after explicit user consent."""
+    tenant_id = _valid_identifier(tenant_id, max_length=32)
+    document_id = _valid_identifier(document_id, max_length=32)
+    expected_source_version_id = _valid_identifier(expected_source_version_id, max_length=32)
+    actor_id = _valid_identifier(actor_id, max_length=32)
+    if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128:
+        raise DocmindIngestionError("DOCMIND_PDF_OCR_REQUEST_INVALID")
+    key_hash = hashlib.sha256(f"{actor_id}\x1f{idempotency_key}".encode()).hexdigest()
+    database = DocmindIngestionJob._meta.database
+    with database.atomic():
+        projects = list(DocmindProject.select().where(DocmindProject.tenant_id == tenant_id).limit(2))
+        if len(projects) != 1:
+            raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_UNAUTHORIZED")
+        project = projects[0]
+        query = DocmindSourceDocument.select().where(
+            (DocmindSourceDocument.project_id == project.id)
+            & (DocmindSourceDocument.document_id == document_id)
+            & (DocmindSourceDocument.deleted_at.is_null(True))
+        )
+        if "sqlite" not in database.__class__.__name__.lower():
+            query = query.for_update()
+        mappings = list(query.limit(2))
+        if len(mappings) != 1:
+            raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_UNAUTHORIZED")
+        mapping = mappings[0]
+        source = DocmindSource.get_or_none(
+            (DocmindSource.id == mapping.source_id)
+            & (DocmindSource.project_id == project.id)
+            & (DocmindSource.enabled == True)
+        )
+        document = Document.get_or_none((Document.id == document_id) & (Document.kb_id == project.dataset_id))
+        version = DocmindSourceVersion.get_or_none(
+            (DocmindSourceVersion.id == expected_source_version_id)
+            & (DocmindSourceVersion.source_document_id == mapping.id)
+            & (DocmindSourceVersion.document_id == document_id)
+        )
+        job = DocmindIngestionJob.get_or_none(DocmindIngestionJob.version_id == expected_source_version_id)
+        if (
+            source is None or document is None or version is None or job is None
+            or not mapping.relative_path.lower().endswith(".pdf")
+            or mapping.observed_ciphertext_sha256 != version.ciphertext_sha256
+            or mapping.observed_size != version.ciphertext_size
+            or mapping.observed_mtime_ns != version.source_mtime_ns
+            or job.project_id != project.id or job.source_id != source.id
+            or job.source_document_id != mapping.id or job.document_id != document_id
+            or DocmindIngestionJob.select().where(
+                (DocmindIngestionJob.source_document_id == mapping.id)
+                & (DocmindIngestionJob.id != job.id)
+                & (~DocmindIngestionJob.lifecycle_state.in_(TERMINAL_STATES))
+            ).exists()
+        ):
+            raise DocmindIngestionError("DOCMIND_PDF_OCR_PRECONDITION_FAILED")
+        if job.pdf_ocr_requested:
+            if job.pdf_ocr_consent_key_hash != key_hash:
+                raise DocmindIngestionError("DOCMIND_PDF_OCR_ALREADY_REQUESTED")
+            return {"job_id": job.id, "version_id": version.id, "fencing_token": job.fencing_token}
+        active_partial = (
+            job.lifecycle_state == "COMPLETE"
+            and mapping.active_source_version_id == version.id
+            and version.lifecycle_state == "ACTIVE"
+            and version.chunk_set_id == document.active_chunk_set_id
+            and version.parser_run_id is not None
+        )
+        if active_partial:
+            run = ParserRun.get_or_none(ParserRun.id == version.parser_run_id)
+            active_partial = bool(
+                run is not None and run.doc_id == document_id
+                and run.chunk_set_id == version.chunk_set_id
+                and run.source_format.lower() == "pdf" and run.parser_name == "kordoc"
+                and run.lifecycle == "READY_WITH_WARNING"
+                and "PDF_IMAGE_OCR_NOT_RUN" in (run.warnings or [])
+            )
+        failed_zero = (
+            job.lifecycle_state == "FAILED"
+            and job.error_code == "PARSER_PDF_NO_SEARCHABLE_TEXT"
+        )
+        if not (active_partial or failed_zero) or job.cleanup_state != "COMPLETE" or job.host_cleanup_state != "COMPLETE":
+            raise DocmindIngestionError("DOCMIND_PDF_OCR_PRECONDITION_FAILED")
+        changed = DocmindSourceDocument.update(
+            generation=mapping.generation + 1, **_updates(),
+        ).where(
+            (DocmindSourceDocument.id == mapping.id)
+            & (DocmindSourceDocument.generation == mapping.generation)
+            & (DocmindSourceDocument.deleted_at.is_null(True))
+            & (DocmindSourceDocument.observed_ciphertext_sha256 == version.ciphertext_sha256)
+            & (DocmindSourceDocument.observed_size == version.ciphertext_size)
+            & (DocmindSourceDocument.observed_mtime_ns == version.source_mtime_ns)
+        ).execute()
+        if changed != 1:
+            raise DocmindIngestionError("DOCMIND_PDF_OCR_PRECONDITION_FAILED")
+        new_fence = job.fencing_token + 1
+        changed = DocmindIngestionJob.update(
+            lifecycle_state="DISCOVERED", attempt=0, fencing_token=new_fence,
+            pdf_ocr_requested=True, pdf_ocr_consented_by=actor_id,
+            pdf_ocr_consented_at=_now(), pdf_ocr_consent_key_hash=key_hash,
+            lease_owner=None, lease_expires_at=None, retry_not_before=None,
+            parser_input_token_hash=None, plaintext_sha256=None, plaintext_size=None,
+            parser_run_id=None, chunk_set_id=None, host_cleanup_state="NOT_STARTED",
+            cleanup_state="NOT_STARTED", error_code=None, error_message=None,
+            **_updates(),
+        ).where(
+            (DocmindIngestionJob.id == job.id)
+            & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
+            & (DocmindIngestionJob.fencing_token == job.fencing_token)
+            & (DocmindIngestionJob.pdf_ocr_requested == False)
+        ).execute()
+        if changed != 1:
+            raise DocmindIngestionError("DOCMIND_PDF_OCR_PRECONDITION_FAILED")
+    return {"job_id": job.id, "version_id": version.id, "fencing_token": new_fence}
+
+
 def _claimable_jobs(
     now: datetime, allowed_formats: tuple[str, ...] | None = None, *, skip_retries: bool = False,
     claim_source_id: str | None = None, claim_job_id: str | None = None,
@@ -936,6 +1052,8 @@ def claim_next(
         ).where(DocmindIngestionJob.id == candidate.id).first()
         if job is None:
             return None
+        if job.pdf_ocr_requested and lease_seconds < 1500:
+            raise DocmindIngestionError("DOCMIND_PDF_OCR_LEASE_TOO_SHORT")
         next_fence = job.fencing_token + 1
         expires = now + timedelta(seconds=lease_seconds)
         changed = (
@@ -1120,7 +1238,7 @@ def process_decrypted_artifact(
     def run_and_activate(workspace: TemporaryParserWorkspace):
         if _now() >= deadline_at:
             raise DocmindIngestionError("DOCMIND_INGESTION_PIPELINE_TIMEOUT")
-        staged = runner.run(
+        run_args = dict(
             job_id=job_id,
             document_id=DocmindIngestionJob.get_by_id(job_id).document_id,
             version_id=version_id,
@@ -1128,6 +1246,9 @@ def process_decrypted_artifact(
             deadline_at=deadline_at,
             max_pdf_pages=max_pdf_pages,
         )
+        if leased_job.pdf_ocr_requested:
+            run_args["pdf_ocr_requested"] = True
+        staged = runner.run(**run_args)
         _recycle_database_connection_after_long_stage()
         if _now() >= deadline_at:
             raise DocmindIngestionError("DOCMIND_INGESTION_PIPELINE_TIMEOUT")

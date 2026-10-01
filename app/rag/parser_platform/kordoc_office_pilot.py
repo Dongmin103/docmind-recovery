@@ -114,6 +114,32 @@ def _pdf_provenance(block: dict[str, Any], page_sizes: dict[int, tuple[float, fl
     )
 
 
+def _pdf_blocks_with_locators(raw_blocks: list[dict[str, Any]]):
+    """Visit PDF list children in source order without changing root block IDs."""
+    stack = [(raw, f"kordoc-ir-v1/block/{index}", 0)
+             for index, raw in reversed(list(enumerate(raw_blocks)))]
+    child_count = 0
+    while stack:
+        raw, locator, depth = stack.pop()
+        if not isinstance(raw, dict):
+            raise ValueError("invalid kordoc PDF block")
+        children = raw.get("children")
+        if children is not None and not isinstance(children, list):
+            raise ValueError("nested kordoc blocks require explicit support")
+        if children:
+            if raw.get("type") != "list":
+                raise ValueError("nested kordoc blocks require explicit support")
+            child_count += len(children)
+            if depth >= 32 or child_count > 100_000:
+                raise ValueError("nested kordoc PDF list exceeds safe limits")
+            for child_index in range(len(children) - 1, -1, -1):
+                child = children[child_index]
+                if not isinstance(child, dict) or child.get("type") != "list":
+                    raise ValueError("nested kordoc blocks require explicit support")
+                stack.append((child, f"{locator}/children/{child_index}", depth + 1))
+        yield raw, locator
+
+
 def _warning_codes(result: dict[str, Any], *, strict_ocr_warnings: bool = False) -> tuple[str, ...]:
     warnings = result.get("warnings") or []
     if not isinstance(warnings, list):
@@ -386,6 +412,7 @@ def normalize_pilot_document(
         )
 
     page_sizes: dict[int, tuple[float, float]] = {}
+    has_unprocessed_pdf_images = False
     image_ocr = result.get("image_ocr", []) if source_format in {"doc", "docx"} else []
     if not isinstance(image_ocr, list):
         raise ValueError("kordoc image OCR result is invalid")
@@ -415,14 +442,16 @@ def normalize_pilot_document(
             if media:
                 media.close()
     else:
-        page_sizes, _ = _pdf_pages(result)
+        page_sizes, has_unprocessed_pdf_images = _pdf_pages(result)
 
     blocks: list[ParsedBlock] = []
     geometry_omitted = False
     heading_stack: list[tuple[int, str]] = []
-    for index, raw in enumerate(result["blocks"]):
+    located_blocks = (_pdf_blocks_with_locators(result["blocks"]) if source_format == "pdf" else
+                      ((raw, f"kordoc-ir-v1/block/{index}") for index, raw in enumerate(result["blocks"])))
+    for raw, source_item_id in located_blocks:
         block_type = raw.get("type")
-        if raw.get("children"):
+        if raw.get("children") and source_format != "pdf":
             raise ValueError("nested kordoc blocks require explicit support")
         if block_type == "separator":
             continue
@@ -431,6 +460,8 @@ def normalize_pilot_document(
         if block_type == "image" and raw.get("text") not in ocr_by_name:
             continue
         diagnostics: dict[str, Any] = {}
+        if source_format == "pdf" and raw.get("docmind_ocr_engine") == "surya":
+            diagnostics["ocr_engine"] = "surya"
         if block_type == "image":
             item = ocr_by_name[raw["text"]]
             diagnostics = {
@@ -450,7 +481,6 @@ def normalize_pilot_document(
             while heading_stack and heading_stack[-1][0] >= level:
                 heading_stack.pop()
             heading_stack.append((level, str(raw.get("text") or "").strip()))
-        source_item_id = f"kordoc-ir-v1/block/{index}"
         if source_format in {"doc", "docx"}:
             provenance = DocxProvenance(
                 item_locator=source_item_id,
@@ -468,6 +498,10 @@ def normalize_pilot_document(
             text, table_html = str(raw.get("text") or "").strip(), None
         if not text.strip():
             continue
+        if source_format == "pdf" and not any(
+            character.isprintable() and not character.isspace() for character in text
+        ):
+            continue
         if source_format == "pdf" and provenance.bbox is None:
             geometry_omitted = True
         stable_id = make_stable_block_id(
@@ -482,15 +516,16 @@ def normalize_pilot_document(
             warning_codes=("PDF_GEOMETRY_OMITTED",) if source_format == "pdf" and provenance.bbox is None else (),
         ))
     if not blocks:
-        raise ValueError("no searchable kordoc content")
+        raise ValueError("PDF_NO_SEARCHABLE_TEXT" if source_format == "pdf" else "no searchable kordoc content")
     return ParsedDocument(
         schema_version="parser-platform-v1", source_document_id=source_document_id,
         source_hash=source_hash, source_format=SourceFormat(source_format),
         parse_run_id=parse_run_id, chunk_set_id=chunk_set_id,
         parser_name="kordoc", parser_version=result["parser_version"],
         backend="kordoc-pilot", status=ParserRunStatus.NORMALIZING,
-        warnings=tuple(sorted(set(warning_codes) | ({"PDF_GEOMETRY_OMITTED"} if geometry_omitted else set()))), blocks=tuple(blocks),
-        diagnostics={"pilot": True, "images_ocr_enabled": True},
+        warnings=tuple(sorted(set(warning_codes) | ({"PDF_GEOMETRY_OMITTED"} if geometry_omitted else set())
+                              | ({"PDF_IMAGE_OCR_NOT_RUN"} if has_unprocessed_pdf_images else set()))), blocks=tuple(blocks),
+        diagnostics={"pilot": True, "images_ocr_enabled": source_format != "pdf" or not has_unprocessed_pdf_images},
     )
 
 

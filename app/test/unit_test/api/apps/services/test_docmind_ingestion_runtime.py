@@ -192,6 +192,50 @@ def test_task_identity_changes_with_parser_retry(runtime_module, monkeypatch):
     assert created[0] != created[1]
 
 
+def test_private_stage_diagnostic_never_logs_exception_message(runtime_module, caplog):
+    try:
+        raise RuntimeError("PRIVATE PDF TEXT /private/source.pdf secret-key")
+    except RuntimeError as error:
+        runtime_module._log_private_stage_failure("prepare", error)
+    assert "stage=prepare" in caplog.text
+    assert "class=RuntimeError" in caplog.text
+    assert "PRIVATE PDF TEXT" not in caplog.text
+    assert "secret-key" not in caplog.text
+
+
+def test_runner_applies_only_explicit_pdf_ocr_request_to_prepared_config(runtime_module, monkeypatch, tmp_path):
+    module = runtime_module
+
+    @dataclass(frozen=True)
+    class Config:
+        artifact_root: str = ""
+        pdf_ocr_requested: bool = False
+        max_pdf_pages: int = 5000
+
+        @classmethod
+        def from_env(cls):
+            return cls()
+
+    monkeypatch.setattr(module, "ParserPlatformConfig", Config)
+    monkeypatch.setattr(module.DocumentService, "get_by_id", lambda _id: (
+        True, SimpleNamespace(to_dict=lambda: {"id": "doc-1"}),
+    ), raising=False)
+    seen = []
+    monkeypatch.setattr(module.ProductionTemporaryParserInputRunner, "_prepare_run",
+                        staticmethod(lambda _doc, _source, _format, config: seen.append(config.pdf_ocr_requested) or SimpleNamespace(parse_run_id="run-1", chunk_set_id="set-1")))
+    monkeypatch.setattr(module.ProductionTemporaryParserInputRunner, "_run_prepared",
+                        lambda _self, **kwargs: SimpleNamespace(config=kwargs["config"]))
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-synthetic")
+    workspace = SimpleNamespace(input_path=source, derived_root=tmp_path)
+    deadline = datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=1)
+    runner = module.ProductionTemporaryParserInputRunner()
+    result = runner.run(job_id="job-1", document_id="doc-1", version_id="version-1",
+                        workspace=workspace, deadline_at=deadline, pdf_ocr_requested=True)
+    assert seen == [True]
+    assert result.config.pdf_ocr_requested is True
+
+
 def test_raw_artifact_file_reference_must_exist_inside_workspace(runtime_module, monkeypatch, tmp_path: Path):
     module = runtime_module
     artifact = tmp_path / "derived" / "parser-artifacts" / "runs" / "run-1" / "raw.json"

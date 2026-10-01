@@ -92,10 +92,13 @@ class ParserRunService:
         )
         if selection.engine != record.parser_name:
             raise ValueError("parser run engine selection changed")
-        expected_version = runtime.pptx_native_version if selection.engine == "pptx-native" else runtime.kordoc_parser_version
-        expected_backend = "pptx-native-offline" if selection.engine == "pptx-native" else "kordoc-offline"
+        expected_version = (runtime.pptx_native_version if selection.engine == "pptx-native" else
+                            runtime.pdf_parser_version if selection.engine == "kordoc-surya" else runtime.kordoc_parser_version)
+        expected_backend = ("pptx-native-offline" if selection.engine == "pptx-native" else
+                            runtime.pdf_backend if selection.engine == "kordoc-surya" else "kordoc-offline")
+        expected_model = runtime.surya_model_revision if selection.engine == "kordoc-surya" else None
         if (record.parser_version != expected_version
-                or record.model_version is not None or record.backend != expected_backend):
+                or record.model_version != expected_model or record.backend != expected_backend):
             raise ValueError("parser run parser runtime identity changed")
         prepared = PreparedParserRun(
             parse_run_id=record.id,
@@ -302,9 +305,9 @@ class ParserRunService:
             document_id=document["id"],
             source_hash=source_hash,
             source=source,
-            parser_version=runtime.kordoc_parser_version,
-            model_version=None,
-            backend="kordoc-offline",
+            parser_version=runtime.pdf_parser_version if selection.engine == "kordoc-surya" else runtime.kordoc_parser_version,
+            model_version=runtime.surya_model_revision if selection.engine == "kordoc-surya" else None,
+            backend=runtime.pdf_backend if selection.engine == "kordoc-surya" else "kordoc-offline",
             chunking_config=dict(chunking_config or {}),
         )
         return cls._reuse_or_create_run(

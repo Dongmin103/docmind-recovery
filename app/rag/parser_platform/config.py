@@ -34,6 +34,7 @@ class ParserPlatformConfig:
     enabled: bool = False
     integration_ready: bool = False
     pdf_enabled: bool = True
+    pdf_ocr_requested: bool = False
     office_enabled: bool = True
     te_run_mode: str | None = None
     policy_version: str = "parser-platform-policy-v1"
@@ -58,6 +59,12 @@ class ParserPlatformConfig:
     kordoc_ocr_model_revision: str = "kordoc-4.15.7-default"
     kordoc_normalizer_revision: str = "docmind-kordoc-normalizer-v3"
     kordoc_chunker_revision: str = "docmind-kordoc-chunker-v2"
+    surya_service_url: str = "http://surya2-ocr:8091"
+    surya_deadline_seconds: int = 1200
+    surya_parser_version: str = "0.22.1"
+    surya_model_revision: str = "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
+    surya_backend: str = "llamacpp"
+    pdf_ocr_merge_revision: str = "kordoc-native-surya-block-merge-v1"
     libreoffice_converter_revision: str = "libreoffice-4:7.4.7-1+deb12u14"
     hwp_enabled: bool = True
     artifact_root: str = ".parser-platform-artifacts"
@@ -67,6 +74,12 @@ class ParserPlatformConfig:
                     self.kordoc_ocr_model_revision, self.kordoc_normalizer_revision,
                     self.kordoc_chunker_revision, self.libreoffice_converter_revision)):
             raise ValueError("Kordoc runtime revisions must be configured")
+        if self.pdf_ocr_requested and not all((self.surya_service_url.startswith("http://"),
+                                               self.surya_parser_version, self.surya_model_revision,
+                                               self.surya_backend, self.pdf_ocr_merge_revision)):
+            raise ValueError("Surya PDF OCR runtime identity is invalid")
+        if not 1 <= self.surya_deadline_seconds <= 1500:
+            raise ValueError("Surya PDF OCR deadline must leave ingestion lease time for staging")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> ParserPlatformConfig:
@@ -100,6 +113,11 @@ class ParserPlatformConfig:
             kordoc_ocr_model_revision=source.get("PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION", "kordoc-4.15.7-default").strip(),
             kordoc_normalizer_revision=source.get("PARSER_PLATFORM_KORDOC_NORMALIZER_REVISION", "docmind-kordoc-normalizer-v3").strip(),
             kordoc_chunker_revision=source.get("PARSER_PLATFORM_KORDOC_CHUNKER_REVISION", "docmind-kordoc-chunker-v2").strip(),
+            surya_service_url=source.get("PARSER_PLATFORM_SURYA_URL", "http://surya2-ocr:8091").rstrip("/"),
+            surya_deadline_seconds=_positive_int(source, "PARSER_PLATFORM_SURYA_DEADLINE_SECONDS", 1200),
+            surya_parser_version=source.get("PARSER_PLATFORM_SURYA_PARSER_VERSION", "0.22.1").strip(),
+            surya_model_revision=source.get("PARSER_PLATFORM_SURYA_MODEL_REVISION", "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470").strip(),
+            surya_backend=source.get("PARSER_PLATFORM_SURYA_BACKEND", "llamacpp").strip(),
             libreoffice_converter_revision=source.get("PARSER_PLATFORM_LIBREOFFICE_CONVERTER_REVISION", "libreoffice-4:7.4.7-1+deb12u14").strip(),
             hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_HWP_ENABLED", True),
             artifact_root=str(Path(source.get("PARSER_PLATFORM_ARTIFACT_ROOT", ".parser-platform-artifacts")).expanduser()),
@@ -176,6 +194,16 @@ class ParserPlatformConfig:
         if source_format == "pdf":
             settings["max_pdf_pages"] = self.max_pdf_pages
             settings["geometry_policy"] = "page-with-optional-bbox-v1"
+            settings["pdf_ocr_requested"] = self.pdf_ocr_requested
+            if self.pdf_ocr_requested:
+                settings.update(
+                    parser_name="kordoc-surya",
+                    parser_version=self.pdf_parser_version,
+                    surya_model_revision=self.surya_model_revision,
+                    surya_backend=self.surya_backend,
+                    surya_deadline_seconds=self.surya_deadline_seconds,
+                    pdf_ocr_merge_revision=self.pdf_ocr_merge_revision,
+                )
         if source_format == "doc" or (source_format == "pptx" and not self.pptx_native_enabled):
             settings["converter_revision"] = self.libreoffice_converter_revision
         if source_format == "pptx":
@@ -187,3 +215,11 @@ class ParserPlatformConfig:
             else:
                 settings["text_fallback_enabled"] = self.pptx_text_fallback_enabled
         return canonical_sha256(settings)
+
+    @property
+    def pdf_parser_version(self) -> str:
+        return f"kordoc-{self.kordoc_parser_version}+surya-{self.surya_parser_version}"
+
+    @property
+    def pdf_backend(self) -> str:
+        return f"kordoc-native+surya-{self.surya_backend}-gpu"

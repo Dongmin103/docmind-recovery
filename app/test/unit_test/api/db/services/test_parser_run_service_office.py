@@ -144,6 +144,25 @@ def test_pdf_run_accepts_deferred_page_count_before_kordoc_parse(monkeypatch) ->
     assert created["parser_name"] == "kordoc"
 
 
+def test_consented_pdf_run_persists_distinct_surya_gpu_identity(monkeypatch) -> None:
+    created = {}
+    monkeypatch.setattr(parser_run_service.ParserRun, "select", lambda: EmptyQuery())
+    monkeypatch.setattr(parser_run_service.ParserRun, "create", lambda **values: created.update(values))
+    config = ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0", pdf_ocr_requested=True)
+    prepared = parser_run_service.ParserRunService.prepare_pdf_run.__wrapped__(
+        parser_run_service.ParserRunService,
+        document={"id": "a" * 32, "name": "sample.pdf"},
+        source_bytes=b"%PDF-1.7\nsynthetic", expected_page_count=0, config=config,
+    )
+    assert prepared.selection.engine == "kordoc-surya"
+    assert created["parser_name"] == "kordoc-surya"
+    assert created["parser_version"] == config.pdf_parser_version
+    assert created["model_version"] == config.surya_model_revision
+    assert created["backend"] == config.pdf_backend
+    assert created["parser_fingerprint"] == prepared.parser_fingerprint
+    assert config.run_config_fingerprint("pdf") != ParserPlatformConfig().run_config_fingerprint("pdf")
+
+
 def test_hwp_run_uses_kordoc_without_canary_or_promotion(monkeypatch) -> None:
     created = {}
     monkeypatch.setattr(parser_run_service.ParserRun, "select", lambda: EmptyQuery())
@@ -186,6 +205,26 @@ def test_kordoc_readback_rejects_parser_version_change(monkeypatch) -> None:
         source_hash=__import__("hashlib").sha256(source_bytes).hexdigest(),
         config_fingerprint=config.run_config_fingerprint("pdf"), parser_name="kordoc",
         parser_version="4.15.6", model_version=None, backend="kordoc-offline",
+        chunk_set_id="c" * 32, idempotency_key="d" * 64,
+        source_fingerprint="e" * 64, parser_fingerprint="f" * 64,
+    )
+    monkeypatch.setattr(parser_run_service.ParserRun, "get_or_none", lambda *args: historical)
+    with pytest.raises(ValueError, match="parser runtime identity changed"):
+        parser_run_service.ParserRunService.load_prepared_run.__wrapped__(
+            parser_run_service.ParserRunService,
+            parse_run_id="old-run", document={"id": "b" * 32, "name": "sample.pdf"},
+            source_bytes=source_bytes, config=config,
+        )
+
+
+def test_consented_pdf_readback_rejects_wrong_surya_model_identity(monkeypatch) -> None:
+    source_bytes = b"%PDF-1.7\nsynthetic"
+    config = ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0", pdf_ocr_requested=True)
+    historical = SimpleNamespace(
+        id="old-run", doc_id="b" * 32, source_format="pdf",
+        source_hash=__import__("hashlib").sha256(source_bytes).hexdigest(),
+        config_fingerprint=config.run_config_fingerprint("pdf"), parser_name="kordoc-surya",
+        parser_version=config.pdf_parser_version, model_version="other-model", backend=config.pdf_backend,
         chunk_set_id="c" * 32, idempotency_key="d" * 64,
         source_fingerprint="e" * 64, parser_fingerprint="f" * 64,
     )
