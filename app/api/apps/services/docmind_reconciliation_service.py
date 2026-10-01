@@ -11,7 +11,7 @@ from datetime import UTC, datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from peewee import IntegrityError
+from peewee import IntegrityError, fn
 
 from api.db.db_models import (
     DocmindFolder,
@@ -24,6 +24,7 @@ from api.db.db_models import (
     DocmindSourceScan,
     DocmindSourceScanBatch,
     DocmindSourceScanEntry,
+    DocmindSourceSyncSession,
     DocmindSourceVersion,
     Document,
 )
@@ -273,7 +274,19 @@ def _source(source_id: str) -> tuple[DocmindSource, DocmindProject]:
     return source, project
 
 
-def begin_scan(
+def begin_scan(**kwargs) -> dict:
+    """Serialize v2 scan creation with session rotation on the source row."""
+    if kwargs.get("protocol_version", 1) != 2:
+        return _begin_scan_locked(**kwargs)
+    source_id = _identifier(kwargs.get("source_id"), max_length=64)
+    with DocmindSource._meta.database.atomic():
+        DocmindSource.update(enabled=DocmindSource.enabled).where(
+            DocmindSource.id == source_id
+        ).execute()
+        return _begin_scan_locked(**kwargs)
+
+
+def _begin_scan_locked(
     *,
     source_id: str,
     scan_id: str,
@@ -282,12 +295,28 @@ def begin_scan(
     occurred_at: datetime | None = None,
     trigger: str = "HOST_FULL_SCAN",
     schedule_fencing_token: int | None = None,
+    protocol_version: int = 1,
+    owner_id: str | None = None,
+    epoch: int | None = None,
 ) -> dict:
     if root_access_confirmed is not True:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_ROOT_ACCESS_REQUIRED")
     source, project = _source(source_id)
     scan_id = _identifier(scan_id, max_length=64)
     worker_id = _identifier(worker_id, max_length=128)
+    session = _scan_session(source.id, worker_id, owner_id, epoch) if protocol_version == 2 else None
+    if protocol_version != 2 and DocmindSourceSyncSession.get_or_none(DocmindSourceSyncSession.source_id == source.id):
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_PROTOCOL_OUTDATED")
+    if session is not None:
+        DocmindSourceScan.update(
+            lifecycle_state="FAILED", completed_at=_now(),
+            error_code="SESSION_REPLACED", **_updates(),
+        ).where(
+            (DocmindSourceScan.source_id == source.id)
+            & (DocmindSourceScan.lifecycle_state == "RUNNING")
+            & ((DocmindSourceScan.protocol_version != 2)
+               | (DocmindSourceScan.scan_start_epoch != session.epoch))
+        ).execute()
     internal_id = _stable_id("docmind-source-scan", source.id, scan_id)
     schedule = DocmindSourceReconciliationSchedule.get_or_none(
         DocmindSourceReconciliationSchedule.source_id == source.id
@@ -314,7 +343,10 @@ def begin_scan(
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_REQUEST_INVALID")
     existing = DocmindSourceScan.get_or_none(DocmindSourceScan.id == internal_id)
     if existing is not None:
-        if existing.worker_id != worker_id or not existing.root_access_confirmed:
+        if (existing.worker_id != worker_id or not existing.root_access_confirmed
+            or existing.protocol_version != protocol_version
+            or (session is not None and existing.scan_start_epoch != session.epoch
+                and not (existing.lifecycle_state == "FAILED" and trigger == "HOST_SCHEDULED"))):
             raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SCAN_CONFLICT")
         if existing.lifecycle_state == "FAILED" and trigger == "HOST_SCHEDULED":
             database = DocmindSourceScan._meta.database
@@ -330,6 +362,9 @@ def begin_scan(
                 ).execute()
                 DocmindSourceScan.update(
                     lifecycle_state="RUNNING",
+                    protocol_version=protocol_version,
+                    scan_start_epoch=session.epoch if session else 0,
+                    scan_start_sequence=session.last_sequence if session else 0,
                     schedule_fencing_token=schedule_fencing_token,
                     received_batch_count=0,
                     observed_file_count=0,
@@ -358,6 +393,9 @@ def begin_scan(
         schedule_fencing_token=schedule_fencing_token,
         trigger=trigger,
         lifecycle_state="RUNNING",
+        protocol_version=protocol_version,
+        scan_start_epoch=session.epoch if session else 0,
+        scan_start_sequence=session.last_sequence if session else 0,
         root_access_confirmed=True,
         started_at=started_at,
         **_timestamps(),
@@ -365,13 +403,29 @@ def begin_scan(
     return {"accepted": True, "scan_id": scan_id, "state": "RUNNING"}
 
 
-def _scan(source_id: str, scan_id: str, worker_id: str) -> DocmindSourceScan:
+def _scan_session(source_id: str, worker_id: str, owner_id: str | None, epoch: int | None):
+    if not isinstance(owner_id, str) or not owner_id or type(epoch) is not int or epoch < 1:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SESSION_INVALID")
+    session = DocmindSourceSyncSession.get_or_none(DocmindSourceSyncSession.source_id == source_id)
+    if (session is None or (session.worker_id, session.owner_id, session.epoch) != (worker_id, owner_id, epoch)
+        or session.lease_expires_at <= _now()):
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SESSION_FENCED")
+    return session
+
+
+def _scan(source_id: str, scan_id: str, worker_id: str, *, owner_id: str | None = None, epoch: int | None = None) -> DocmindSourceScan:
     scan = DocmindSourceScan.get_or_none(
         (DocmindSourceScan.source_id == _identifier(source_id, max_length=64))
         & (DocmindSourceScan.scan_id == _identifier(scan_id, max_length=64))
     )
     if scan is None or scan.worker_id != _identifier(worker_id, max_length=128):
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SCAN_NOT_FOUND")
+    if scan.protocol_version == 2:
+        session = _scan_session(scan.source_id, scan.worker_id, owner_id, epoch)
+        if session.epoch != scan.scan_start_epoch:
+            raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SESSION_FENCED")
+    elif DocmindSourceSyncSession.get_or_none(DocmindSourceSyncSession.source_id == scan.source_id):
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_PROTOCOL_OUTDATED")
     return scan
 
 
@@ -485,8 +539,10 @@ def record_scan_batch(
     documents: list[dict],
     observation_handler=None,
     provisioner=None,
+    owner_id: str | None = None,
+    epoch: int | None = None,
 ) -> dict:
-    scan = _scan(source_id, scan_id, worker_id)
+    scan = _scan(source_id, scan_id, worker_id, owner_id=owner_id, epoch=epoch)
     if scan.lifecycle_state != "RUNNING" or not scan.root_access_confirmed:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SCAN_NOT_RUNNING")
     if scan.trigger == "HOST_SCHEDULED":
@@ -502,7 +558,7 @@ def record_scan_batch(
             raise DocmindReconciliationError("DOCMIND_RECONCILIATION_STALE_SCHEDULE_LEASE")
     if not isinstance(batch_index, int) or batch_index < 0 or batch_index > 1_000_000:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
-    if not isinstance(documents, list) or len(documents) > 10_000:
+    if not isinstance(documents, list) or len(documents) > (500 if scan.protocol_version == 2 else 10_000):
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_BATCH_INVALID")
     normalized: list[ScanDocument] = []
     for raw in documents:
@@ -560,7 +616,7 @@ def record_scan_batch(
                 & (DocmindSourceDocument.source_id == scan.source_id)
                 & (DocmindSourceDocument.relative_path_hash == path_hash)
             )
-            if mapping is None and source.default_folder_id and document.host_file_id is None:
+            if scan.protocol_version == 1 and mapping is None and source.default_folder_id and document.host_file_id is None:
                 provision = provisioner or _provision_discovered_document
                 mapping = provision(
                     source=source,
@@ -583,7 +639,7 @@ def record_scan_batch(
                 )
             except IntegrityError as error:
                 raise DocmindReconciliationError("DOCMIND_RECONCILIATION_DUPLICATE_PATH") from error
-            if mapping is not None and mapping.deleted_at is None:
+            if scan.protocol_version == 1 and mapping is not None and mapping.deleted_at is None:
                 _observe_scan_entry(scan, project, mapping, entry, observation_handler)
         changed = (
             DocmindSourceScan.update(
@@ -603,18 +659,18 @@ def record_scan_batch(
     return {"accepted": True, "idempotent": False, "batch_index": batch_index}
 
 
-def apply_authoritative_deletions(
+def stage_authoritative_deletions(
     source_documents: list[DocmindSourceDocument],
     *,
     authority_kind: str,
     authority_scan_id: str | None,
-    adapter: SearchRetentionAdapter,
     now: datetime,
-) -> list[str]:
+) -> None:
     retained_until = now + timedelta(days=30)
     database = DocmindSourceDocument._meta.database
     with database.atomic():
         for source_document in source_documents:
+            deletion_generation = source_document.generation + (0 if source_document.deleted_at is not None else 1)
             if source_document.deleted_at is None:
                 changed = (
                     DocmindSourceDocument.update(
@@ -652,6 +708,7 @@ def apply_authoritative_deletions(
                 source_document.id,
                 authority_kind,
                 authority_scan_id or "event",
+                str(deletion_generation),
             )
             DocmindSourceDeletion.get_or_create(
                 id=deletion_id,
@@ -662,6 +719,7 @@ def apply_authoritative_deletions(
                     "document_id": source_document.document_id,
                     "authority_kind": authority_kind,
                     "authority_scan_id": authority_scan_id,
+                    "deletion_generation": deletion_generation,
                     "confirmed_at": now,
                     "search_excluded_at": None,
                     "retained_until": retained_until,
@@ -669,6 +727,55 @@ def apply_authoritative_deletions(
                     **_timestamps(),
                 },
             )
+            Document.update(status="0").where(Document.id == source_document.document_id).execute()
+
+
+def revive_authoritatively_deleted_mapping(mapping: DocmindSourceDocument, *, now: datetime) -> None:
+    """Revive only a verified same-path source item under the caller's source lock.
+
+    The previous index remains excluded until a fresh version activates.
+    """
+    if mapping.deleted_at is None:
+        return
+    changed = DocmindSourceDocument.update(
+        deleted_at=None, source_dirty=True, stable_observation_count=0,
+        stable_observed_at=None, latest_target_version_id=None,
+        generation=mapping.generation + 1, **_updates(),
+    ).where(
+        (DocmindSourceDocument.id == mapping.id)
+        & (DocmindSourceDocument.generation == mapping.generation)
+        & (DocmindSourceDocument.deleted_at.is_null(False))
+    ).execute()
+    if changed != 1:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_REVIVE_CONFLICT")
+    DocmindSourceDeletion.update(
+        lifecycle_state="CANCELLED_RECREATED", **_updates(),
+    ).where(
+        (DocmindSourceDeletion.source_document_id == mapping.id)
+        & (DocmindSourceDeletion.lifecycle_state == "PENDING_SEARCH_EXCLUSION")
+    ).execute()
+    mapping.deleted_at = None
+    mapping.source_dirty = True
+    mapping.generation += 1
+    mapping.stable_observation_count = 0
+    mapping.latest_target_version_id = None
+
+
+def apply_authoritative_deletions(
+    source_documents: list[DocmindSourceDocument], *, authority_kind: str,
+    authority_scan_id: str | None, adapter: SearchRetentionAdapter, now: datetime,
+) -> list[str]:
+    stage_authoritative_deletions(source_documents, authority_kind=authority_kind, authority_scan_id=authority_scan_id, now=now)
+    return finish_authoritative_deletions(source_documents, authority_kind=authority_kind, authority_scan_id=authority_scan_id, adapter=adapter, now=now)
+
+
+def finish_authoritative_deletions(
+    source_documents: list[DocmindSourceDocument], *, authority_kind: str,
+    authority_scan_id: str | None, adapter: SearchRetentionAdapter, now: datetime,
+) -> list[str]:
+    """Retry external effects from committed tombstones, without new observations."""
+    if not source_documents and authority_scan_id is None:
+        return []
 
     pending_query = DocmindSourceDeletion.select().where(
         (DocmindSourceDeletion.lifecycle_state == "PENDING_SEARCH_EXCLUSION")
@@ -682,20 +789,61 @@ def apply_authoritative_deletions(
         pending_query = pending_query.where(
             DocmindSourceDeletion.source_document_id.in_([item.id for item in source_documents])
         )
-    pending = list(pending_query)
+    pending = list(pending_query.limit(500))
     if not pending:
         return []
-    document_ids = sorted({item.document_id for item in pending})
-    # The source generation/job fence above prevents activation races. DB
-    # Document.status is the first search gate inside the production adapter;
-    # a partial ES marker therefore remains safely excluded and retryable.
-    adapter.exclude(document_ids, retained_until=min(item.retained_until for item in pending))
-    DocmindSourceDeletion.update(
-        search_excluded_at=now,
-        lifecycle_state="INACTIVE_RETAINED",
-        **_updates(),
-    ).where(DocmindSourceDeletion.id.in_([item.id for item in pending])).execute()
-    return document_ids
+    completed: list[str] = []
+    # The source row is the same serialization point as incremental delivery
+    # and activation. External exclusion may be slow, but cannot race revive.
+    for source_id in sorted({item.source_id for item in pending}):
+        with DocmindSource._meta.database.atomic():
+            DocmindSource.update(enabled=DocmindSource.enabled).where(
+                DocmindSource.id == source_id
+            ).execute()
+            current = []
+            for item in pending:
+                if item.source_id != source_id:
+                    continue
+                mapping = DocmindSourceDocument.get_by_id(item.source_document_id)
+                if mapping.deleted_at is None or (item.deletion_generation and mapping.generation != item.deletion_generation):
+                    DocmindSourceDeletion.update(lifecycle_state="CANCELLED_RECREATED", **_updates()).where(
+                        (DocmindSourceDeletion.id == item.id)
+                        & (DocmindSourceDeletion.lifecycle_state == "PENDING_SEARCH_EXCLUSION")
+                    ).execute()
+                else:
+                    current.append(item)
+            if current:
+                document_ids = sorted({item.document_id for item in current})
+                adapter.exclude(document_ids, retained_until=min(item.retained_until for item in current))
+                DocmindSourceDeletion.update(
+                    search_excluded_at=now, lifecycle_state="INACTIVE_RETAINED", **_updates(),
+                ).where(DocmindSourceDeletion.id.in_([item.id for item in current])).execute()
+                completed.extend(document_ids)
+    return completed
+
+
+def retry_pending_authoritative_deletions(
+    *, source_id: str | None = None, limit: int = 100,
+    adapter: SearchRetentionAdapter | None = None,
+) -> int:
+    if type(limit) is not int or not 1 <= limit <= 500:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_PAGE_INVALID")
+    query = DocmindSourceDeletion.select().where(
+        DocmindSourceDeletion.lifecycle_state == "PENDING_SEARCH_EXCLUSION"
+    )
+    if source_id is not None:
+        query = query.where(DocmindSourceDeletion.source_id == _identifier(source_id, max_length=64))
+    rows = list(query.order_by(DocmindSourceDeletion.confirmed_at, DocmindSourceDeletion.id).limit(limit))
+    finished = 0
+    retention = adapter or ProductionSearchRetentionAdapter()
+    for row in rows:
+        mapping = DocmindSourceDocument.get_by_id(row.source_document_id)
+        finished += len(finish_authoritative_deletions(
+            [mapping], authority_kind=row.authority_kind,
+            authority_scan_id=row.authority_scan_id,
+            adapter=retention, now=_now(),
+        ))
+    return finished
 
 
 def complete_scan(
@@ -710,8 +858,10 @@ def complete_scan(
     occurred_at: datetime | None = None,
     observation_handler=None,
     provisioner=None,
+    owner_id: str | None = None,
+    epoch: int | None = None,
 ) -> dict:
-    scan = _scan(source_id, scan_id, worker_id)
+    scan = _scan(source_id, scan_id, worker_id, owner_id=owner_id, epoch=epoch)
     if scan.lifecycle_state == "COMPLETE":
         return {"accepted": True, "scan_id": scan.scan_id, "state": "COMPLETE", "idempotent": True}
     if scan.lifecycle_state != "RUNNING" or not scan.root_access_confirmed or complete is not True:
@@ -730,6 +880,35 @@ def complete_scan(
             raise DocmindReconciliationError("DOCMIND_RECONCILIATION_STALE_SCHEDULE_LEASE")
     if not isinstance(file_count, int) or not isinstance(batch_count, int) or file_count < 0 or batch_count < 0:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_COMPLETION_INVALID")
+    if scan.protocol_version == 2:
+        batches = DocmindSourceScanBatch.select(
+            fn.COUNT(DocmindSourceScanBatch.id),
+            fn.MIN(DocmindSourceScanBatch.batch_index),
+            fn.MAX(DocmindSourceScanBatch.batch_index),
+            fn.SUM(DocmindSourceScanBatch.item_count),
+        ).where(DocmindSourceScanBatch.source_scan_id == scan.id).tuples().get()
+        actual_count = DocmindSourceScanEntry.select().where(
+            DocmindSourceScanEntry.source_scan_id == scan.id
+        ).count()
+        valid = (batches[0] == batch_count and (batch_count == 0 or
+                 (batches[1], batches[2]) == (0, batch_count - 1)) and
+                 (batches[3] or 0) == file_count and actual_count == file_count)
+        if not valid:
+            fail_scan(source_id=source_id, scan_id=scan_id, worker_id=worker_id,
+                      error_code="SCAN_INCOMPLETE", owner_id=owner_id, epoch=epoch,
+                      protocol_version=2)
+            raise DocmindReconciliationError("DOCMIND_RECONCILIATION_COMPLETION_MISMATCH")
+        now = occurred_at or _now()
+        DocmindSourceScan.update(
+            lifecycle_state="COMPLETE", declared_batch_count=batch_count,
+            declared_file_count=file_count, completed_at=now, error_code=None,
+            **_updates(),
+        ).where((DocmindSourceScan.id == scan.id) &
+                (DocmindSourceScan.lifecycle_state == "RUNNING")).execute()
+        if scan.trigger == "HOST_SCHEDULED":
+            _advance_midnight_schedule(scan)
+        return {"accepted": True, "scan_id": scan.scan_id, "state": "COMPLETE",
+                "candidate_paging_required": True}
     batches = list(
         DocmindSourceScanBatch.select()
         .where(DocmindSourceScanBatch.source_scan_id == scan.id)
@@ -817,6 +996,62 @@ def complete_scan(
     }
 
 
+def _advance_midnight_schedule(scan: DocmindSourceScan) -> None:
+    local_date = scan.scan_id.removeprefix("midnight-")
+    next_local = datetime.combine(
+        datetime.fromisoformat(local_date).date() + timedelta(days=1), time.min, SEOUL
+    )
+    changed = DocmindSourceReconciliationSchedule.update(
+        last_claimed_local_date=local_date, pending_local_date=None,
+        next_due_at=next_local.astimezone(UTC).replace(tzinfo=None),
+        lease_owner=None, lease_expires_at=None, **_updates(),
+    ).where(
+        (DocmindSourceReconciliationSchedule.source_id == scan.source_id)
+        & (DocmindSourceReconciliationSchedule.fencing_token == scan.schedule_fencing_token)
+    ).execute()
+    if changed != 1:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_STALE_SCHEDULE_LEASE")
+
+
+def missing_scan_candidates(
+    *, source_id: str, scan_id: str, worker_id: str, owner_id: str,
+    epoch: int, after_document_id: str | None = None, limit: int = 500,
+) -> dict:
+    scan = _scan(source_id, scan_id, worker_id, owner_id=owner_id, epoch=epoch)
+    if scan.protocol_version != 2 or scan.lifecycle_state != "COMPLETE" or not scan.root_access_confirmed:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_NOT_AUTHORITATIVE")
+    if type(limit) is not int or not 1 <= limit <= 500:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_PAGE_INVALID")
+    if after_document_id is not None:
+        after_document_id = _identifier(after_document_id, max_length=32)
+    entry = DocmindSourceScanEntry.alias()
+    observed = entry.select(entry.id).where(
+        (entry.source_scan_id == scan.id)
+        & ((entry.relative_path_hash == DocmindSourceDocument.relative_path_hash)
+           | ((DocmindSourceDocument.host_file_identity.is_null(False))
+              & (entry.host_file_identity == DocmindSourceDocument.host_file_identity)))
+    )
+    query = DocmindSourceDocument.select(
+        DocmindSourceDocument.document_id, DocmindSourceDocument.relative_path
+    ).where(
+        (DocmindSourceDocument.project_id == scan.project_id)
+        & (DocmindSourceDocument.source_id == scan.source_id)
+        & (DocmindSourceDocument.deleted_at.is_null(True))
+        & (DocmindSourceDocument.source_dirty == False)
+        & (DocmindSourceDocument.last_change_received_at.is_null(True)
+           | (DocmindSourceDocument.last_change_received_at <= scan.started_at))
+        & ~fn.EXISTS(observed)
+    )
+    if after_document_id is not None:
+        query = query.where(DocmindSourceDocument.document_id > after_document_id)
+    rows = list(query.order_by(DocmindSourceDocument.document_id).limit(limit + 1))
+    page = rows[:limit]
+    return {
+        "candidates": [{"document_id": row.document_id, "relative_path": row.relative_path} for row in page],
+        "next_cursor": page[-1].document_id if len(rows) > limit else None,
+    }
+
+
 def fail_scan(
     *,
     source_id: str,
@@ -826,10 +1061,17 @@ def fail_scan(
     root_access_confirmed: bool | None = None,
     occurred_at: datetime | None = None,
     schedule_fencing_token: int | None = None,
+    owner_id: str | None = None,
+    epoch: int | None = None,
+    protocol_version: int = 1,
 ) -> dict:
     source, project = _source(source_id)
     scan_id = _identifier(scan_id, max_length=64)
     worker_id = _identifier(worker_id, max_length=128)
+    if protocol_version == 2:
+        _scan_session(source.id, worker_id, owner_id, epoch)
+    elif DocmindSourceSyncSession.get_or_none(DocmindSourceSyncSession.source_id == source.id):
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_PROTOCOL_OUTDATED")
     scan = DocmindSourceScan.get_or_none(
         (DocmindSourceScan.source_id == source.id) & (DocmindSourceScan.scan_id == scan_id)
     )
@@ -852,6 +1094,9 @@ def fail_scan(
             schedule_fencing_token=schedule_fencing_token,
             trigger="HOST_SCHEDULED" if schedule is not None else "HOST_FAILURE",
             lifecycle_state="FAILED",
+            protocol_version=protocol_version,
+            scan_start_epoch=epoch or 0,
+            scan_start_sequence=0,
             root_access_confirmed=root_access_confirmed is True,
             started_at=occurred_at or _now(),
             completed_at=occurred_at or _now(),
@@ -872,6 +1117,8 @@ def fail_scan(
         return {"accepted": True, "scan_id": scan.scan_id, "state": "FAILED"}
     if scan.worker_id != worker_id:
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SCAN_NOT_FOUND")
+    if scan.protocol_version == 2 and scan.scan_start_epoch != epoch:
+        raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SESSION_FENCED")
     if scan.lifecycle_state == "COMPLETE":
         raise DocmindReconciliationError("DOCMIND_RECONCILIATION_SCAN_ALREADY_COMPLETE")
     error_code = _identifier(error_code, max_length=64)
@@ -895,7 +1142,18 @@ def fail_scan(
     return {"accepted": True, "scan_id": scan.scan_id, "state": "FAILED"}
 
 
-def confirm_event_deletion(
+def confirm_event_deletion(**kwargs) -> dict:
+    source_id = _identifier(kwargs.get("source_id"), max_length=64)
+    with DocmindSource._meta.database.atomic():
+        DocmindSource.update(enabled=DocmindSource.enabled).where(
+            DocmindSource.id == source_id
+        ).execute()
+        if DocmindSourceSyncSession.get_or_none(DocmindSourceSyncSession.source_id == source_id):
+            raise DocmindReconciliationError("DOCMIND_RECONCILIATION_PROTOCOL_OUTDATED")
+        return _confirm_event_deletion_locked(**kwargs)
+
+
+def _confirm_event_deletion_locked(
     *,
     source_id: str,
     document_id: str,
@@ -982,6 +1240,11 @@ def reschedule_retryable_jobs(
         .where(
             (DocmindIngestionJob.lifecycle_state.in_(RETRYABLE_STATES))
             & (DocmindSourceDocument.deleted_at.is_null(True))
+            & (DocmindSourceDocument.source_dirty == False)
+            & (DocmindSourceDocument.observation_epoch == DocmindIngestionJob.observation_epoch)
+            & (DocmindSourceDocument.observation_generation == DocmindIngestionJob.observation_generation)
+            & (DocmindSourceDocument.latest_target_version_id.is_null(True)
+               | (DocmindSourceDocument.latest_target_version_id == DocmindIngestionJob.version_id))
             & (DocmindSource.enabled == True)
             & (
                 DocmindIngestionJob.error_code.is_null(True)

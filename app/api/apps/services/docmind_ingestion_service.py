@@ -22,6 +22,7 @@ from api.db.db_models import (
     DocmindProject,
     DocmindSource,
     DocmindSourceDocument,
+    DocmindSourceSyncSession,
     DocmindSourceVersion,
     Document,
     ParserRun,
@@ -31,12 +32,12 @@ from common.docmind_source_path import (
     logical_path_identity_hash,
     normalize_logical_relative_path,
 )
-from common.time_utils import current_timestamp
 from common.storage_attempt_audit import StorageAttemptAudit, stage_scope
+from common.time_utils import current_timestamp
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-TERMINAL_STATES = frozenset({"COMPLETE", "FAILED", "ACTION_REQUIRED", "DELETED"})
+TERMINAL_STATES = frozenset({"COMPLETE", "FAILED", "ACTION_REQUIRED", "DELETED", "SUPERSEDED"})
 CLAIMABLE_STATES = frozenset({"DISCOVERED", "RETRY_WAIT"})
 OPT_IN_CLAIM_FORMATS = frozenset({"pdf", "doc", "docx", "xls", "xlsx", "pptx"})
 
@@ -151,6 +152,15 @@ _reaper_lock = threading.Lock()
 _last_reap_monotonic = float("-inf")
 
 
+def _observation_superseded(mapping, job) -> bool:
+    return bool(mapping is not None and (
+        mapping.source_dirty
+        or mapping.observation_epoch != job.observation_epoch
+        or mapping.observation_generation != job.observation_generation
+        or mapping.latest_target_version_id not in {None, job.version_id}
+    ))
+
+
 def _cleanup_recovery_target(
     job: DocmindIngestionJob, *, host_cleanup_state: str, cleanup_state: str
 ) -> str:
@@ -168,7 +178,9 @@ def _cleanup_recovery_target(
         and job.parser_run_id
         and job.chunk_set_id
     )
-    return "COMPLETE" if activated else "FAILED"
+    if activated:
+        return "COMPLETE"
+    return "SUPERSEDED" if _observation_superseded(source_document, job) else "FAILED"
 
 
 def _certify_active_version_after_cleanup(job_id: str, fencing_token: int) -> None:
@@ -629,6 +641,21 @@ def observe_source_version(
     if logical_path_identity(source_document.relative_path) != logical_path_identity(relative_path):
         raise DocmindIngestionError("DOCMIND_INGESTION_PATH_MISMATCH")
 
+    return _observe_mapped_source_version(
+        project, source_document, ciphertext_sha256=ciphertext_sha256,
+        ciphertext_size=ciphertext_size, source_mtime_ns=source_mtime_ns,
+        required_stable_observations=required_stable_observations,
+    )
+
+
+def _observe_mapped_source_version(
+    project, source_document, *, ciphertext_sha256, ciphertext_size, source_mtime_ns,
+    required_stable_observations=2,
+):
+    """Shared enqueue path for validated, batch-resolved source mappings."""
+    document_id = source_document.document_id
+    source_id = source_document.source_id
+
     same = (
         source_document.observed_ciphertext_sha256 == ciphertext_sha256
         and source_document.observed_size == ciphertext_size
@@ -684,11 +711,27 @@ def observe_source_version(
                         f"{source_document.id}\x1f{version.id}".encode()
                     ).hexdigest(),
                     "lifecycle_state": "DISCOVERED",
+                    "observation_epoch": source_document.observation_epoch,
+                    "observation_generation": source_document.observation_generation,
                     **_timestamps(),
                 },
             )
         except IntegrityError as error:
             raise DocmindIngestionError("DOCMIND_INGESTION_IDEMPOTENCY_CONFLICT") from error
+        if (job.observation_epoch, job.observation_generation) != (source_document.observation_epoch, source_document.observation_generation):
+            if (job.lifecycle_state not in {"DISCOVERED", "RETRY_WAIT", "SUPERSEDED", "FAILED", "ACTION_REQUIRED", "COMPLETE", "DELETED"}
+                    or job.cleanup_state not in {"COMPLETE", "NOT_STARTED"}
+                    or job.host_cleanup_state not in {"COMPLETE", "NOT_STARTED"}):
+                return {"state": "DEFERRED_PREVIOUS_CLEANUP", "version_id": version.id, "job_id": job.id}
+            DocmindIngestionJob.update(
+                lifecycle_state="DISCOVERED", observation_epoch=source_document.observation_epoch,
+                observation_generation=source_document.observation_generation, fencing_token=job.fencing_token + 1,
+                attempt=0, lease_owner=None, lease_expires_at=None, retry_not_before=None,
+                parser_input_token_hash=None, plaintext_sha256=None, plaintext_size=None,
+                parser_run_id=None, chunk_set_id=None, cleanup_state="NOT_STARTED", host_cleanup_state="NOT_STARTED",
+                error_code=None, error_message=None, **_updates(),
+            ).where((DocmindIngestionJob.id == job.id) & (DocmindIngestionJob.fencing_token == job.fencing_token)).execute()
+            job = DocmindIngestionJob.get_by_id(job.id)
     return {"state": job.lifecycle_state, "version_id": version.id, "job_id": job.id}
 
 
@@ -697,6 +740,16 @@ def observe_source_version_from_worker(**observation) -> dict:
 
     source_id = _valid_identifier(observation.get("source_id", ""), max_length=64)
     document_id = _valid_identifier(observation.get("document_id", ""), max_length=32)
+    with DocmindSource._meta.database.atomic():
+        DocmindSource.update(enabled=DocmindSource.enabled).where(
+            DocmindSource.id == source_id
+        ).execute()
+        if DocmindSourceSyncSession.get_or_none(DocmindSourceSyncSession.source_id == source_id):
+            raise DocmindIngestionError("DOCMIND_INGESTION_PROTOCOL_OUTDATED")
+        return _observe_source_version_from_legacy_worker(source_id, document_id, observation)
+
+
+def _observe_source_version_from_legacy_worker(source_id: str, document_id: str, observation: dict) -> dict:
     mappings = list(
         DocmindSourceDocument.select()
         .where(
@@ -972,6 +1025,11 @@ def _claimable_jobs(
         .join(DocmindSource, on=(DocmindIngestionJob.source_id == DocmindSource.id))
         .where(
             DocmindSourceDocument.deleted_at.is_null(True)
+            & (DocmindSourceDocument.source_dirty == False)
+            & (DocmindSourceDocument.observation_epoch == DocmindIngestionJob.observation_epoch)
+            & (DocmindSourceDocument.observation_generation == DocmindIngestionJob.observation_generation)
+            & (DocmindSourceDocument.latest_target_version_id.is_null(True)
+               | (DocmindSourceDocument.latest_target_version_id == DocmindIngestionJob.version_id))
             & (DocmindSource.enabled == True)
             & (DocmindSource.project_id == DocmindIngestionJob.project_id)
             & (
@@ -1046,6 +1104,8 @@ def claim_next(
     database = DocmindIngestionJob._meta.database
     now = _now()
     with database.atomic():
+        # Same lock order as incremental receipt processing: source, document, job.
+        DocmindSource.update(enabled=DocmindSource.enabled).where(DocmindSource.id == candidate.source_id).execute()
         job = _claimable_jobs(
             now, formats, skip_retries=skip_retries, claim_source_id=claim_source_id,
             claim_job_id=claim_job_id,
@@ -1093,6 +1153,20 @@ def claim_next(
         )
 
 
+def _current_observation(source_document, job, version) -> bool:
+    return bool(
+        source_document is not None and version is not None
+        and source_document.deleted_at is None
+        and not source_document.source_dirty
+        and source_document.observation_epoch == job.observation_epoch
+        and source_document.observation_generation == job.observation_generation
+        and source_document.latest_target_version_id in {None, job.version_id}
+        and source_document.observed_ciphertext_sha256 == version.ciphertext_sha256
+        and source_document.observed_size == version.ciphertext_size
+        and source_document.observed_mtime_ns == version.source_mtime_ns
+    )
+
+
 def _leased_job(job_id: str, worker_id: str, fencing_token: int) -> DocmindIngestionJob:
     job = DocmindIngestionJob.get_or_none(
         DocmindIngestionJob.id == _valid_identifier(job_id, max_length=32)
@@ -1108,14 +1182,7 @@ def _leased_job(job_id: str, worker_id: str, fencing_token: int) -> DocmindInges
         raise DocmindIngestionError("DOCMIND_INGESTION_STALE_LEASE")
     source_document = DocmindSourceDocument.get_or_none(DocmindSourceDocument.id == job.source_document_id)
     version = DocmindSourceVersion.get_or_none(DocmindSourceVersion.id == job.version_id)
-    if (
-        source_document is None
-        or version is None
-        or source_document.deleted_at is not None
-        or source_document.observed_ciphertext_sha256 != version.ciphertext_sha256
-        or source_document.observed_size != version.ciphertext_size
-        or source_document.observed_mtime_ns != version.source_mtime_ns
-    ):
+    if not _current_observation(source_document, job, version):
         raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_CHANGED")
     return job
 
@@ -1290,8 +1357,10 @@ def process_decrypted_artifact(
         if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9_]{1,64}", code):
             code = "DOCMIND_INGESTION_PIPELINE_FAILED"
         cleanup_failed = code in {"EPHEMERAL_CLEANUP_FAILED", "EPHEMERAL_CLEANUP_STATE_FAILED"}
+        current_mapping = DocmindSourceDocument.get_or_none(DocmindSourceDocument.id == leased_job.source_document_id)
+        failure_state = "SUPERSEDED" if _observation_superseded(current_mapping, leased_job) else "FAILED"
         DocmindIngestionJob.update(
-            lifecycle_state="CLEANUP_FAILED" if cleanup_failed else "FAILED",
+            lifecycle_state="CLEANUP_FAILED" if cleanup_failed else failure_state,
             cleanup_state="FAILED" if cleanup_failed else "COMPLETE",
             error_code=code,
             error_message=(f"pdf_page_count={observed_pdf_pages};max_pdf_pages={max_pdf_pages}"
@@ -1322,16 +1391,12 @@ def activate_indexed_version(
         raise DocmindIngestionError("DOCMIND_INGESTION_STALE_RESULT")
     source_document = DocmindSourceDocument.get_by_id(job.source_document_id)
     version = DocmindSourceVersion.get_by_id(job.version_id)
-    if (
-        source_document.deleted_at is not None
-        or source_document.observed_ciphertext_sha256 != version.ciphertext_sha256
-        or source_document.observed_size != version.ciphertext_size
-        or source_document.observed_mtime_ns != version.source_mtime_ns
-    ):
+    if not _current_observation(source_document, job, version):
         raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_CHANGED")
 
     database = DocmindIngestionJob._meta.database
     with database.atomic():
+        DocmindSource.update(enabled=DocmindSource.enabled).where(DocmindSource.id == job.source_id).execute()
         changed = DocmindIngestionJob.update(lifecycle_state="INDEXING", **_updates()).where(
             (DocmindIngestionJob.id == job.id)
             & (DocmindIngestionJob.lifecycle_state == job.lifecycle_state)
@@ -1344,7 +1409,7 @@ def activate_indexed_version(
         version = DocmindSourceVersion.get_by_id(job.version_id)
         if job.lifecycle_state != "INDEXING" or job.fencing_token != fencing_token:
             raise DocmindIngestionError("DOCMIND_INGESTION_STALE_RESULT")
-        if source_document.deleted_at is not None or source_document.observed_ciphertext_sha256 != version.ciphertext_sha256:
+        if not _current_observation(source_document, job, version):
             raise DocmindIngestionError("DOCMIND_INGESTION_SOURCE_CHANGED")
         activator.activate(
             document_id=job.document_id,
@@ -1460,7 +1525,8 @@ def record_worker_status(
         target = "CLEANUP_FAILED"
         host_cleanup_state = "FAILED"
     elif status == "FAILED":
-        target = status
+        mapping = DocmindSourceDocument.get_or_none(DocmindSourceDocument.id == job.source_document_id)
+        target = "SUPERSEDED" if _observation_superseded(mapping, job) else status
         host_cleanup_state = "COMPLETE"
     elif status == "ACTION_REQUIRED":
         target = status
