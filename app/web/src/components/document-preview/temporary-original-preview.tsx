@@ -203,6 +203,10 @@ export default function TemporaryOriginalPreview({
 
   useEffect(() => release, [release]);
   useEffect(() => {
+    window.addEventListener('pagehide', release);
+    return () => window.removeEventListener('pagehide', release);
+  }, [release]);
+  useEffect(() => {
     if (
       identityRef.current.documentId !== documentId ||
       identityRef.current.sourceVersionId !== sourceVersionId

@@ -143,6 +143,25 @@ describe('temporary original preview', () => {
     ));
   });
 
+  it('sends a durable close when the page exits while a preview is queued', async () => {
+    mockFetch.mockImplementation((url: string, options: RequestInit) => {
+      if (options.method === 'POST') return Promise.resolve(response(202, { ...ReadySession, status: 'QUEUED' }));
+      if (options.method === 'DELETE') return Promise.resolve(response(204));
+      return Promise.resolve(response(200, { ...ReadySession, status: 'QUEUED' }));
+    });
+    const { unmount } = render(
+      <TemporaryOriginalPreview documentId="document-1" sourceVersionId="source-v1" chunkSetId="chunks-v1" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '원문 보기' }));
+    await screen.findByRole('button', { name: '취소' });
+    window.dispatchEvent(new Event('pagehide'));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith(
+      '/api/v1/docmind/previews/preview-1',
+      expect.objectContaining({ method: 'DELETE', keepalive: true }),
+    ));
+    unmount();
+  });
+
   it('polls a queued preview, keeps it alive, and clears stale highlights when chunks change', async () => {
     jest.useFakeTimers();
     const onChunkSetChanged = jest.fn();
