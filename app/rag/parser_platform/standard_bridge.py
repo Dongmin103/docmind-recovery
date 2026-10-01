@@ -156,10 +156,10 @@ class ParserPlatformStandardBridge:
                 extraction = extract(source_bytes)
             if extraction.source_hash != hashlib.sha256(source_bytes).hexdigest():
                 raise ValueError("native PPTX source hash mismatch")
-            if not extraction.coverage_complete or not extraction.blocks:
+            if not any(any(character.isalnum() for character in block.text) for block in extraction.blocks):
                 raise parser_error(
                     "PARSER_PPTX_NATIVE_UNSUPPORTED",
-                    detail=", ".join(extraction.warnings),
+                    detail="NO_USABLE_NATIVE_TEXT",
                 )
             with stage_scope(storage, "normalize_artifacts", prepared.parse_run_id):
                 raw_ref = self.artifacts.write_json(

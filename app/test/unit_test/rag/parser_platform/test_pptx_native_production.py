@@ -71,7 +71,7 @@ def test_native_bridge_extracts_and_chunks_slides_without_conversion(tmp_path, m
     assert (tmp_path / "runs" / prepared.parse_run_id / "normalized-document.json").exists()
 
 
-def test_native_bridge_rejects_incomplete_chart_before_artifact_write(tmp_path) -> None:
+def test_native_bridge_indexes_readable_text_with_partial_chart_warning(tmp_path) -> None:
     source = synthetic_deck()
     output = BytesIO()
     with ZipFile(BytesIO(source)) as original, ZipFile(output, "w", ZIP_DEFLATED) as changed:
@@ -87,9 +87,42 @@ def test_native_bridge_rejects_incomplete_chart_before_artifact_write(tmp_path) 
     config = ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0",
                                   pptx_native_enabled=True, artifact_root=str(tmp_path))
     prepared = _prepared(config, broken)
-    with pytest.raises(ParserPlatformError, match="CHART_DATA_INCOMPLETE") as rejected:
+    document = ParserPlatformStandardBridge.from_config(config).parse(
+        prepared=prepared, source_bytes=broken, source_document_id="synthetic-pptx",
+        source_format=SourceFormat.PPTX, trace_id="trace",
+    )
+    assert document.diagnostics["native_coverage_complete"] is False
+    assert "PPTX_NATIVE_PARTIAL_COVERAGE" in document.warnings
+    assert "CHART_DATA_INCOMPLETE" in document.warnings
+    from rag.svr.task_executor_refactor.chunk_service import chunk_parser_platform_document
+    chunks = asyncio.run(chunk_parser_platform_document(
+        document, config=config, parser_config={"chunk_token_num": 128}, source_bytes=broken,
+    ))
+    assert chunks
+    assert any("PPTX_NATIVE_PARTIAL_COVERAGE" in chunk["metadata"]["parser_platform"]["warning_codes"] for chunk in chunks)
+
+
+def test_native_bridge_rejects_zero_usable_text_before_artifact_write(tmp_path) -> None:
+    source = synthetic_deck()
+    output = BytesIO()
+    with ZipFile(BytesIO(source)) as original, ZipFile(output, "w", ZIP_DEFLATED) as changed:
+        for entry in original.infolist():
+            raw = original.read(entry.filename)
+            if entry.filename == "ppt/slides/slide1.xml":
+                root = etree.fromstring(raw)
+                tree = root.find("{http://schemas.openxmlformats.org/presentationml/2006/main}cSld/{http://schemas.openxmlformats.org/presentationml/2006/main}spTree")
+                for shape in list(tree):
+                    if etree.QName(shape).localname not in {"nvGrpSpPr", "grpSpPr"}:
+                        tree.remove(shape)
+                raw = etree.tostring(root)
+            changed.writestr(entry.filename, raw)
+    empty = output.getvalue()
+    config = ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0",
+                                  pptx_native_enabled=True, artifact_root=str(tmp_path))
+    prepared = _prepared(config, empty)
+    with pytest.raises(ParserPlatformError) as rejected:
         ParserPlatformStandardBridge.from_config(config).parse(
-            prepared=prepared, source_bytes=broken, source_document_id="synthetic-pptx",
+            prepared=prepared, source_bytes=empty, source_document_id="synthetic-pptx",
             source_format=SourceFormat.PPTX, trace_id="trace",
         )
     assert rejected.value.code == "PARSER_PPTX_NATIVE_UNSUPPORTED"

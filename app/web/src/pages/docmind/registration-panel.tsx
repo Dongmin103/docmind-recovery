@@ -150,6 +150,12 @@ function RegistrationRow({
             · {r.chunk_count}개 청크 ·{' '}
             {r.index_ready ? '검색 가능' : '검색 준비 중'}
           </p>
+          {r.state === 'INDEXED' && r.parser_run?.parser_name === 'pptx-native' && (
+            <p className="mt-1 text-xs text-state-warning">
+              {r.parser_run.warnings.includes('PPTX_NATIVE_PARTIAL_COVERAGE') && <span>일부 내용 미추출</span>}
+              {r.parser_run.warnings.includes('IMAGE_OCR_NOT_RUN') && <span className="ml-2">이미지 속 글자 미인식</span>}
+            </p>
+          )}
         </div>
         <span
           className={`text-xs ${r.state === 'FAILED' ? 'text-state-warning' : 'text-text-secondary'}`}

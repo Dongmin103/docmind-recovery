@@ -116,7 +116,12 @@ async def chunk_parser_platform_document(document, *, config, parser_config: dic
 
     if document.parser_name != "kordoc" and not (
         document.parser_name == "pptx-native" and document.source_format.value == "pptx"
-        and config.pptx_native_enabled and document.diagnostics.get("native_coverage_complete") is True
+        and config.pptx_native_enabled and (
+            document.diagnostics.get("native_coverage_complete") is True or (
+                document.diagnostics.get("native_coverage_state") == "partial"
+                and "PPTX_NATIVE_PARTIAL_COVERAGE" in document.warnings
+            )
+        )
     ):
         raise ValueError("search parser identity or coverage mismatch")
     with stage_scope(getattr(settings, "STORAGE_IMPL", None), "chunk", document.parse_run_id):

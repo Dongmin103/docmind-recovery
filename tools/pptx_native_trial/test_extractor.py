@@ -257,7 +257,7 @@ def test_f1_counts_duplicate_and_missing_items():
     }
 
 
-def test_inherited_master_text_is_reported_as_incomplete(source):
+def test_visible_master_text_is_extracted_for_each_slide(source):
     def add_text(root):
         shape = etree.fromstring(f'''<p:sp xmlns:p="{NS["p"]}" xmlns:a="{NS["a"]}">
         <p:nvSpPr><p:cNvPr id="99" name="Master notice"/></p:nvSpPr>
@@ -265,12 +265,60 @@ def test_inherited_master_text_is_reported_as_incomplete(source):
         root.find("p:cSld/p:spTree", NS).append(shape)
 
     changed = rewrite(
-        source,
+        synthetic_deck(slides=2),
         {"ppt/slideMasters/slideMaster1.xml": lambda raw: xml_edit(raw, add_text)},
     )
     result = extract(changed)
-    assert "INHERITED_CONTENT_NOT_EXTRACTED" in result.warnings
-    assert not result.coverage_complete
+    assert [block.slide for block in result.blocks if block.text == "VISIBLE MASTER NOTICE"] == [1, 2]
+    assert "INHERITED_CONTENT_NOT_EXTRACTED" not in result.warnings
+    assert result.coverage_complete
+
+
+def test_master_visibility_and_slide_override_are_respected(source):
+    def add_text(root):
+        shape = etree.fromstring(f'''<p:sp xmlns:p="{NS["p"]}" xmlns:a="{NS["a"]}">
+        <p:nvSpPr><p:cNvPr id="99" name="Master notice"/></p:nvSpPr>
+        <p:txBody><a:p><a:r><a:t>VISIBLE MASTER NOTICE</a:t></a:r></a:p></p:txBody></p:sp>''')
+        root.find("p:cSld/p:spTree", NS).append(shape)
+
+    hidden = rewrite(source, {
+        "ppt/slideMasters/slideMaster1.xml": lambda raw: xml_edit(raw, add_text),
+        "ppt/slides/slide1.xml": lambda raw: xml_edit(raw, lambda root: root.set("showMasterSp", "0")),
+    })
+    assert all(block.text != "VISIBLE MASTER NOTICE" for block in extract(hidden).blocks)
+
+
+def test_inherited_groups_apply_transform_and_hidden_ancestor_is_omitted(source):
+    def add_groups(root):
+        tree = root.find("p:cSld/p:spTree", NS)
+        for group_id, hidden in ((90, "0"), (91, "1")):
+            tree.append(etree.fromstring(f'''<p:grpSp xmlns:p="{NS["p"]}" xmlns:a="{NS["a"]}">
+              <p:nvGrpSpPr><p:cNvPr id="{group_id}" name="group" hidden="{hidden}"/></p:nvGrpSpPr>
+              <p:grpSpPr><a:xfrm><a:off x="127000" y="127000"/><a:ext cx="127000" cy="127000"/>
+              <a:chOff x="0" y="0"/><a:chExt cx="127000" cy="127000"/></a:xfrm></p:grpSpPr>
+              <p:sp><p:nvSpPr><p:cNvPr id="{group_id + 10}" name="notice"/></p:nvSpPr>
+              <p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="12700" cy="12700"/></a:xfrm></p:spPr>
+              <p:txBody><a:p><a:r><a:t>GROUP {group_id}</a:t></a:r></a:p></p:txBody></p:sp>
+              </p:grpSp>'''))
+
+    changed = rewrite(source, {"ppt/slideMasters/slideMaster1.xml": lambda raw: xml_edit(raw, add_groups)})
+    result = extract(changed)
+    inherited = [block for block in result.blocks if block.text.startswith("GROUP ")]
+    assert [block.text for block in inherited] == ["GROUP 90"]
+    assert inherited[0].bbox[0] >= 10
+
+
+def test_distinct_inherited_shapes_without_geometry_are_not_collapsed(source):
+    def add_duplicates(root):
+        tree = root.find("p:cSld/p:spTree", NS)
+        for shape_id in (90, 91):
+            tree.append(etree.fromstring(f'''<p:sp xmlns:p="{NS["p"]}" xmlns:a="{NS["a"]}">
+              <p:nvSpPr><p:cNvPr id="{shape_id}" name="notice"/></p:nvSpPr>
+              <p:txBody><a:p><a:r><a:t>SAME NOTICE</a:t></a:r></a:p></p:txBody></p:sp>'''))
+
+    changed = rewrite(source, {"ppt/slideMasters/slideMaster1.xml": lambda raw: xml_edit(raw, add_duplicates)})
+    result = extract(changed)
+    assert len([block for block in result.blocks if block.text == "SAME NOTICE"]) == 2
 
 
 def test_cached_chart_titles_and_format_codes_reach_searchable_text(source):

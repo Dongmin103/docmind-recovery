@@ -61,9 +61,12 @@ class OfficeChunker:
     def chunk(self, document: ParsedDocument, *, parser_config: dict, source_bytes: bytes) -> list[dict]:
         if document.parser_name != "kordoc" and not (
             document.parser_name == "pptx-native" and document.source_format == SourceFormat.PPTX
-            and document.diagnostics.get("native_coverage_complete") is True
+            and (document.diagnostics.get("native_coverage_complete") is True or (
+                document.diagnostics.get("native_coverage_state") == "partial"
+                and "PPTX_NATIVE_PARTIAL_COVERAGE" in document.warnings
+            ))
         ):
-            raise ValueError("OfficeChunker requires Kordoc or complete native PPTX document")
+            raise ValueError("OfficeChunker requires Kordoc or native PPTX document with coverage state")
         blocks = [
             block for block in document.blocks
             if block.block_type not in {BlockType.GROUP, BlockType.OCR_ATTACHMENT} and block.searchable

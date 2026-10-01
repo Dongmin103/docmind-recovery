@@ -22,6 +22,12 @@ export function SourceIndexStatus({ node }: { node: DocMindHierarchyNode }) {
   return (
     <span className={failed ? 'text-state-warning' : 'text-text-secondary'}>
       {IndexStateLabels[node.index_state]}
+      {node.searchable && node.index_partial_coverage
+        ? ' · 일부 내용 미추출'
+        : null}
+      {node.searchable && node.index_image_ocr_not_run
+        ? ' · 이미지 속 글자 미인식'
+        : null}
       {failed && node.index_cleanup_state === 'PENDING'
         ? ' · 임시 파일 정리 대기'
         : failed && node.index_cleanup_state === 'FAILED'
