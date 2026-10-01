@@ -746,7 +746,7 @@ def test_retry_policy_is_bounded_delayed_and_forces_new_decryption(reconciliatio
 
 @pytest.mark.parametrize("error_code", [
     "PARSER_PLATFORM_HWP_DISABLED", "PARSER_SOURCE_TYPE_MISMATCH", "PARSER_DOCLING_UNAVAILABLE",
-    "PARSER_MEDIA_OCR_FAILED", "DOCMIND_PDF_PAGE_CAP_EXCEEDED",
+    "PARSER_MEDIA_OCR_FAILED", "DOCMIND_PDF_PAGE_CAP_EXCEEDED", "PARSER_PPTX_NATIVE_UNSUPPORTED",
 ])
 def test_retry_policy_preserves_unsupported_or_invalid_files(reconciliation_db, error_code):
     version = DocmindSourceVersion.create(

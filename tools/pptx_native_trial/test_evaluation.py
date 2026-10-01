@@ -14,7 +14,7 @@ def test_missing_and_extra_data_reduce_recall_and_precision():
 def test_fixture_metrics_detect_value_corruption_and_duplicate_text():
     from dataclasses import replace
     from tools.pptx_native_trial.benchmark import fixture_accuracy
-    from tools.pptx_native_trial.extractor import extract
+    from rag.parser_platform.pptx_native_extractor import extract
     from tools.pptx_native_trial.fixtures import synthetic_deck
 
     result = extract(synthetic_deck())
@@ -32,7 +32,7 @@ def test_fixture_metrics_detect_value_corruption_and_duplicate_text():
 
 def test_missing_whole_slide_cannot_shrink_the_ground_truth():
     from tools.pptx_native_trial.benchmark import fixture_accuracy
-    from tools.pptx_native_trial.extractor import extract
+    from rag.parser_platform.pptx_native_extractor import extract
     from tools.pptx_native_trial.fixtures import synthetic_deck
 
     result = extract(synthetic_deck(1))

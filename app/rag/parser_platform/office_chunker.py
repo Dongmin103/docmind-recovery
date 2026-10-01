@@ -44,6 +44,14 @@ def _merge_source_chunks(chunks: list[dict], text: str) -> dict:
     for field in ("parent_id", "group_id"):
         if any(item.get(field) != source_metadata[0].get(field) for item in source_metadata[1:]):
             metadata[field] = None
+    if "page_num_int" in merged:
+        merged["page_num_int"] = sorted({page for chunk in chunks for page in chunk.get("page_num_int", [])})
+        if all(chunk.get("position_int") for chunk in chunks):
+            merged["position_int"] = _unique([position for chunk in chunks for position in chunk["position_int"]])
+            merged["top_int"] = [position[3] for position in merged["position_int"]]
+        else:
+            merged.pop("position_int", None)
+            merged.pop("top_int", None)
     return merged
 
 
@@ -51,8 +59,11 @@ class OfficeChunker:
     """Apply format-specific Office boundaries to normalized blocks."""
 
     def chunk(self, document: ParsedDocument, *, parser_config: dict, source_bytes: bytes) -> list[dict]:
-        if document.parser_name != "kordoc":
-            raise ValueError("OfficeChunker requires a Kordoc normalized document")
+        if document.parser_name != "kordoc" and not (
+            document.parser_name == "pptx-native" and document.source_format == SourceFormat.PPTX
+            and document.diagnostics.get("native_coverage_complete") is True
+        ):
+            raise ValueError("OfficeChunker requires Kordoc or complete native PPTX document")
         blocks = [
             block for block in document.blocks
             if block.block_type not in {BlockType.GROUP, BlockType.OCR_ATTACHMENT} and block.searchable

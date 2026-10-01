@@ -16,8 +16,10 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from tools.pptx_native_trial.contracts import load_contracts
 from tools.pptx_native_trial.docmind_adapter import to_parsed_document
 from tools.pptx_native_trial.evaluation import score
-from tools.pptx_native_trial.extractor import VERSION, extract
 from tools.pptx_native_trial.fixtures import synthetic_deck
+
+load_contracts()
+from rag.parser_platform.pptx_native_extractor import VERSION, extract
 
 
 def fixture_accuracy(result, chart_points, *, expected_slides=1):

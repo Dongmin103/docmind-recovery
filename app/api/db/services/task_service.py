@@ -268,7 +268,9 @@ class TaskService(CommonService):
         try:
             with DB.atomic():
                 if doc.get("parse_run_id"):
-                    run_claimed = (ParserRun.update(lifecycle="PARSING_KORDOC")
+                    parser_name = ParserRun.get_by_id(doc["parse_run_id"]).parser_name
+                    phase = "PARSING_PPTX_NATIVE" if parser_name == "pptx-native" else "PARSING_KORDOC"
+                    run_claimed = (ParserRun.update(lifecycle=phase)
                                    .where((ParserRun.id == doc["parse_run_id"])
                                           & (ParserRun.lifecycle == "QUEUED"))
                                    .execute())

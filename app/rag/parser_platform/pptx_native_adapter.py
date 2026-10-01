@@ -1,17 +1,14 @@
-"""Trial evaluation adapter into DocMind's normalized schema."""
+"""Map complete native PPTX extraction into the parser platform schema."""
 
-from tools.pptx_native_trial.contracts import load_contracts
-
-load_contracts()
 from rag.parser_platform.pptx_native_extractor import VERSION
 
 
 def to_parsed_document(
     extraction,
     *,
-    document_id="native-trial",
-    run_id="native-trial-run",
-    chunk_set_id="native-trial-chunks",
+    document_id: str,
+    run_id: str,
+    chunk_set_id: str,
 ):
     from rag.parser_platform.schemas import (
         BlockType,
@@ -63,15 +60,14 @@ def to_parsed_document(
         chunk_set_id=chunk_set_id,
         parser_name="pptx-native",
         parser_version=VERSION,
-        backend="pptx-native-offline-trial",
+        backend="pptx-native-offline",
         status=ParserRunStatus.NORMALIZING,
         warnings=extraction.warnings,
         blocks=tuple(blocks),
         diagnostics={
             "native_coverage_complete": extraction.coverage_complete,
             "slide_count": extraction.slide_count,
-            "image_ocr": "not_run",
+            "image_ocr": "disabled",
             "reading_order": "shape_tree",
-            "trial_only": True,
         },
     )

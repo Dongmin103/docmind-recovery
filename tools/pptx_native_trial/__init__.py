@@ -1,1 +1,1 @@
-"""Offline PPTX extraction experiment; not registered as a production parser."""
+"""Offline PPTX evaluation tools using the production native extractor."""

@@ -55,6 +55,29 @@ def test_prepare_office_run_persists_kordoc_identity_without_ocr_model(monkeypat
     assert created["expected_task_count"] == 1
 
 
+def test_prepare_native_pptx_run_persists_its_own_runtime_identity(monkeypatch) -> None:
+    from tools.pptx_native_trial.fixtures import synthetic_deck
+
+    created = {}
+    monkeypatch.setattr(parser_run_service.ParserRun, "select", lambda: EmptyQuery())
+    monkeypatch.setattr(parser_run_service.ParserRun, "create", lambda **values: created.update(values))
+    source_bytes = synthetic_deck()
+    config = ParserPlatformConfig(enabled=True, integration_ready=True, te_run_mode="0",
+                                  pptx_native_enabled=True, kordoc_pptx_enabled=False)
+
+    prepared = parser_run_service.ParserRunService.prepare_office_run.__wrapped__(
+        parser_run_service.ParserRunService,
+        document={"id": "doc-native", "name": "slides.pptx"},
+        source_bytes=source_bytes, source_format=SourceFormat.PPTX, config=config,
+    )
+
+    assert prepared.selection.engine == "pptx-native"
+    assert created["parser_name"] == "pptx-native"
+    assert created["parser_version"] == config.pptx_native_version
+    assert created["backend"] == "pptx-native-offline"
+    assert created["model_version"] is None
+
+
 @pytest.mark.parametrize("source_format", [SourceFormat.DOCX, SourceFormat.PDF])
 def test_prepare_kordoc_route_persists_engine_identity(monkeypatch, source_format) -> None:
     created = {}

@@ -43,6 +43,7 @@ class OcrRequirement(StrEnum):
 class ParserRunStatus(StrEnum):
     QUEUED = "QUEUED"
     PARSING_KORDOC = "PARSING_KORDOC"
+    PARSING_PPTX_NATIVE = "PARSING_PPTX_NATIVE"
     PARSING_SURYA = "PARSING_SURYA"
     PARSING_DOCLING = "PARSING_DOCLING"
     PARSING_RHWP = "PARSING_RHWP"
@@ -73,7 +74,7 @@ def _validate_bbox(value: BBox | None) -> BBox | None:
 class PdfProvenance(FrozenModel):
     kind: Literal["pdf"] = "pdf"
     page: int = Field(ge=1)
-    bbox: BBox
+    bbox: BBox | None = None
     polygon: tuple[Point, ...] | None = None
     rendered_size: tuple[float, float] | None = None
 

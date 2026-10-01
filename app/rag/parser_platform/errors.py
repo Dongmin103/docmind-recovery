@@ -214,6 +214,11 @@ ERRORS = {
         "문서 구조를 검색용 형식으로 정리하지 못했습니다.",
         True,
     ),
+    "PARSER_PPTX_NATIVE_UNSUPPORTED": ParserPlatformErrorInfo(
+        "PARSER_PPTX_NATIVE_UNSUPPORTED",
+        "이 PPTX에는 네이티브 파서가 아직 처리하지 못하는 내용이 있습니다.",
+        False,
+    ),
     "PARSER_PDF_PAGE_LIMIT_EXCEEDED": ParserPlatformErrorInfo(
         "PARSER_PDF_PAGE_LIMIT_EXCEEDED",
         "PDF 페이지 수가 분석 한도를 초과했습니다.",

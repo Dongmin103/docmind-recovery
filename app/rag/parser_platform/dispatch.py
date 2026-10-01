@@ -129,6 +129,8 @@ class FormatDispatcher:
         if declared not in expected_mimes or sniffed not in expected_mimes or not source.content.startswith(b"PK"):
             raise parser_error("PARSER_SOURCE_TYPE_MISMATCH")
         self._validate_ooxml(source.content, source_format)
+        if source_format == SourceFormat.PPTX and self.config.pptx_native_enabled:
+            return ParserSelection(source_format, "pptx-native", "office_document_parse", "file_format_pptx_native")
         return ParserSelection(source_format, "kordoc", "office_document_parse", f"file_format_{source_format.value}")
 
     def _require_kordoc_size(self, content: bytes) -> None:

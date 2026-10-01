@@ -46,6 +46,8 @@ class ParserPlatformConfig:
     kordoc_pdf_enabled: bool = True
     kordoc_excel_enabled: bool = True
     kordoc_pptx_enabled: bool = True
+    pptx_native_enabled: bool = False
+    pptx_native_version: str = "1.0.0"
     kordoc_hwp_enabled: bool = True
     pptx_text_fallback_enabled: bool = False
     kordoc_service_url: str = "http://kordoc-parser:8095"
@@ -85,6 +87,7 @@ class ParserPlatformConfig:
             kordoc_pdf_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_PDF_ENABLED", True),
             kordoc_excel_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_EXCEL_ENABLED", True),
             kordoc_pptx_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_PPTX_ENABLED", True),
+            pptx_native_enabled=_strict_bool(source, "PARSER_PLATFORM_PPTX_NATIVE_ENABLED", False),
             kordoc_hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_HWP_ENABLED", True),
             pptx_text_fallback_enabled=_strict_bool(source, "PARSER_PLATFORM_PPTX_TEXT_FALLBACK_ENABLED", False),
             kordoc_service_url=source.get(
@@ -129,7 +132,7 @@ class ParserPlatformConfig:
         if source_format in {"xls", "xlsx"}:
             return self.office_enabled and self.kordoc_excel_enabled
         if source_format == "pptx":
-            return self.office_enabled and self.kordoc_pptx_enabled
+            return self.office_enabled and (self.pptx_native_enabled or self.kordoc_pptx_enabled)
         if source_format in {"hwp", "hwpx"}:
             return self.hwp_enabled and self.kordoc_hwp_enabled
         return False
@@ -172,8 +175,15 @@ class ParserPlatformConfig:
             })
         if source_format == "pdf":
             settings["max_pdf_pages"] = self.max_pdf_pages
-        if source_format in {"doc", "pptx"}:
+            settings["geometry_policy"] = "page-with-optional-bbox-v1"
+        if source_format == "doc" or (source_format == "pptx" and not self.pptx_native_enabled):
             settings["converter_revision"] = self.libreoffice_converter_revision
         if source_format == "pptx":
-            settings["text_fallback_enabled"] = self.pptx_text_fallback_enabled
+            if self.pptx_native_enabled:
+                settings.update(parser_name="pptx-native", parser_version=self.pptx_native_version,
+                                image_ocr="disabled", native_coverage_policy="fail-incomplete-v1")
+                for key in ("patch_revision", "ocr_model_revision", "normalizer_revision", "chunker_revision"):
+                    settings.pop(key)
+            else:
+                settings["text_fallback_enabled"] = self.pptx_text_fallback_enabled
         return canonical_sha256(settings)
