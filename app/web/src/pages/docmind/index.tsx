@@ -143,6 +143,7 @@ function DocumentModal({
           <TemporaryOriginalPreview
             key={`${chunk.doc_id}:${chunk.source_version_id ?? ''}`}
             documentId={chunk.doc_id}
+            sourceFormat={name.split('.').pop()?.toLowerCase()}
             sourceVersionId={chunk.source_version_id}
             chunkSetId={chunk.chunk_set_id}
             onChunkSetChanged={onChunkSetChanged}

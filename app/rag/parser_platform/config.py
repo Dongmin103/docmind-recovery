@@ -47,7 +47,7 @@ class ParserPlatformConfig:
     kordoc_excel_enabled: bool = True
     kordoc_pptx_enabled: bool = True
     pptx_native_enabled: bool = False
-    pptx_native_version: str = "1.0.0"
+    pptx_native_version: str = "1.1.0"
     kordoc_hwp_enabled: bool = True
     pptx_text_fallback_enabled: bool = False
     kordoc_service_url: str = "http://kordoc-parser:8095"
@@ -181,7 +181,7 @@ class ParserPlatformConfig:
         if source_format == "pptx":
             if self.pptx_native_enabled:
                 settings.update(parser_name="pptx-native", parser_version=self.pptx_native_version,
-                                image_ocr="disabled", native_coverage_policy="fail-incomplete-v1")
+                                image_ocr="disabled", native_coverage_policy="index-partial-v2")
                 for key in ("patch_revision", "ocr_model_revision", "normalizer_revision", "chunker_revision"):
                     settings.pop(key)
             else:

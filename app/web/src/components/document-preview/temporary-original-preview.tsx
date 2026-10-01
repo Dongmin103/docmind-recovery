@@ -14,6 +14,7 @@ import type { IHighlight } from 'react-pdf-highlighter';
 
 interface Props {
   documentId: string;
+  sourceFormat?: string;
   sourceVersionId?: string;
   chunkSetId?: string;
   highlights?: IHighlight[];
@@ -29,14 +30,31 @@ const TerminalStatuses = new Set([
   'CLEANUP_FAILED',
 ]);
 const StageLabels: Record<string, string> = {
-  QUEUED: '순서를 기다리는 중입니다.',
-  DECRYPTING: '원문을 준비하는 중입니다.',
-  PROCESSING: '표시 형식으로 준비하는 중입니다.',
+  QUEUED: '미리보기 대기 중입니다. 최대 120초 동안 기다립니다.',
+  DECRYPTING: '원문 복호화 중입니다.',
+  PROCESSING: '페이지 준비 중입니다.',
   READY: '원문을 불러오는 중입니다.',
 };
 
 function previewError(error: unknown): string {
   if (error instanceof PreviewRequestError) {
+    const messages: Record<string, string> = {
+      PREVIEW_DISABLED: '원문 미리보기 기능이 비활성화되어 있습니다.',
+      PREVIEW_FORMAT_UNSUPPORTED: '이 형식은 원문 미리보기를 지원하지 않습니다.',
+      PREVIEW_QUEUE_FULL: '미리보기 대기열이 가득 찼습니다. 잠시 후 다시 시도해 주세요.',
+      PREVIEW_QUEUE_TIMEOUT: '미리보기 대기 시간이 120초를 초과했습니다. 다시 시도해 주세요.',
+      PREVIEW_PROCESS_TIMEOUT: '페이지 준비 시간이 60초를 초과했습니다.',
+      PREVIEW_PROCESSOR_FAILED: '한글 문서 표시 서비스에 연결할 수 없거나 처리가 중단되었습니다.',
+      PREVIEW_PROCESSING_FAILED: '문서 표시 중 오류가 발생했습니다. 다시 시도해 주세요.',
+      PREVIEW_INPUT_TOO_LARGE: '원파일이 미리보기 크기 제한인 64MiB를 초과했습니다.',
+      PREVIEW_DERIVED_TOO_LARGE: '페이지가 미리보기 용량 제한을 초과했습니다.',
+      PREVIEW_SVG_TOO_LARGE: '페이지가 미리보기 용량 제한을 초과했습니다.',
+      PREVIEW_CAPACITY_EXCEEDED: '미리보기 임시 공간이 부족합니다. 다른 원문을 닫고 다시 시도해 주세요.',
+      PREVIEW_TMPFS_UNAVAILABLE: '미리보기 임시 공간을 사용할 수 없습니다.',
+      PREVIEW_READER_BUSY: '이전 페이지를 전달 중입니다. 잠시 후 다시 시도해 주세요.',
+      PREVIEW_PROCESSOR_BUSY: '다른 페이지를 준비 중입니다. 잠시 후 다시 시도해 주세요.',
+    };
+    if (messages[error.code]) return messages[error.code];
     if (error.code === 'SOURCE_VERSION_CHANGED') {
       return '원본이 변경되었습니다. 다시 검색한 뒤 원문을 열어 주세요.';
     }
@@ -47,7 +65,7 @@ function previewError(error: unknown): string {
       return '미리보기 시간이 만료되었습니다. 다시 시도해 주세요.';
     }
     if (error.status === 403) return '원문 열람 권한이 없습니다.';
-    if (error.status === 429 || error.status === 503) {
+    if (error.status === 429) {
       return '미리보기 작업이 많습니다. 잠시 후 다시 시도해 주세요.';
     }
     return `원문을 열지 못했습니다. (${error.code})`;
@@ -143,6 +161,7 @@ function HwpPageViewer({
 
 export default function TemporaryOriginalPreview({
   documentId,
+  sourceFormat,
   sourceVersionId,
   chunkSetId,
   highlights,
@@ -201,7 +220,7 @@ export default function TemporaryOriginalPreview({
   }, [chunkSetId]);
 
   const start = useCallback(() => {
-    if (!sourceVersionId || !chunkSetId || busy) return;
+    if (!sourceVersionId || !chunkSetId || busy || ['doc', 'ppt'].includes(sourceFormat?.toLowerCase() ?? '')) return;
     release();
     setSession(null);
     setContentUrl('');
@@ -324,7 +343,7 @@ export default function TemporaryOriginalPreview({
         { once: true },
       );
     })();
-  }, [busy, chunkSetId, documentId, release, sourceVersionId]);
+  }, [busy, chunkSetId, documentId, release, sourceVersionId, sourceFormat]);
 
   const stop = () => {
     release();
@@ -341,6 +360,9 @@ export default function TemporaryOriginalPreview({
       ? []
       : highlights;
   const canStart = Boolean(sourceVersionId && chunkSetId);
+  if (['doc', 'ppt'].includes(sourceFormat?.toLowerCase() ?? '')) {
+    return <p role="status" className="p-5 text-sm text-text-secondary">이 형식은 원문 미리보기를 지원하지 않습니다.</p>;
+  }
   return (
     <div className="flex h-full min-h-0 flex-col">
       {!session || error ? (

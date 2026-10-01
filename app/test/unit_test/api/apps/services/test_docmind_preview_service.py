@@ -1,17 +1,51 @@
 import hashlib
 import importlib.util
+import io
 import os
 import stat
+import struct
 import sys
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from peewee import SqliteDatabase
+
+
+def test_office_directory_is_bounded_before_zipfile_allocation(tmp_path, monkeypatch):
+    source = tmp_path / "large.docx"
+    with zipfile.ZipFile(source, "w") as archive:
+        for number in range(10001):
+            archive.writestr(str(number), b"")
+    monkeypatch.setattr(service.zipfile, "ZipFile", lambda *_args: pytest.fail("unbounded ZIP directory parsing"))
+    with pytest.raises(service.PreviewError, match="INVALID_PREVIEW_PACKAGE"):
+        service._validate_direct(source, "docx")
+
+
+def test_zip64_locator_cannot_override_bounded_directory(tmp_path, monkeypatch):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for number in range(10001):
+            archive.writestr(str(number), b"")
+    original = buffer.getvalue()
+    _, _, _, count, length, start, _ = struct.unpack_from("<4H2IH", original[-22:], 4)
+    base = original[:-22]
+    fake = bytearray(original[start:start + 46])
+    struct.pack_into("<3H", fake, 28, 1, 0, 20)
+    zip64 = struct.pack("<4sQ2H2I4Q", b"PK\x06\x06", 91, 45, 45, 0, 0, count, count, length, start)
+    locator = struct.pack("<4sIQI", b"PK\x06\x07", 0, len(base), 1)
+    eocd = struct.pack("<4s4H2IH", b"PK\x05\x06", 0, 0, 1, 1, 67, len(base) + 56, 0)
+    source = tmp_path / "forged.docx"
+    source.write_bytes(base + zip64 + fake + b"x" + locator + eocd)
+    monkeypatch.setattr(service.zipfile, "ZipFile", lambda *_args: pytest.fail("ZIP64 bypass"))
+    with pytest.raises(service.PreviewError, match="INVALID_PREVIEW_PACKAGE"):
+        service._validate_direct(source, "docx")
 
 from api.db.db_models import (
     DocmindPreviewSession,
@@ -33,11 +67,14 @@ fake_services.__path__ = []
 fake_auth = ModuleType("api.apps.services.docmind_worker_auth")
 fake_auth._secret = lambda _key_id: b"p" * 32
 fake_services.docmind_worker_auth = fake_auth
-previous = {name: sys.modules.get(name) for name in ("api.apps", "api.apps.services", "api.apps.services.docmind_worker_auth")}
+fake_kb = ModuleType("api.db.services.knowledgebase_service")
+fake_kb.KnowledgebaseService = SimpleNamespace(accessible=lambda *_args: True)
+previous = {name: sys.modules.get(name) for name in ("api.apps", "api.apps.services", "api.apps.services.docmind_worker_auth", "api.db.services.knowledgebase_service")}
 sys.modules.update({
     "api.apps": fake_apps,
     "api.apps.services": fake_services,
     "api.apps.services.docmind_worker_auth": fake_auth,
+    "api.db.services.knowledgebase_service": fake_kb,
 })
 try:
     SPEC.loader.exec_module(service)
@@ -54,6 +91,13 @@ MODELS = [Document, DocmindProject, DocmindSource, DocmindSourceDocument, Docmin
 @pytest.fixture
 def preview_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DOCMIND_PREVIEW_ENABLED", "1")
+    if os.name != "posix":
+        page_lock = threading.RLock()
+        @contextmanager
+        def local_page_lock(_session_id):
+            with page_lock:
+                yield
+        monkeypatch.setattr(service, "_page_lock", local_page_lock)
     database = SqliteDatabase(tmp_path / "preview.sqlite")
     root = tmp_path / "previews"
     root.mkdir()
@@ -103,8 +147,137 @@ def test_create_token_hash_owner_and_idempotency(preview_db):
         service.status(first["preview_id"], "owner-1", "0" * 64)
     second = _create("tab-b")
     assert second["preview_id"] != first["preview_id"]
-    with pytest.raises(service.PreviewError, match="PREVIEW_CAPACITY_EXCEEDED"):
-        _create("tab-c")
+    for key in ("tab-c", "tab-d", "tab-e"):
+        _create(key)
+    assert all(row.reserved_bytes == 0 for row in DocmindPreviewSession.select())
+    assert list(preview_db[1].iterdir()) == []
+    with pytest.raises(service.PreviewError, match="PREVIEW_QUEUE_FULL"):
+        _create("tab-f")
+
+
+def test_claim_reserves_capacity_and_release_admits_next(preview_db):
+    first, second = _create("one"), _create("two")
+    assert service.claim("worker-1")["job_id"] == first["preview_id"]
+    assert service.claim("worker-2") is None
+    row = DocmindPreviewSession.get_by_id(first["preview_id"])
+    assert row.reserved_bytes == 64 * 1024 * 1024
+    service.cancel(row.id, "owner-1", first["preview_token"])
+    assert service.claim("worker-2")["job_id"] == second["preview_id"]
+
+
+@pytest.mark.parametrize("extension", ["doc", "ppt"])
+def test_legacy_office_rejected_before_queue(preview_db, extension):
+    DocmindSourceDocument.update(relative_path=f"folder/file.{extension}").execute()
+    with pytest.raises(service.PreviewError, match="PREVIEW_FORMAT_UNSUPPORTED") as error:
+        _create()
+    assert error.value.status == 415
+    assert DocmindPreviewSession.select().count() == 0
+
+
+@pytest.mark.parametrize("kind", ["pdf", "docx", "pptx", "xls", "xlsx"])
+def test_direct_formats_never_call_processor_or_executor(preview_db, monkeypatch, kind):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("direct preview must not depend on HWP")
+    monkeypatch.setattr(service, "_processor", forbidden)
+    monkeypatch.setattr(service._processor_executor, "submit", forbidden)
+    DocmindSourceDocument.update(relative_path="folder/file." + kind).execute()
+    created = _create()
+    job = service.claim("worker-1")
+    body = b"%PDF-1.4\npreview"
+    if kind == "xls":
+        body = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    if kind in {"docx", "pptx", "xlsx"}:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("[Content_Types].xml", b"<Types/>")
+            archive.writestr({"docx": "word/document.xml", "pptx": "ppt/presentation.xml", "xlsx": "xl/workbook.xml"}[kind], b"<root/>")
+        body = buffer.getvalue()
+    service.accept_artifact(created["preview_id"], worker_id="worker-1", version_id="version-1",
+        fencing_token=job["fencing_token"], plaintext=body,
+        plaintext_sha256=hashlib.sha256(body).hexdigest(), plaintext_size=len(body))
+    row = DocmindPreviewSession.get_by_id(created["preview_id"])
+    assert row.display_format == kind
+    assert row.reserved_bytes == len(body)
+    assert row.lifecycle_state == "PROCESSING"
+    service.cancel(row.id, "owner-1", created["preview_token"])
+    assert not (preview_db[1] / row.id).exists()
+
+
+def test_concurrent_queue_and_claim_are_bounded(preview_db):
+    def enqueue(index):
+        with preview_db[0].connection_context():
+            try:
+                return _create(f"parallel-{index}")
+            except service.PreviewError as error:
+                assert error.code == "PREVIEW_QUEUE_FULL"
+                return None
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(enqueue, range(12)))
+    assert sum(result is not None for result in results) == 5
+    assert sum(row.reserved_bytes for row in DocmindPreviewSession.select()) == 0
+    def claim(index):
+        with preview_db[0].connection_context():
+            return service.claim(f"worker-{index}")
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        claims = list(pool.map(claim, range(5)))
+    assert sum(job is not None for job in claims) == 1
+    assert sum(row.reserved_bytes for row in DocmindPreviewSession.select()) == service.INPUT_LIMIT
+
+
+def test_two_small_active_files_and_five_waiters(preview_db):
+    for key in ("first", "second"):
+        created = _create(key)
+        job = service.claim("worker-1")
+        body = b"%PDF-1.4\npreview"
+        service.accept_artifact(created["preview_id"], worker_id="worker-1", version_id="version-1",
+            fencing_token=job["fencing_token"], plaintext=body,
+            plaintext_sha256=hashlib.sha256(body).hexdigest(), plaintext_size=len(body))
+        service.worker_status(created["preview_id"], worker_id="worker-1", version_id="version-1",
+            fencing_token=job["fencing_token"], status="CLEANED", error_code=None)
+    for index in range(5):
+        _create(f"waiting-{index}")
+    assert service.claim("worker-1") is None
+    with pytest.raises(service.PreviewError, match="PREVIEW_QUEUE_FULL"):
+        _create("overflow")
+    assert DocmindPreviewSession.select().count() == 7
+
+
+def test_hwp_reserves_whole_budget_before_decryption(preview_db):
+    DocmindSourceDocument.update(relative_path="folder/file.hwp").execute()
+    first, second = _create("first"), _create("second")
+    assert service.claim("worker-1")["job_id"] == first["preview_id"]
+    assert DocmindPreviewSession.get_by_id(first["preview_id"]).reserved_bytes == 96 * 1024 * 1024
+    assert service.claim("worker-2") is None
+    assert DocmindPreviewSession.get_by_id(second["preview_id"]).reserved_bytes == 0
+
+
+def test_hwp_page_replacement_preserves_readers_and_status(preview_db, monkeypatch):
+    DocmindSourceDocument.update(relative_path="folder/file.hwp").execute()
+    created = _create()
+    job = service.claim("worker-1")
+    directory = preview_db[1] / job["id"]
+    directory.mkdir()
+    (directory / "input.hwp").write_bytes(b"synthetic")
+    (directory / "page-1.svg").write_bytes(b"first page")
+    DocmindPreviewSession.update(lifecycle_state="READY", display_format="svg", viewer_kind="hwp",
+        page_count=3, host_cleanup_state="COMPLETE").where(DocmindPreviewSession.id == job["id"]).execute()
+    stream, _ = service.acquire_file(job["id"], "owner-1", created["preview_token"], 1)
+    with pytest.raises(service.PreviewError, match="PREVIEW_READER_BUSY"):
+        service.acquire_file(job["id"], "owner-1", created["preview_token"], 2)
+    assert stream.read() == b"first page"
+    stream.close()
+    service.release_file(job["id"])
+    def render(endpoint, payload, timeout):
+        path = directory / f"page-{payload['page']}.svg"
+        path.write_bytes(b"next page")
+        return {"page_path": str(path), "page_count": 3}
+    monkeypatch.setattr(service, "_processor", render)
+    stream, _ = service.acquire_file(job["id"], "owner-1", created["preview_token"], 2)
+    assert stream.read() == b"next page"
+    stream.close()
+    service.release_file(job["id"])
+    assert [path.name for path in directory.glob("*.svg")] == ["page-2.svg"]
+    assert service.status(job["id"], "owner-1", created["preview_token"])["status"] == "READY"
 
 
 def test_source_change_revokes_each_request(preview_db):
@@ -127,7 +300,8 @@ def test_queue_timeout_even_with_heartbeat_and_cleanup_receipt(preview_db):
     ).where(
         DocmindPreviewSession.id == row.id
     ).execute()
-    service.heartbeat(row.id, "owner-1", created["preview_token"])
+    with pytest.raises(service.PreviewError, match="PREVIEW_QUEUE_TIMEOUT"):
+        service.heartbeat(row.id, "owner-1", created["preview_token"])
     assert service.claim("worker-1") is None
     service.reap()
     row = DocmindPreviewSession.get_by_id(row.id)
@@ -172,9 +346,10 @@ def test_background_processing_waits_for_host_cleanup(preview_db, monkeypatch):
     assert receipt["cleanup_required"]
     directory = preview_db[1] / created["preview_id"]
     input_path = directory / "input.pdf"
-    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
-    assert stat.S_IMODE(input_path.stat().st_mode) == 0o600
-    if os.geteuid() == 0:
+    if os.name == "posix":
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+        assert stat.S_IMODE(input_path.stat().st_mode) == 0o600
+    if os.name == "posix" and os.geteuid() == 0:
         assert directory.stat().st_uid == 10001
         assert input_path.stat().st_uid == 10001
     deadline = time.monotonic() + 5
@@ -201,13 +376,16 @@ def test_background_processing_waits_for_host_cleanup(preview_db, monkeypatch):
 
 
 def test_host_cleanup_before_processing_cannot_ready_early(preview_db, monkeypatch):
+    DocmindSourceDocument.update(relative_path="folder/file.hwp").execute()
     release = threading.Event()
 
     def processor(_endpoint, payload, timeout):
-        assert timeout == 185
+        assert timeout == 65
         assert release.wait(5)
-        return {"display_format": "pdf", "viewer_kind": "pdf", "page_count": None,
-                "content_path": payload["input_path"]}
+        path = Path(payload["output_dir"]) / "page-1.svg"
+        path.write_text("<svg xmlns='http://www.w3.org/2000/svg'/>")
+        return {"display_format": "svg", "viewer_kind": "hwp", "page_count": 2,
+                "first_page_path": str(path)}
 
     monkeypatch.setattr(service, "_processor", processor)
     created = _create()
@@ -293,7 +471,7 @@ def test_reaper_cleans_abandoned_processing_after_lease(preview_db, monkeypatch)
     assert row.lifecycle_state == "FAILED"
     assert row.cleanup_state == "COMPLETE"
     assert not directory.exists()
-    assert cancelled == [("/preview/cancel", {"session_id": row.id}, 30)]
+    assert cancelled == []  # Direct-file cleanup never calls the HWP runtime.
     receipt = service.worker_status(
         row.id, worker_id="worker-1", version_id="version-1",
         fencing_token=job["fencing_token"], status="CLEANED", error_code=None,

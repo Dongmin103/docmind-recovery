@@ -110,6 +110,7 @@ export default function DocumentViewSwitch({
             <TemporaryOriginalPreview
               key={`${documentId}:${sourceVersionId ?? ''}`}
               documentId={documentId}
+              sourceFormat={fileType}
               sourceVersionId={sourceVersionId}
               chunkSetId={chunkSetId}
               onChunkSetChanged={onChunkSetChanged}

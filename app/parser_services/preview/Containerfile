@@ -1,7 +1,7 @@
 FROM python:3.13-slim-bookworm@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-writer libreoffice-impress fonts-noto-cjk fonts-liberation \
+    libfreetype6 libexpat1 fonts-noto-cjk fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir rhwp-python==0.8.1 defusedxml==0.7.1
@@ -9,9 +9,9 @@ RUN pip install --no-cache-dir rhwp-python==0.8.1 defusedxml==0.7.1
 RUN groupadd --gid 10001 preview && useradd --uid 10001 --gid 10001 --no-create-home preview
 WORKDIR /opt/docmind-preview
 COPY preview/*.py ./
-COPY docling_office/legacy_doc_conversion.py ./legacy_doc_conversion.py
 RUN rm -rf /tmp && ln -s /run/docmind-previews/processor-tmp /tmp
 USER 10001:10001
 ENV PYTHONUNBUFFERED=1 DOCMIND_PREVIEW_ROOT=/run/docmind-previews LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libfreetype.so.6
+RUN python -c "from rhwp import Document"
 EXPOSE 8090
 CMD ["python", "service.py"]

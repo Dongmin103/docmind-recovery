@@ -1,7 +1,7 @@
 """Selective OOXML text extraction for PPTX search ingestion.
 
 Coverage means supported native content, never image OCR or pixel-level fidelity.
-Unsupported native structures are reported for fail-closed indexing.
+Unsupported native structures are reported as partial coverage.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ NS = {
     "pkg": "http://schemas.openxmlformats.org/package/2006/relationships",
     "dgm": "http://schemas.openxmlformats.org/drawingml/2006/diagram",
 }
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 EMU_PER_POINT = 12700
 
@@ -385,7 +385,6 @@ def extract(source: bytes) -> Extraction:
             if not slide_ids:
                 raise ValueError("PPTX has no slides")
             seen = set()
-            inspected_inheritance = set()
             for number, slide_id in enumerate(slide_ids, 1):
                 kind, part = relations.get(
                     slide_id.get(f"{{{NS['r']}}}id"), (None, None)
@@ -397,35 +396,6 @@ def extract(source: bytes) -> Extraction:
                 if slide.get("show") in {"0", "false"}:
                     warnings.add("HIDDEN_SLIDE_INCLUDED")
                 slide_relations = package.relations(part)
-                # Native extraction does not flatten master/layout inheritance. Detect visible
-                # inherited content so absence cannot become a complete-coverage claim.
-                pending = [
-                    target
-                    for relation_kind, target in slide_relations.values()
-                    if relation_kind == "slideLayout" and target
-                ]
-                while pending:
-                    inherited_part = pending.pop()
-                    if inherited_part in inspected_inheritance:
-                        continue
-                    inspected_inheritance.add(inherited_part)
-                    inherited = package.xml(inherited_part)
-                    for shape in inherited.findall(".//p:sp", NS):
-                        if shape.find(".//p:ph", NS) is None and _text(
-                            shape.find("p:txBody", NS)
-                        ):
-                            warnings.add("INHERITED_CONTENT_NOT_EXTRACTED")
-                    if inherited.findall(".//p:graphicFrame", NS):
-                        warnings.add("INHERITED_CONTENT_NOT_EXTRACTED")
-                    if inherited.findall(".//p:pic", NS):
-                        warnings.add("IMAGE_OCR_NOT_RUN")
-                    pending.extend(
-                        target
-                        for relation_kind, target in package.relations(
-                            inherited_part
-                        ).values()
-                        if relation_kind == "slideMaster" and target
-                    )
                 tree = slide.find("p:cSld/p:spTree", NS)
                 if tree is None:
                     raise ValueError("PPTX slide shape tree missing")
@@ -560,6 +530,74 @@ def extract(source: bytes) -> Extraction:
                             warnings.add("SHAPE_UNSUPPORTED")
 
                 visit(tree)
+                if slide.get("showMasterSp") not in {"0", "false"}:
+                    seen_inherited = {
+                        (block.text, block.bbox)
+                        for block in blocks if block.slide == number and block.kind == "text" and block.bbox is not None
+                    }
+                    layouts = [
+                        target for relation_kind, target in slide_relations.values()
+                        if relation_kind == "slideLayout" and target
+                    ]
+                    if len(layouts) != 1:
+                        raise ValueError("PPTX slide layout relationship missing or ambiguous")
+                    layout_part = layouts[0]
+                    layout = package.xml(layout_part)
+                    inherited_parts = [(layout_part, layout)]
+                    if layout.get("showMasterSp") not in {"0", "false"}:
+                        masters = [
+                            target for relation_kind, target in package.relations(layout_part).values()
+                            if relation_kind == "slideMaster" and target
+                        ]
+                        if len(masters) != 1:
+                            raise ValueError("PPTX slide master relationship missing or ambiguous")
+                        inherited_parts.append((masters[0], package.xml(masters[0])))
+                    for inherited_part, inherited in inherited_parts:
+                        inherited_tree = inherited.find("p:cSld/p:spTree", NS)
+                        if inherited_tree is None:
+                            raise ValueError("PPTX inherited shape tree missing")
+
+                        def visit_inherited(
+                            container, matrix=IDENTITY, path="", depth=0, *,
+                            seen_inherited=seen_inherited, number=number,
+                            inherited_part=inherited_part,
+                        ):
+                            if depth > 64:
+                                raise ValueError("PPTX inherited group depth limit")
+                            for shape in container:
+                                tag = etree.QName(shape).localname
+                                if tag in {"nvGrpSpPr", "grpSpPr", "extLst"}:
+                                    continue
+                                identity = shape.find(".//p:cNvPr", NS)
+                                if identity is not None and identity.get("hidden") in {"1", "true"}:
+                                    continue
+                                shape_id = identity.get("id") if identity is not None else None
+                                if tag == "grpSp":
+                                    _, child_matrix = _geometry(shape, matrix, group=True)
+                                    visit_inherited(shape, child_matrix, f"{path}group/{shape_id}/", depth + 1)
+                                elif tag == "pic":
+                                    warnings.add("IMAGE_OCR_NOT_RUN")
+                                elif tag == "graphicFrame":
+                                    warnings.add("INHERITED_CONTENT_NOT_EXTRACTED")
+                                elif tag == "sp" and shape.find(".//p:ph", NS) is None:
+                                    value = _text(shape.find("p:txBody", NS))
+                                    if not value:
+                                        continue
+                                    bbox, _ = _geometry(shape, matrix)
+                                    key = (value, bbox)
+                                    if bbox is not None and key in seen_inherited:
+                                        continue
+                                    if bbox is not None:
+                                        seen_inherited.add(key)
+                                    if not shape_id:
+                                        raise ValueError("Inherited PPTX shape identity missing")
+                                    blocks.append(Block(
+                                        "text", number,
+                                        f"{inherited_part}#slide/{number}/{path}shape/{shape_id}",
+                                        value, bbox, details={"inherited_from": inherited_part},
+                                    ))
+
+                        visit_inherited(inherited_tree)
             if len({b.locator for b in blocks}) != len(blocks):
                 raise ValueError("Duplicate PPTX block identity")
             if not blocks:

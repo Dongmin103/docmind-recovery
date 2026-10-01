@@ -9,6 +9,8 @@ import os
 import re
 import shutil
 import stat
+import struct
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -31,13 +33,16 @@ from common.misc_utils import get_uuid
 from common.time_utils import current_timestamp
 
 INPUT_LIMIT = 64 * 1024 * 1024
-DERIVED_LIMIT = 128 * 1024 * 1024
-TOTAL_LIMIT = 256 * 1024 * 1024
+DERIVED_LIMIT = 16 * 1024 * 1024
+TOTAL_LIMIT = 96 * 1024 * 1024
 MAX_SESSIONS = 2
+MAX_QUEUED = 5
+HWP_FORMATS = frozenset({"hwp", "hwpx"})
+DIRECT_VIEWERS = {"pdf": "pdf", "docx": "word", "pptx": "powerpoint", "xls": "excel", "xlsx": "excel"}
 QUEUE_TTL = timedelta(seconds=120)
 HEARTBEAT_TTL = timedelta(minutes=2)
 HARD_TTL = timedelta(minutes=60)
-FORMATS = frozenset({"pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "hwp", "hwpx"})
+FORMATS = frozenset(DIRECT_VIEWERS) | HWP_FORMATS
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 ACTIVE = frozenset({"QUEUED", "DECRYPTING", "PROCESSING", "READY"})
@@ -82,6 +87,76 @@ def _updates() -> dict:
 
 def _for_update(query):
     return query if isinstance(DocmindPreviewSession._meta.database, SqliteDatabase) else query.for_update()
+
+
+@contextmanager
+def _admission():
+    """Serialize the shared tmpfs budget across tenants and API processes."""
+    database = DocmindPreviewSession._meta.database
+    with database.atomic("IMMEDIATE") if isinstance(database, SqliteDatabase) else database.atomic():
+        # Lock in stable order, not just the requesting tenant's project: the
+        # queue and tmpfs are shared by every project in this deployment.
+        list(_for_update(DocmindProject.select().order_by(DocmindProject.id)))
+        yield
+
+
+def _bound_zip_directory(path: Path) -> None:
+    """Reject oversized/forged directories before ZipFile allocates entries.
+
+    ZIP64 and split archives are unnecessary for the 64 MiB preview limit.
+    Bound both the metadata bytes and actual entry count, not just EOCD claims.
+    """
+    with path.open("rb") as stream:
+        size = path.stat().st_size
+        stream.seek(max(0, size - 65557))
+        tail = stream.read(65557)
+        offset = tail.rfind(b"PK\x05\x06")
+        if (offset < 0 or offset + 22 > len(tail)
+                or tail[max(0, offset - 20):offset - 16] == b"PK\x06\x07"):
+            raise PreviewError("INVALID_PREVIEW_PACKAGE", 422)
+        disk, start_disk, disk_count, count, length, start, comment = struct.unpack_from("<4H2IH", tail, offset + 4)
+        if (disk or start_disk or count != disk_count or count > 10000
+                or length > 2 * 1024 * 1024 or start + length != size - len(tail) + offset
+                or offset + 22 + comment != len(tail)):
+            raise PreviewError("INVALID_PREVIEW_PACKAGE", 422)
+        stream.seek(start)
+        directory = stream.read(length)
+    position, entries = 0, 0
+    while position < len(directory):
+        if directory[position:position + 4] != b"PK\x01\x02" or position + 46 > len(directory):
+            raise PreviewError("INVALID_PREVIEW_PACKAGE", 422)
+        name, extra, comment = struct.unpack_from("<3H", directory, position + 28)
+        position += 46 + name + extra + comment
+        entries += 1
+        if entries > 10000:
+            raise PreviewError("INVALID_PREVIEW_PACKAGE", 422)
+    if position != length or entries != count:
+        raise PreviewError("INVALID_PREVIEW_PACKAGE", 422)
+
+
+def _validate_direct(path: Path, kind: str) -> None:
+    with path.open("rb") as stream:
+        magic = stream.read(8)
+    if kind == "pdf" and not magic.startswith(b"%PDF-"):
+        raise PreviewError("INVALID_PREVIEW_SOURCE", 422)
+    if kind == "xls" and magic != b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        raise PreviewError("INVALID_PREVIEW_SOURCE", 422)
+    parts = {"docx": "word/document.xml", "pptx": "ppt/presentation.xml", "xlsx": "xl/workbook.xml"}
+    if kind not in parts:
+        return
+    try:
+        _bound_zip_directory(path)
+        with zipfile.ZipFile(path) as archive:
+            entries = archive.infolist()
+            names = {entry.filename for entry in entries}
+            if (len(entries) > 10000 or len(names) != len(entries)
+                    or not {"[Content_Types].xml", parts[kind]}.issubset(names)
+                    or sum(entry.file_size for entry in entries) > INPUT_LIMIT * 4
+                    or any(entry.flag_bits & 1 or entry.filename.startswith("/")
+                           or ".." in Path(entry.filename).parts or entry.file_size > INPUT_LIMIT for entry in entries)):
+                raise PreviewError("INVALID_PREVIEW_PACKAGE", 422)
+    except (zipfile.BadZipFile, OSError) as error:
+        raise PreviewError("INVALID_PREVIEW_PACKAGE", 422) from error
 
 
 def _id(value: str, field: str = "ID") -> str:
@@ -195,6 +270,12 @@ def _authorized(session_id: str, tenant_id: str, token: str, *, allow_terminal: 
     if not hmac.compare_digest(session.token_hash, _token_hash(token)):
         raise PreviewError("PREVIEW_TOKEN_INVALID", 403)
     now = _now()
+    if session.lifecycle_state == "QUEUED" and session.create_time <= _queue_cutoff_ms():
+        DocmindPreviewSession.update(error_code="PREVIEW_QUEUE_TIMEOUT").where(DocmindPreviewSession.id == session.id).execute()
+        _end(session, "FAILED")
+        raise PreviewError("PREVIEW_QUEUE_TIMEOUT", 410)
+    if session.lifecycle_state in TERMINAL and session.error_code and not allow_terminal:
+        raise PreviewError(session.error_code, 410)
     if now >= session.expires_at or now >= session.hard_expires_at:
         _end(session, "EXPIRED")
         raise PreviewError("PREVIEW_EXPIRED", 410)
@@ -241,8 +322,7 @@ def create(document_id: str, tenant_id: str, *, source_version_id: str, chunk_se
         raise PreviewError("PREVIEW_FORMAT_UNSUPPORTED", 415)
     _root()
     idem_hash = hashlib.sha256(f"{tenant_id}\x1f{document_id}\x1f{source_version_id}\x1f{idempotency_key}".encode()).hexdigest()
-    database = DocmindPreviewSession._meta.database
-    with database.atomic():
+    with _admission():
         # The project row serializes admission across web workers.
         _for_update(DocmindProject.select().where(DocmindProject.id == project.id)).get()
         _, current_mapping, current_version, current_document = _source(
@@ -261,10 +341,13 @@ def create(document_id: str, tenant_id: str, *, source_version_id: str, chunk_se
             result = _public(existing, document.active_chunk_set_id or "")
             result["preview_token"] = _token(existing)
             return result
-        reservation = INPUT_LIMIT + DERIVED_LIMIT if source_format in {"doc", "ppt", "hwp", "hwpx"} else INPUT_LIMIT
-        live = DocmindPreviewSession.select().where(DocmindPreviewSession.reserved_bytes > 0)
-        if live.count() >= MAX_SESSIONS or sum(item.reserved_bytes for item in live) + reservation > TOTAL_LIMIT:
-            raise PreviewError("PREVIEW_CAPACITY_EXCEEDED", 429)
+        waiting = list(_for_update(DocmindPreviewSession.select().where(
+            (DocmindPreviewSession.lifecycle_state == "QUEUED")
+            & (DocmindPreviewSession.expires_at > _now())
+            & (DocmindPreviewSession.create_time > _queue_cutoff_ms())
+        )))
+        if len(waiting) >= MAX_QUEUED:
+            raise PreviewError("PREVIEW_QUEUE_FULL", 429)
         now = _now()
         session = DocmindPreviewSession.create(
             id=get_uuid(), owner_id=tenant_id, project_id=project.id,
@@ -272,7 +355,7 @@ def create(document_id: str, tenant_id: str, *, source_version_id: str, chunk_se
             document_id=document_id, version_id=version.id,
             requested_chunk_set_id=chunk_set_id, idempotency_hash=idem_hash,
             token_hash="0" * 64, lifecycle_state="QUEUED", source_format=source_format,
-            reserved_bytes=reservation, last_heartbeat_at=now,
+            reserved_bytes=0, last_heartbeat_at=now,
             expires_at=now + HEARTBEAT_TTL, hard_expires_at=now + HARD_TTL,
             create_time=current_timestamp(), create_date=now, **_updates(),
         )
@@ -288,7 +371,7 @@ def status(session_id: str, tenant_id: str, token: str) -> dict:
     session, current_chunk_set = _authorized(session_id, tenant_id, token, allow_terminal=True)
     if session.lifecycle_state == "READY":
         try:
-            content_path(session) if session.source_format not in {"hwp", "hwpx"} else page_path(session, 1)
+            content_path(session) if session.source_format not in HWP_FORMATS else _regular_file(_session_dir(session.id) / f"input.{session.source_format}", session.id)
         except PreviewError:
             _end(session, "EXPIRED")
             raise PreviewError("PREVIEW_EXPIRED", 410)
@@ -312,7 +395,7 @@ def _end(session: DocmindPreviewSession, state: str) -> None:
     DocmindPreviewSession.update(lifecycle_state=state, **_updates()).where(
         DocmindPreviewSession.id == session.id
     ).execute()
-    if session.lifecycle_state == "PROCESSING" or session.active_readers:
+    if session.source_format in HWP_FORMATS and (session.lifecycle_state == "PROCESSING" or session.active_readers):
         try:
             _processor("/preview/cancel", {"session_id": session.id}, timeout=30)
         except PreviewError:
@@ -391,53 +474,60 @@ def claim(worker_id: str, lease_seconds: int = 300) -> dict | None:
     if not 180 <= lease_seconds <= 1800:
         raise PreviewError("PREVIEW_LEASE_INVALID", 400)
     now = _now()
-    database = DocmindPreviewSession._meta.database
-    candidate = DocmindPreviewSession.select().where(
+    candidates = list(DocmindPreviewSession.select().where(
         (DocmindPreviewSession.lifecycle_state == "QUEUED")
         & (DocmindPreviewSession.expires_at > now)
         & (DocmindPreviewSession.create_time > _queue_cutoff_ms())
-    ).order_by(DocmindPreviewSession.create_time.asc()).first()
-    if candidate is None:
-        return None
-    try:
-        _source_matches_session(candidate, check_access=True)
-    except PreviewError:
-        _end(candidate, "EXPIRED")
-        return None
-    with database.atomic():
-        candidate = _for_update(DocmindPreviewSession.select().where(
-            DocmindPreviewSession.id == candidate.id
-        )).first()
-        if (
-            candidate is None or candidate.lifecycle_state != "QUEUED"
-            or candidate.expires_at <= _now()
-            or candidate.create_time <= _queue_cutoff_ms()
-        ):
-            return None
-        _, mapping, version, _ = _source_matches_session(candidate, check_access=False)
-        expires = now + timedelta(seconds=lease_seconds)
-        fence = candidate.fencing_token + 1
-        changed = DocmindPreviewSession.update(
-            lifecycle_state="DECRYPTING", fencing_token=fence,
-            lease_owner=worker_id, lease_expires_at=expires,
-            host_cleanup_state="PENDING", **_updates(),
-        ).where(
-            (DocmindPreviewSession.id == candidate.id)
-            & (DocmindPreviewSession.lifecycle_state == "QUEUED")
-            & (DocmindPreviewSession.fencing_token == candidate.fencing_token)
-        ).execute()
-        if changed != 1:
-            raise PreviewError("PREVIEW_CLAIM_CONFLICT")
-        return {
-            "id": candidate.id, "job_id": candidate.id,
-            "source_id": candidate.source_id, "document_id": candidate.document_id,
-            "version_id": candidate.version_id, "relative_path": mapping.relative_path,
-            "ciphertext_sha256": version.ciphertext_sha256,
-            "ciphertext_size": version.ciphertext_size,
-            "source_mtime_ns": version.source_mtime_ns,
-            "fencing_token": fence,
-            "lease_expires_at": expires.replace(tzinfo=UTC).isoformat(),
-        }
+    ).order_by(DocmindPreviewSession.create_time, DocmindPreviewSession.id).limit(MAX_QUEUED))
+    for queued in candidates:
+        try:
+            _source_matches_session(queued, check_access=True)
+        except PreviewError:
+            _end(queued, "EXPIRED")
+            continue
+        with _admission():
+            candidate = _for_update(DocmindPreviewSession.select().where(
+                DocmindPreviewSession.id == queued.id
+            )).first()
+            if (candidate is None or candidate.lifecycle_state != "QUEUED"
+                    or candidate.expires_at <= _now() or candidate.hard_expires_at <= _now()
+                    or candidate.create_time <= _queue_cutoff_ms()):
+                continue
+            live = list(_for_update(DocmindPreviewSession.select().where(
+                (DocmindPreviewSession.reserved_bytes > 0)
+                | (DocmindPreviewSession.lifecycle_state.in_({"DECRYPTING", "PROCESSING", "READY"}))
+            )))
+            reservation = TOTAL_LIMIT if candidate.source_format in HWP_FORMATS else INPUT_LIMIT
+            if (len(live) >= MAX_SESSIONS
+                    or sum(row.reserved_bytes for row in live) + reservation > TOTAL_LIMIT
+                    or any(row.lifecycle_state == "DECRYPTING" for row in live)
+                    or candidate.source_format in HWP_FORMATS and any(row.source_format in HWP_FORMATS for row in live)):
+                continue
+            _, mapping, version, _ = _source_matches_session(candidate, check_access=False)
+            expires = _now() + timedelta(seconds=lease_seconds)
+            fence = candidate.fencing_token + 1
+            changed = DocmindPreviewSession.update(
+                lifecycle_state="DECRYPTING", fencing_token=fence, reserved_bytes=reservation,
+                lease_owner=worker_id, lease_expires_at=expires,
+                host_cleanup_state="PENDING", **_updates(),
+            ).where(
+                (DocmindPreviewSession.id == candidate.id)
+                & (DocmindPreviewSession.lifecycle_state == "QUEUED")
+                & (DocmindPreviewSession.fencing_token == candidate.fencing_token)
+            ).execute()
+            if changed != 1:
+                raise PreviewError("PREVIEW_CLAIM_CONFLICT")
+            return {
+                "id": candidate.id, "job_id": candidate.id,
+                "source_id": candidate.source_id, "document_id": candidate.document_id,
+                "version_id": candidate.version_id, "relative_path": mapping.relative_path,
+                "ciphertext_sha256": version.ciphertext_sha256,
+                "ciphertext_size": version.ciphertext_size,
+                "source_mtime_ns": version.source_mtime_ns,
+                "fencing_token": fence,
+                "lease_expires_at": expires.replace(tzinfo=UTC).isoformat(),
+            }
+    return None
 
 
 def _leased(session_id: str, worker_id: str, version_id: str, fencing_token: int) -> DocmindPreviewSession:
@@ -457,8 +547,15 @@ def _processor(endpoint: str, payload: dict, timeout: int) -> dict:
     base = os.getenv("DOCMIND_PREVIEW_PROCESSOR_URL", "http://docmind-preview-processor:8090").rstrip("/")
     try:
         response = requests.post(f"{base}{endpoint}", json=payload, timeout=timeout)
-        response.raise_for_status()
         result = response.json()
+        if not response.ok:
+            code = result.get("error") if isinstance(result, dict) else None
+            allowed = {"PREVIEW_PROCESSOR_BUSY", "PREVIEW_PROCESS_TIMEOUT", "PREVIEW_INPUT_TOO_LARGE",
+                       "PREVIEW_SVG_TOO_LARGE", "INVALID_PREVIEW_SOURCE", "INVALID_PREVIEW_PACKAGE"}
+            raise PreviewError(code if code in allowed else "PREVIEW_PROCESSOR_FAILED",
+                               429 if code == "PREVIEW_PROCESSOR_BUSY" else 503)
+    except requests.Timeout as error:
+        raise PreviewError("PREVIEW_PROCESS_TIMEOUT", 504) from error
     except (requests.RequestException, ValueError) as error:
         raise PreviewError("PREVIEW_PROCESSOR_FAILED", 503) from error
     if not isinstance(result, dict):
@@ -507,15 +604,31 @@ def accept_artifact(
         ).execute()
         if changed != 1:
             raise PreviewError("PREVIEW_STALE_WORKER_RESULT")
-        _processor_executor.submit(_process_session, session.id, fencing_token)
+        if session.source_format in DIRECT_VIEWERS:
+            _validate_direct(input_path, session.source_format)
+            _source_matches_session(session, check_access=True)
+            with _admission():
+                locked = _for_update(DocmindPreviewSession.select().where(DocmindPreviewSession.id == session.id)).get()
+                if locked.lifecycle_state != "PROCESSING" or locked.fencing_token != fencing_token:
+                    raise PreviewError("PREVIEW_STALE_WORKER_RESULT")
+                _source_matches_session(locked, check_access=False)
+                DocmindPreviewSession.update(
+                    display_format=session.source_format, viewer_kind=DIRECT_VIEWERS[session.source_format],
+                    reserved_bytes=plaintext_size,
+                    lifecycle_state="READY" if locked.host_cleanup_state == "COMPLETE" else "PROCESSING",
+                    **_updates(),
+                ).where(DocmindPreviewSession.id == session.id).execute()
+        else:
+            _processor_executor.submit(_process_session, session.id, fencing_token)
         return {"accepted": True, "job_id": session.id, "version_id": version_id,
                 "fencing_token": fencing_token, "cleanup_required": True}
-    except Exception:
+    except Exception as error:
         DocmindPreviewSession.update(
-            lifecycle_state="FAILED", error_code="PREVIEW_ARTIFACT_FAILED", **_updates()
+            lifecycle_state="FAILED", error_code=error.code if isinstance(error, PreviewError) else "PREVIEW_ARTIFACT_FAILED", **_updates()
         ).where(
             (DocmindPreviewSession.id == session.id)
             & (DocmindPreviewSession.fencing_token == fencing_token)
+            & (DocmindPreviewSession.lifecycle_state.in_({"DECRYPTING", "PROCESSING"}))
         ).execute()
         cleanup(session.id)
         raise
@@ -534,34 +647,21 @@ def _process_session(session_id: str, fencing_token: int) -> None:
             result = _processor("/preview/process", {
             "session_id": session.id, "input_path": str(input_path),
             "source_format": session.source_format, "output_dir": str(directory),
-            }, timeout=185)
+            }, timeout=65)
             display_format = result.get("display_format")
             viewer_kind = result.get("viewer_kind")
-            if display_format not in {"pdf", "docx", "pptx", "xls", "xlsx", "svg"} or viewer_kind not in {
-            "pdf", "word", "powerpoint", "excel", "hwp"
-            }:
+            if display_format != "svg" or viewer_kind != "hwp":
                 raise PreviewError("PREVIEW_PROCESSOR_INVALID")
             page_count = result.get("page_count")
-            if viewer_kind == "hwp":
-                if not isinstance(page_count, int) or page_count < 1:
-                    raise PreviewError("PREVIEW_PROCESSOR_INVALID")
-                page = _regular_file(Path(result.get("first_page_path", "")), session.id)
-                if page != directory / "page-1.svg":
-                    raise PreviewError("PREVIEW_PROCESSOR_INVALID")
-            else:
-                result_path = _regular_file(Path(result.get("content_path", "")), session.id)
-                expected_path = (
-                    input_path if display_format == session.source_format
-                    else directory / f"display.{display_format}"
-                )
-                if result_path != expected_path:
-                    raise PreviewError("PREVIEW_PROCESSOR_INVALID")
-                if result_path.stat().st_size > DERIVED_LIMIT:
-                    raise PreviewError("PREVIEW_DERIVED_TOO_LARGE", 413)
-                if result_path != input_path and session.source_format in {"doc", "ppt"}:
-                    input_path.unlink()
+            if not isinstance(page_count, int) or not 1 <= page_count <= 100000:
+                raise PreviewError("PREVIEW_PROCESSOR_INVALID")
+            page = _regular_file(Path(result.get("first_page_path", "")), session.id)
+            if page != directory / "page-1.svg":
+                raise PreviewError("PREVIEW_PROCESSOR_INVALID")
+            if page.stat().st_size > DERIVED_LIMIT:
+                raise PreviewError("PREVIEW_DERIVED_TOO_LARGE", 413)
             actual_size = sum(p.stat().st_size for p in directory.iterdir() if p.is_file())
-            if actual_size > INPUT_LIMIT + DERIVED_LIMIT:
+            if actual_size > TOTAL_LIMIT:
                 raise PreviewError("PREVIEW_DERIVED_TOO_LARGE", 413)
             _source_matches_session(session, check_access=True)
             with database.atomic():
@@ -585,13 +685,13 @@ def _process_session(session_id: str, fencing_token: int) -> None:
                 state = "READY" if locked.host_cleanup_state == "COMPLETE" else "PROCESSING"
                 DocmindPreviewSession.update(
                     display_format=display_format, viewer_kind=viewer_kind, page_count=page_count,
-                    reserved_bytes=(INPUT_LIMIT + DERIVED_LIMIT if viewer_kind == "hwp" else actual_size),
+                    reserved_bytes=TOTAL_LIMIT,
                     lifecycle_state=state, **_updates(),
                 ).where(DocmindPreviewSession.id == session.id).execute()
-        except Exception:
-            logger.exception("DocMind preview processing failed session=%s", session_id)
+        except Exception as error:  # noqa: BLE001 - background task must record failure and clean up
+            logger.warning("DocMind preview processing failed session=%s code=%s", session_id, error.code if isinstance(error, PreviewError) else "PREVIEW_PROCESSING_FAILED")
             DocmindPreviewSession.update(
-                lifecycle_state="FAILED", error_code="PREVIEW_PROCESSING_FAILED", **_updates()
+                lifecycle_state="FAILED", error_code=error.code if isinstance(error, PreviewError) else "PREVIEW_PROCESSING_FAILED", **_updates()
             ).where(
                 (DocmindPreviewSession.id == session.id)
                 & (DocmindPreviewSession.lifecycle_state == "PROCESSING")
@@ -696,6 +796,9 @@ def authorized_file(session_id: str, tenant_id: str, token: str, page: int | Non
                     path.unlink(missing_ok=True)
                     raise PreviewError("SOURCE_VERSION_CHANGED")
                 directory = _session_dir(session.id)
+                for previous in directory.glob("page-*.svg"):
+                    if previous != path:
+                        previous.unlink()
                 total_size = sum(item.stat().st_size for item in directory.iterdir() if item.is_file())
                 page_bytes = sum(item.stat().st_size for item in directory.glob("page-*.svg") if item.is_file())
                 other_reserved = sum(item.reserved_bytes for item in DocmindPreviewSession.select().where(
@@ -743,6 +846,8 @@ def acquire_file(session_id: str, tenant_id: str, token: str, page: int | None =
             raise PreviewError("PREVIEW_EXPIRED", 410)
         if session.lifecycle_state != "READY":
             raise PreviewError("PREVIEW_NOT_READY", 202)
+        if page is not None and session.active_readers:
+            raise PreviewError("PREVIEW_READER_BUSY", 429)
         DocmindPreviewSession.update(
             active_readers=session.active_readers + 1,
             reader_lease_expires_at=_now() + timedelta(seconds=90 if page else 30),
@@ -762,7 +867,13 @@ def acquire_file(session_id: str, tenant_id: str, token: str, page: int | None =
             os.close(descriptor)
             raise
         return os.fdopen(descriptor, "rb"), display_format
-    except Exception:
+    except Exception as error:
+        if isinstance(error, PreviewError) and error.code in {
+            "PREVIEW_PROCESS_TIMEOUT", "PREVIEW_PROCESSOR_FAILED", "PREVIEW_PROCESSOR_INVALID",
+            "PREVIEW_DERIVED_TOO_LARGE", "PREVIEW_SVG_TOO_LARGE",
+        }:
+            DocmindPreviewSession.update(error_code=error.code).where(DocmindPreviewSession.id == session_id).execute()
+            _end(DocmindPreviewSession.get_by_id(session_id), "FAILED")
         release_file(session_id)
         raise
 

@@ -175,6 +175,21 @@ def test_live_source_tree_ignores_stale_published_catalog(source_db):
     assert "doc-pending" not in {doc for docs in tree.folders.values() for doc in docs}
 
 
+def test_active_native_pptx_warning_flags_reach_source_node(source_db):
+    _mapping("home", "doc-a", "Manuals/slides.pptx", complete=True)
+    run = ParserRun.get_by_id("run-doc-a")
+    run.parser_name = "pptx-native"
+    run.lifecycle = "READY_WITH_WARNING"
+    run.warnings = ["PPTX_NATIVE_PARTIAL_COVERAGE", "GRAPHIC_UNSUPPORTED", "IMAGE_OCR_NOT_RUN"]
+    run.save()
+
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_state"] == "INDEXED"
+    assert node["searchable"] is True
+    assert node["index_partial_coverage"] is True
+    assert node["index_image_ocr_not_run"] is True
+
+
 def test_tombstone_disabled_source_and_failed_cleanup_are_excluded(source_db):
     mapping = _mapping("home", "doc-a", "Manuals/guide.doc", complete=True)
     _mapping("dept", "doc-b", "Manuals/guide.doc", complete=True)

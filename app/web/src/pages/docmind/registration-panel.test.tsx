@@ -38,6 +38,17 @@ const setup = (
 };
 
 describe('minimal registration history', () => {
+  it('shows native partial coverage and skipped image OCR in indexed history', () => {
+    setup([row('partial', {
+      parser_run: {
+        parse_run_id: 'run-partial', parser_name: 'pptx-native', parser_version: '1.1.0',
+        phase: 'READY_WITH_WARNING', warnings: ['PPTX_NATIVE_PARTIAL_COVERAGE', 'IMAGE_OCR_NOT_RUN'],
+      } as DocMindRegistration['parser_run'],
+    })]);
+    fireEvent.click(screen.getByRole('button', { name: '등록 기록 1건' }));
+    expect(screen.getByText('일부 내용 미추출')).toBeVisible();
+    expect(screen.getByText('이미지 속 글자 미인식')).toBeVisible();
+  });
   it('uses the document parent from the source tree when folder IDs have different representations', () => {
     setup(
       [

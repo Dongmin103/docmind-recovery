@@ -53,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(HTTPStatus.OK, cancel(str(request["session_id"])))
                 return
             source_format = str(request["source_format"]).lower()
-            heavy = source_format in {"doc", "ppt", "hwp", "hwpx"}
+            heavy = source_format in {"hwp", "hwpx"}
             if heavy and not _HEAVY.acquire(blocking=False):
                 self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "PREVIEW_PROCESSOR_BUSY"})
                 return
@@ -80,8 +80,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    # LibreOffice creates its IPC socket below /tmp even with TMPDIR set.
-    # The image links /tmp to this directory on the shared, bounded tmpfs.
+    # Every temporary file remains on the shared bounded tmpfs.
     Path(ROOT, "processor-tmp").mkdir(mode=0o700, exist_ok=True)
     port = int(os.environ.get("DOCMIND_PREVIEW_PROCESSOR_PORT", "8090"))
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

@@ -86,7 +86,7 @@ def _searchable(mapping, version, job, run, document, project_id: str) -> bool:
     )
 
 
-def _index_status(job, *, searchable: bool) -> dict[str, Any]:
+def _index_status(job, *, searchable: bool, run=None) -> dict[str, Any]:
     """Describe ingestion separately from access to a previously active index."""
     state = job.lifecycle_state if job is not None else None
     cleanup_states = {job.cleanup_state, job.host_cleanup_state} if job is not None else set()
@@ -119,11 +119,14 @@ def _index_status(job, *, searchable: bool) -> dict[str, Any]:
         }
         if error_code not in allowed_errors:
             error_code = "DOCMIND_INGESTION_FAILED"
+    native_warnings = set(run.warnings or ()) if searchable and run is not None and run.parser_name == "pptx-native" else set()
     return {
         "index_state": index_state,
         "index_cleanup_state": cleanup,
         "index_error_code": error_code,
         "searchable": searchable,
+        "index_partial_coverage": "PPTX_NATIVE_PARTIAL_COVERAGE" in native_warnings,
+        "index_image_ocr_not_run": "IMAGE_OCR_NOT_RUN" in native_warnings,
     }
 
 
@@ -304,7 +307,7 @@ def load(tenant_id: str) -> SourceProjection | None:
             "type": "file",
             "document_id": mapping.document_id,
             "document_exists": document is not None,
-            **_index_status(latest_jobs.get(mapping.id), searchable=eligible),
+            **_index_status(latest_jobs.get(mapping.id), searchable=eligible, run=run),
         }
         nodes[parent_id]["child_count"] += 1
         if eligible:

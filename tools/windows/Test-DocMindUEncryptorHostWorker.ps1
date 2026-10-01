@@ -16,6 +16,12 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
 }
 
 try {
+    $ingestionClaim = [ordered]@{ worker_id = 'worker-test'; protocol_version = 1; lease_seconds = 300; skip_retries = $true; claim_source_id = 'dept-2-e2e'; allowed_formats = @('hwp') }
+    $previewClaim = Get-DocMindClaimRequestBody -Purpose preview -IngestionBody $ingestionClaim
+    Assert-True (($previewClaim.Keys | Sort-Object) -join ',' -eq 'lease_seconds,protocol_version,worker_id') 'Preview claim leaked ingestion-only filters.'
+    Assert-True ($previewClaim.worker_id -eq 'worker-test' -and $previewClaim.lease_seconds -eq 300) 'Preview claim identity or lease changed.'
+    $unchangedClaim = Get-DocMindClaimRequestBody -Purpose ingest -IngestionBody $ingestionClaim
+    Assert-True ($unchangedClaim.skip_retries -and $unchangedClaim.claim_source_id -eq 'dept-2-e2e') 'Preview changed ingestion claim policy.'
     $stateRoot = Join-Path $testRoot 'state-test'
     [IO.Directory]::CreateDirectory($stateRoot) | Out-Null
     Write-JobState -JobDirectory $stateRoot -Lease ([pscustomobject]@{

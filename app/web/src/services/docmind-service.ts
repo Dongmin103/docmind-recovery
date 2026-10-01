@@ -138,6 +138,8 @@ export interface DocMindHierarchyNode {
     | 'ACTION_REQUIRED';
   index_cleanup_state?: 'PENDING' | 'FAILED' | 'COMPLETE' | null;
   index_error_code?: string | null;
+  index_partial_coverage?: boolean;
+  index_image_ocr_not_run?: boolean;
   searchable?: boolean;
   semantic_folder_id?: string;
   mutation_capabilities?: {
