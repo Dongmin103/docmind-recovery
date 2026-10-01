@@ -1799,6 +1799,40 @@ class DocmindSource(DataBaseModel):
         indexes = ((('project_id', 'id'), True),)
 
 
+class DocmindSourceSyncSession(DataBaseModel):
+    """One durable fence per source; never prune epochs or sequence watermarks."""
+
+    source_id = CharField(max_length=64, primary_key=True)
+    worker_id = CharField(max_length=128, null=False)
+    owner_id = CharField(max_length=128, null=False)
+    epoch = BigIntegerField(default=1, null=False)
+    last_sequence = BigIntegerField(default=0, null=False)
+    lease_expires_at = DateTimeField(null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_sync_session"
+
+
+class DocmindSourceChangeReceipt(DataBaseModel):
+    """Durable result committed in the same transaction as document mutations."""
+
+    id = CharField(max_length=32, primary_key=True)
+    source_id = CharField(max_length=64, null=False)
+    epoch = BigIntegerField(null=False)
+    sequence = BigIntegerField(null=False)
+    request_id = CharField(max_length=128, null=False)
+    payload_sha256 = CharField(max_length=64, null=False)
+    result_json = LongTextField(null=False)
+    received_at = DateTimeField(null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_change_receipt"
+        indexes = (
+            (("source_id", "epoch", "request_id"), True),
+            (("source_id", "epoch", "sequence"), True),
+        )
+
+
 class DocmindSourceDocument(DataBaseModel):
     """Stable cloud-source identity; never stores a host physical root."""
 
