@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +32,7 @@ from common.docmind_source_path import (
     normalize_logical_relative_path,
 )
 from common.time_utils import current_timestamp
+from common.storage_attempt_audit import StorageAttemptAudit, stage_scope
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -1116,7 +1117,7 @@ def process_decrypted_artifact(
         raise
     receipt = receipt_holder[0]
 
-    def parse_and_activate(workspace: TemporaryParserWorkspace):
+    def run_and_activate(workspace: TemporaryParserWorkspace):
         if _now() >= deadline_at:
             raise DocmindIngestionError("DOCMIND_INGESTION_PIPELINE_TIMEOUT")
         staged = runner.run(
@@ -1131,13 +1132,14 @@ def process_decrypted_artifact(
         if _now() >= deadline_at:
             raise DocmindIngestionError("DOCMIND_INGESTION_PIPELINE_TIMEOUT")
         try:
-            activate_indexed_version(
-                job_id,
-                fencing_token=fencing_token,
-                result=staged.index,
-                expected_active_chunk_set_id=staged.expected_active_chunk_set_id,
-                activator=activator,
-            )
+            with stage_scope(storage, "activation", staged.index.parser_run_id):
+                activate_indexed_version(
+                    job_id,
+                    fencing_token=fencing_token,
+                    result=staged.index,
+                    expected_active_chunk_set_id=staged.expected_active_chunk_set_id,
+                    activator=activator,
+                )
         except Exception:
             discard = getattr(activator, "discard_staging", None)
             if callable(discard):
@@ -1152,8 +1154,13 @@ def process_decrypted_artifact(
             raise
         return staged
 
+    from common import settings
+
+    storage = getattr(settings, "STORAGE_IMPL", None)
+    audit = storage.attempt(job_id, fencing_token) if isinstance(storage, StorageAttemptAudit) else nullcontext()
     try:
-        adapter.consume(receipt, parse_and_activate)
+        with audit:
+            adapter.consume(receipt, run_and_activate)
     except Exception as error:
         code = getattr(error, "code", None)
         if code == "PARSER_PDF_PAGE_LIMIT_EXCEEDED" and max_pdf_pages is not None:
@@ -1340,11 +1347,12 @@ def record_worker_status(
     else:
         raise DocmindIngestionError("DOCMIND_INGESTION_STATUS_INVALID")
     preserve_pdf_cap = job.error_code == "DOCMIND_PDF_PAGE_CAP_EXCEEDED" and host_cleanup_state == "COMPLETE"
+    retain_failure_code = status in {"CLEANED", "COMPLETE"} and target != "COMPLETE" and error_code is None
     with DocmindIngestionJob._meta.database.atomic():
         changed = DocmindIngestionJob.update(
             lifecycle_state=target,
             host_cleanup_state=host_cleanup_state,
-            error_code=job.error_code if preserve_pdf_cap else error_code,
+            error_code=job.error_code if preserve_pdf_cap or retain_failure_code else error_code,
             error_message=job.error_message if preserve_pdf_cap else None,
             **_updates(),
         ).where(

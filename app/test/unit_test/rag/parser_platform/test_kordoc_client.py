@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from rag.parser_platform.kordoc_pilot import KordocPageLimitExceeded, parse_pilot_service
+from rag.parser_platform.kordoc_pilot import KordocPageLimitExceeded, KordocServiceError, parse_pilot_service
 
 
 class KordocClientTest(unittest.TestCase):
@@ -28,3 +28,14 @@ class KordocClientTest(unittest.TestCase):
                 )
         self.assertEqual(seen["max_pdf_pages"], 30)
         self.assertEqual(caught.exception.page_count, 31)
+
+    def test_invalid_input_code_is_preserved_without_service_details(self):
+        def fail(request, *, timeout):
+            body = io.BytesIO(b'{"code":"PARSER_INVALID_INPUT","detail":"private"}')
+            raise HTTPError(request.full_url, 400, "invalid", {}, body)
+
+        with patch("rag.parser_platform.kordoc_pilot.urllib.request.urlopen", side_effect=fail):
+            with self.assertRaises(KordocServiceError) as caught:
+                parse_pilot_service(b"synthetic", "pptx", service_url="http://kordoc-parser:8095")
+        self.assertEqual(caught.exception.code, "PARSER_INVALID_INPUT")
+        self.assertNotIn("private", str(caught.exception))

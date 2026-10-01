@@ -24,6 +24,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypeVar
 
+from common.storage_attempt_audit import job_stage_scope
+
 CleanupState = Literal["PENDING", "IN_PROGRESS", "COMPLETE", "CLEANUP_FAILED"]
 CleanupOutcome = Literal["SUCCESS", "FAILED", "CANCELED", "TIMEOUT", "REAPED"]
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -386,6 +388,12 @@ class EphemeralParserInputAdapter:
             return destination
 
     def _cleanup(self, directory: Path, manifest: _Manifest, outcome: CleanupOutcome) -> None:
+        from common import settings
+
+        with job_stage_scope(getattr(settings, "STORAGE_IMPL", None), "container_cleanup", manifest.job_id):
+            self._cleanup_impl(directory, manifest, outcome)
+
+    def _cleanup_impl(self, directory: Path, manifest: _Manifest, outcome: CleanupOutcome) -> None:
         with self._lock:
             state_error: Exception | None = None
             try:

@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import json
 import sys
 from datetime import timedelta
 from io import BytesIO
@@ -9,6 +10,8 @@ from types import SimpleNamespace
 import pytest
 from peewee import SqliteDatabase
 from pypdf import PdfWriter
+from common import settings
+from common.storage_attempt_audit import StorageAttemptAudit, job_stage_scope
 
 from api.db.db_models import (
     DocmindFolder,
@@ -872,6 +875,76 @@ def test_bounded_runner_consumes_token_activates_and_waits_for_host_cleanup(inge
         status="COMPLETE",
     )
     assert DocmindIngestionJob.get().lifecycle_state == "COMPLETE"
+
+
+def test_cloud_artifact_scopes_storage_attempt_audit_through_activation(ingestion_db, tmp_path, monkeypatch):
+    _, claim = _enqueue_and_claim()
+    plaintext = b"synthetic"
+
+    class Storage:
+        def get(self, bucket, name):
+            return b"synthetic"
+
+    monkeypatch.setattr(settings, "STORAGE_IMPL", StorageAttemptAudit(Storage(), tmp_path), raising=False)
+
+    class Adapter:
+        def accept(self, **_kwargs):
+            return service.ParserInputReceipt("ephemeral-1")
+
+        def consume(self, receipt, callback):
+            result = callback(SimpleNamespace(input_path=Path("synthetic.pdf")))
+            with job_stage_scope(settings.STORAGE_IMPL, "container_cleanup", claim.job_id):
+                pass
+            return result
+
+    class Runner:
+        def run(self, **_kwargs):
+            settings.STORAGE_IMPL.get("private-bucket", "private-name")
+            return service.ParserStageResult(service.IndexReadyResult("a" * 32, "b" * 32), None)
+
+    service.process_decrypted_artifact(
+        claim.job_id,
+        worker_id="windows-worker-1",
+        version_id=claim.version_id,
+        fencing_token=claim.fencing_token,
+        plaintext=plaintext,
+        plaintext_sha256=hashlib.sha256(plaintext).hexdigest(),
+        plaintext_size=len(plaintext),
+        adapter=Adapter(),
+        runner=Runner(),
+        activator=SimpleNamespace(activate=lambda **_kwargs: None),
+    )
+
+    reports = list(tmp_path.glob("*.json"))
+    assert len(reports) == 1
+    report = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert report["job_id"] == claim.job_id
+    assert report["methods"]["get"] == 1
+    assert [stage["name"] for stage in report["stages"]] == ["activation", "container_cleanup"]
+    assert "private" not in reports[0].read_text(encoding="utf-8")
+
+
+def test_host_cleanup_ack_retains_failed_job_error_code(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    DocmindIngestionJob.update(
+        lifecycle_state="FAILED",
+        cleanup_state="COMPLETE",
+        host_cleanup_state="PENDING",
+        error_code="PARSER_SOURCE_TYPE_MISMATCH",
+    ).where(DocmindIngestionJob.id == claim.job_id).execute()
+
+    service.record_worker_status(
+        claim.job_id,
+        worker_id="windows-worker-1",
+        version_id=claim.version_id,
+        fencing_token=claim.fencing_token,
+        status="COMPLETE",
+    )
+
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert job.lifecycle_state == "FAILED"
+    assert job.host_cleanup_state == "COMPLETE"
+    assert job.error_code == "PARSER_SOURCE_TYPE_MISMATCH"
 
 
 def test_pdf_page_cap_from_kordoc_preserves_page_count_after_host_cleanup(ingestion_db):

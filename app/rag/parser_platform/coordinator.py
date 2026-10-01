@@ -12,6 +12,7 @@ from rag.parser_platform.schemas import ParserRunStatus
 ALLOWED_TRANSITIONS = {
     ParserRunStatus.QUEUED: {
         ParserRunStatus.PARSING_KORDOC,
+        ParserRunStatus.PARSING_PPTX_NATIVE,
         ParserRunStatus.PARSING_SURYA,
         ParserRunStatus.PARSING_DOCLING,
         ParserRunStatus.PARSING_RHWP,
@@ -19,6 +20,7 @@ ALLOWED_TRANSITIONS = {
         ParserRunStatus.FAILED_TERMINAL,
     },
     ParserRunStatus.PARSING_KORDOC: {ParserRunStatus.NORMALIZING, ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL},
+    ParserRunStatus.PARSING_PPTX_NATIVE: {ParserRunStatus.NORMALIZING, ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL},
     ParserRunStatus.PARSING_SURYA: {ParserRunStatus.NORMALIZING, ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL},
     ParserRunStatus.PARSING_DOCLING: {
         ParserRunStatus.PARSING_SURYA,

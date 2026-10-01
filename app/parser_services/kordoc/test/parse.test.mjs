@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { compare, diffBlocks, markdownToHwpx } from 'kordoc';
+import { compare, diffBlocks, markdownToHwpx, parse } from 'kordoc';
 import { parseDocument } from '../src/parse.mjs';
 
 function payloadFor(source, sourceFormat) {
@@ -207,6 +207,37 @@ test('DOCX image OCR failure keeps its searchable body without an OCR warning', 
   assert.ok(result.blocks.some(block => block.text?.includes('Visible paragraph')));
   assert.deepEqual(result.image_ocr, []);
   assert.ok(!result.warnings.some(warning => String(warning.code).includes('OCR_FAILED')));
+});
+
+test('disabled OCR skips PDF and PPTX page OCR and DOCX image OCR', async () => {
+  const previous = process.env.KORDOC_OCR_ENABLED;
+  process.env.KORDOC_OCR_ENABLED = '0';
+  try {
+    const pdf = readFileSync(new URL('./fixtures/office-sample.pdf', import.meta.url));
+    const pptx = readFileSync(new URL('./fixtures/three-slides.pptx', import.meta.url));
+    const observed = [];
+    for (const [source, format] of [[pdf, 'pdf'], [pptx, 'pptx']]) {
+      await parseDocument(payloadFor(source, format), {
+        convertOfficeFn: async () => pdf,
+        parseFn: async (bytes, options) => {
+          observed.push({ format, ocr: options.ocr });
+          return parse(bytes, options);
+        },
+      });
+    }
+    assert.deepEqual(observed, [{ format: 'pdf', ocr: false }, { format: 'pptx', ocr: false }]);
+
+    const docx = readFileSync(new URL('./fixtures/image-ocr.docx', import.meta.url));
+    let imageOcrCalls = 0;
+    const result = await parseDocument(payloadFor(docx, 'docx'), {
+      parseImageFn: async () => { imageOcrCalls++; throw new Error('OCR should be disabled'); },
+    });
+    assert.equal(imageOcrCalls, 0);
+    assert.deepEqual(result.image_ocr, []);
+  } finally {
+    if (previous === undefined) delete process.env.KORDOC_OCR_ENABLED;
+    else process.env.KORDOC_OCR_ENABLED = previous;
+  }
 });
 
 test('scanned PDF uses local OCR with page geometry when models are provisioned', {

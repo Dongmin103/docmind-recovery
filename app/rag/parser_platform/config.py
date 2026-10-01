@@ -46,14 +46,17 @@ class ParserPlatformConfig:
     kordoc_pdf_enabled: bool = True
     kordoc_excel_enabled: bool = True
     kordoc_pptx_enabled: bool = True
+    pptx_native_enabled: bool = False
+    pptx_native_version: str = "1.0.0"
     kordoc_hwp_enabled: bool = True
+    pptx_text_fallback_enabled: bool = False
     kordoc_service_url: str = "http://kordoc-parser:8095"
     kordoc_deadline_seconds: int = 900
     kordoc_max_source_bytes: int = 64 * 1024 * 1024
     kordoc_parser_version: str = "4.15.7"
     kordoc_patch_revision: str = "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b"
     kordoc_ocr_model_revision: str = "kordoc-4.15.7-default"
-    kordoc_normalizer_revision: str = "docmind-kordoc-normalizer-v2"
+    kordoc_normalizer_revision: str = "docmind-kordoc-normalizer-v3"
     kordoc_chunker_revision: str = "docmind-kordoc-chunker-v2"
     libreoffice_converter_revision: str = "libreoffice-4:7.4.7-1+deb12u14"
     hwp_enabled: bool = True
@@ -84,7 +87,9 @@ class ParserPlatformConfig:
             kordoc_pdf_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_PDF_ENABLED", True),
             kordoc_excel_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_EXCEL_ENABLED", True),
             kordoc_pptx_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_PPTX_ENABLED", True),
+            pptx_native_enabled=_strict_bool(source, "PARSER_PLATFORM_PPTX_NATIVE_ENABLED", False),
             kordoc_hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_KORDOC_HWP_ENABLED", True),
+            pptx_text_fallback_enabled=_strict_bool(source, "PARSER_PLATFORM_PPTX_TEXT_FALLBACK_ENABLED", False),
             kordoc_service_url=source.get(
                 "PARSER_PLATFORM_KORDOC_URL", "http://kordoc-parser:8095"
             ).rstrip("/"),
@@ -93,7 +98,7 @@ class ParserPlatformConfig:
             kordoc_parser_version=source.get("PARSER_PLATFORM_KORDOC_PARSER_VERSION", "4.15.7").strip(),
             kordoc_patch_revision=source.get("PARSER_PLATFORM_KORDOC_PATCH_REVISION", "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b").strip(),
             kordoc_ocr_model_revision=source.get("PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION", "kordoc-4.15.7-default").strip(),
-            kordoc_normalizer_revision=source.get("PARSER_PLATFORM_KORDOC_NORMALIZER_REVISION", "docmind-kordoc-normalizer-v2").strip(),
+            kordoc_normalizer_revision=source.get("PARSER_PLATFORM_KORDOC_NORMALIZER_REVISION", "docmind-kordoc-normalizer-v3").strip(),
             kordoc_chunker_revision=source.get("PARSER_PLATFORM_KORDOC_CHUNKER_REVISION", "docmind-kordoc-chunker-v2").strip(),
             libreoffice_converter_revision=source.get("PARSER_PLATFORM_LIBREOFFICE_CONVERTER_REVISION", "libreoffice-4:7.4.7-1+deb12u14").strip(),
             hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_HWP_ENABLED", True),
@@ -127,7 +132,7 @@ class ParserPlatformConfig:
         if source_format in {"xls", "xlsx"}:
             return self.office_enabled and self.kordoc_excel_enabled
         if source_format == "pptx":
-            return self.office_enabled and self.kordoc_pptx_enabled
+            return self.office_enabled and (self.pptx_native_enabled or self.kordoc_pptx_enabled)
         if source_format in {"hwp", "hwpx"}:
             return self.hwp_enabled and self.kordoc_hwp_enabled
         return False
@@ -170,6 +175,15 @@ class ParserPlatformConfig:
             })
         if source_format == "pdf":
             settings["max_pdf_pages"] = self.max_pdf_pages
-        if source_format in {"doc", "pptx"}:
+            settings["geometry_policy"] = "page-with-optional-bbox-v1"
+        if source_format == "doc" or (source_format == "pptx" and not self.pptx_native_enabled):
             settings["converter_revision"] = self.libreoffice_converter_revision
+        if source_format == "pptx":
+            if self.pptx_native_enabled:
+                settings.update(parser_name="pptx-native", parser_version=self.pptx_native_version,
+                                image_ocr="disabled", native_coverage_policy="fail-incomplete-v1")
+                for key in ("patch_revision", "ocr_model_revision", "normalizer_revision", "chunker_revision"):
+                    settings.pop(key)
+            else:
+                settings["text_fallback_enabled"] = self.pptx_text_fallback_enabled
         return canonical_sha256(settings)

@@ -1,0 +1,40 @@
+# Explicit, temporary real-input test boundary for the encrypted DEPT2 source.
+# Apply only with the matching host policy and a worker scoped to dept-2-e2e.
+services:
+  ragflow-cpu:
+    environment:
+      DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS: "120"
+      # Distinguish OCR-free parser runs from earlier DEPT2 attempts.
+      PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION: "disabled-for-dept2-reindex"
+      PARSER_PLATFORM_PPTX_TEXT_FALLBACK_ENABLED: "1"
+
+  kordoc-parser:
+    environment:
+      # Remaining DEPT2 documents are parsed without page or embedded-image OCR.
+      KORDOC_OCR_ENABLED: "0"
+      KORDOC_REQUIRE_OCR: "0"
+
+  security-gate:
+    environment:
+      DOCMIND_DEV_APPROVED_SOURCE_ID: ${DOCMIND_DEV_APPROVED_SOURCE_ID:?Set approved source ID}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        fail() { echo "Windows DEPT2 reindex gate failed: $$1" >&2; exit 1; }
+        [ "$$DOCMIND_DEV_SECURITY_MODE" = "isolated-approved-dept2-reindex" ] || fail "unsupported security mode"
+        [ "$$DOCMIND_DEV_DATA_CLASS" = "approved-dept2-reindex" ] || fail "unsupported data class"
+        [ "$$DOCMIND_DEV_APPROVED_SOURCE_ID" = "dept-2-e2e" ] || fail "unsupported source"
+        [ "$$DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK" = "1" ] || fail "loopback transport boundary was not acknowledged"
+        [ "$$DOCMIND_DEV_EXTERNAL_API_POLICY" = "https-only" ] || fail "external API policy must be https-only"
+        check_secret() {
+          value="$$1"; name="$$2"
+          [ "$${#value}" -ge 32 ] || fail "$$name is missing or too short"
+          case "$$value" in GENERATED_LOCALLY|CHANGE_ME*|*PLACEHOLDER*) fail "$$name still contains a placeholder" ;; esac
+        }
+        check_secret "$$MYSQL_PASSWORD" MYSQL_PASSWORD
+        check_secret "$$ELASTIC_PASSWORD" ELASTIC_PASSWORD
+        check_secret "$$REDIS_PASSWORD" REDIS_PASSWORD
+        check_secret "$$MINIO_PASSWORD" MINIO_PASSWORD
+        [ "$${#MINIO_USER}" -ge 16 ] || fail "MINIO_USER is missing or too short"
+        echo "Windows DEPT2 reindex boundary validated (no secrets logged)."

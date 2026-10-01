@@ -38,6 +38,7 @@ from rag.llm.embedding_model import (
     DEFAULT_MAX_TOKENS,
     BedrockEmbed,
     EmbeddingError,
+    HuggingFaceEmbed,
     LocalAIEmbed,
     MistralEmbed,
     NvidiaEmbed,
@@ -47,6 +48,17 @@ from rag.llm.embedding_model import (
 )
 from common.exceptions import ModelException
 from common.token_utils import num_tokens_from_string
+
+
+def test_local_tei_embedding_uses_configured_read_timeout(monkeypatch):
+    monkeypatch.setenv("DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS", "120")
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = [[0.1, 0.2]]
+    model = HuggingFaceEmbed("unused", "BAAI/bge-m3", base_url="http://bge-m3-cpu:80")
+    with patch("rag.llm.embedding_model.requests.post", return_value=response) as post:
+        model.encode(["small test"])
+    assert post.call_args.kwargs["timeout"] == 120
 
 
 # --------------------------------------------------------------------------- #

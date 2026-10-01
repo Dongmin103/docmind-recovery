@@ -58,7 +58,10 @@ class CommonToStandardChunkAdapter:
                 continue
             attachment_texts = [item.text for item in attachments_by_parent.get(block.stable_block_id, []) if item.text]
             searchable_table_html = None if block.diagnostics.get("display_html_only") else block.table_html
-            content_parts = [part for part in (block.text, searchable_table_html, *attachment_texts) if part]
+            searchable_text = block.text
+            if searchable_table_html and block.diagnostics.get("table_html_contains_text"):
+                searchable_text = None
+            content_parts = [part for part in (searchable_text, searchable_table_html, *attachment_texts) if part]
             if not content_parts:
                 continue
             metadata = {
@@ -97,13 +100,17 @@ class CommonToStandardChunkAdapter:
                 "metadata": metadata,
             }
             positions = []
+            pdf_pages = []
             for provenance in block.provenance:
                 if isinstance(provenance, PdfProvenance):
-                    left, top, right, bottom = provenance.bbox
-                    positions.append((provenance.page, round(left), round(right), round(top), round(bottom)))
+                    pdf_pages.append(provenance.page)
+                    if provenance.bbox is not None:
+                        left, top, right, bottom = provenance.bbox
+                        positions.append((provenance.page, round(left), round(right), round(top), round(bottom)))
+            if pdf_pages:
+                chunk["page_num_int"] = sorted(set(pdf_pages))
             if positions:
                 chunk["position_int"] = positions
-                chunk["page_num_int"] = sorted({position[0] for position in positions})
                 chunk["top_int"] = [position[3] for position in positions]
             chunks.append(chunk)
         return chunks

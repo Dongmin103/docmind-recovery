@@ -127,6 +127,16 @@ def test_staging_tagger_applies_run_identity_to_main_mother_and_derived_chunks()
     assert conflict.value.code == "CHUNK_SET_STAGING_IDENTITY_MISMATCH"
 
 
+def test_cloud_staging_chunk_ids_are_stable_within_set_and_distinct_across_sets() -> None:
+    source = [{"id": "same-source-chunk", "doc_id": "doc", "content_with_weight": "synthetic"}]
+    first = StagingChunkTagger.tag(source, document_id="doc", parse_run_id="run-1", chunk_set_id="set-1", isolate_ids=True)
+    repeat = StagingChunkTagger.tag(source, document_id="doc", parse_run_id="run-1", chunk_set_id="set-1", isolate_ids=True)
+    next_set = StagingChunkTagger.tag(source, document_id="doc", parse_run_id="run-2", chunk_set_id="set-2", isolate_ids=True)
+    assert first[0]["id"] == repeat[0]["id"]
+    assert first[0]["id"] != next_set[0]["id"]
+    assert source[0]["id"] == "same-source-chunk"
+
+
 @pytest.mark.parametrize(
     "updates",
     [

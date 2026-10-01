@@ -15,6 +15,7 @@ from rag.parser_platform.schemas import ParserRunStatus, SourceFormat
 REUSABLE_LIFECYCLES = {
     "QUEUED",
     "PARSING_KORDOC",
+    "PARSING_PPTX_NATIVE",
     "PARSING_SURYA",
     "PARSING_DOCLING",
     "PARSING_RHWP",
@@ -89,10 +90,12 @@ class ParserRunService:
             ),
             document_id=document["id"],
         )
-        if selection.engine != "kordoc" or selection.engine != record.parser_name:
+        if selection.engine != record.parser_name:
             raise ValueError("parser run engine selection changed")
-        if (record.parser_version != runtime.kordoc_parser_version
-                or record.model_version is not None or record.backend != "kordoc-offline"):
+        expected_version = runtime.pptx_native_version if selection.engine == "pptx-native" else runtime.kordoc_parser_version
+        expected_backend = "pptx-native-offline" if selection.engine == "pptx-native" else "kordoc-offline"
+        if (record.parser_version != expected_version
+                or record.model_version is not None or record.backend != expected_backend):
             raise ValueError("parser run parser runtime identity changed")
         prepared = PreparedParserRun(
             parse_run_id=record.id,
@@ -341,13 +344,15 @@ class ParserRunService:
             sniffed_mime=mime,
         )
         selection = coordinator.dispatcher.select(source, document_id=document["id"])
+        parser_version = runtime.pptx_native_version if selection.engine == "pptx-native" else runtime.kordoc_parser_version
+        backend = "pptx-native-offline" if selection.engine == "pptx-native" else "kordoc-offline"
         base_request = ParserRunRequest(
             document_id=document["id"],
             source_hash=source_hash,
             source=source,
-            parser_version=runtime.kordoc_parser_version,
+            parser_version=parser_version,
             model_version=None,
-            backend="kordoc-offline",
+            backend=backend,
             chunking_config=dict(chunking_config or {}),
         )
         return cls._reuse_or_create_run(

@@ -34,6 +34,7 @@ from typing import Any, Dict, List
 
 import xxhash
 from common import settings
+from common.storage_attempt_audit import stage_scope
 from common.connection_utils import timeout
 from common.constants import PAGERANK_FLD, TAG_FLD
 from common.misc_utils import thread_pool_exec
@@ -113,12 +114,16 @@ async def chunk_parser_platform_document(document, *, config, parser_config: dic
     """Route normalized parser results through their format's chunk policy."""
     from rag.parser_platform.office_chunker import OfficeChunker
 
-    if document.parser_name != "kordoc":
-        raise ValueError("search parser must be Kordoc")
-    return await asyncio.to_thread(
-        OfficeChunker().chunk, document,
-        parser_config=parser_config, source_bytes=source_bytes,
-    )
+    if document.parser_name != "kordoc" and not (
+        document.parser_name == "pptx-native" and document.source_format.value == "pptx"
+        and config.pptx_native_enabled and document.diagnostics.get("native_coverage_complete") is True
+    ):
+        raise ValueError("search parser identity or coverage mismatch")
+    with stage_scope(getattr(settings, "STORAGE_IMPL", None), "chunk", document.parse_run_id):
+        return await asyncio.to_thread(
+            OfficeChunker().chunk, document,
+            parser_config=parser_config, source_bytes=source_bytes,
+        )
 
 
 class ChunkService:
@@ -201,6 +206,7 @@ class ChunkService:
             def parser_progress(phase: str, details: dict) -> None:
                 lifecycle = {
                     "PARSING_KORDOC": "PARSING_KORDOC",
+                    "PARSING_PPTX_NATIVE": "PARSING_PPTX_NATIVE",
                     "NORMALIZING": "NORMALIZING",
                 }.get(phase)
                 if lifecycle:
@@ -432,12 +438,16 @@ class ChunkService:
                 document_id=self._task_context.doc_id,
                 parse_run_id=self._task_context.parse_run_id,
                 chunk_set_id=self._task_context.chunk_set_id,
+                isolate_ids=getattr(self._task_context, "_docmind_ephemeral_workspace", None) is not None,
             )
 
         self._apply_document_availability(chunks)
 
         # Create mother chunks (summary chunks)
-        mothers = self._create_mother_chunks(chunks)
+        cloud_workspace = getattr(self._task_context, "_docmind_ephemeral_workspace", None)
+        mothers = self._create_mother_chunks(
+            chunks, chunk_set_id=self._task_context.chunk_set_id if cloud_workspace is not None else None,
+        )
 
         # Insert mother chunks
         if not await self._insert_mother_chunks(task_id, task_tenant_id, task_dataset_id, mothers, doc_bulk_size):
@@ -467,7 +477,7 @@ class ChunkService:
             )
 
     @classmethod
-    def _create_mother_chunks(cls, chunks: List[Dict]) -> List[Dict]:
+    def _create_mother_chunks(cls, chunks: List[Dict], *, chunk_set_id: str | None = None) -> List[Dict]:
         """Create mother chunks from summary fields.
 
         Mother chunks are summary/abstract chunks that are stored separately.
@@ -481,6 +491,12 @@ class ChunkService:
                 continue
 
             mom_id = xxhash.xxh64(mom.encode("utf-8")).hexdigest()
+            if chunk_set_id is not None:
+                mom_id = make_chunk_id(
+                    "cloud_mother_chunk_set", ck.get("doc_id"),
+                    source_chunk_uid=mom_id,
+                    extra={"chunk_set_id": chunk_set_id},
+                )
             ck["mom_id"] = mom_id
 
             if mom_id in mother_ids:
@@ -646,9 +662,19 @@ class ChunkService:
         chunk_ids: List[str],
     ):
         """Roll back an insertion by deleting chunks and images."""
-        await self._intercept_doc_store_delete({"id": chunk_ids}, search.index_name(task_tenant_id), task_dataset_id)
+        index_name = search.index_name(task_tenant_id)
+        cloud_workspace = getattr(self._task_context, "_docmind_ephemeral_workspace", None)
+        if cloud_workspace is not None:
+            refresh_idx = getattr(settings.docStoreConn, "refresh_idx", None)
+            if callable(refresh_idx) and await thread_pool_exec(refresh_idx, index_name) is False:
+                raise RuntimeError("cloud staging refresh failed before rollback")
+        await self._intercept_doc_store_delete({"id": chunk_ids}, index_name, task_dataset_id)
 
-        # Delete associated images
+        # Cloud source chunks never persist images in object storage.
+        if cloud_workspace is not None:
+            return
+
+        # Delete associated images for ordinary tasks.
         tasks = []
         for chunk_id in chunk_ids:
             tasks.append(asyncio.create_task(self._delete_image(task_dataset_id, chunk_id)))

@@ -245,13 +245,17 @@ class ProductionTemporaryParserInputRunner:
             raise DocmindIngestionError("DOCMIND_INGESTION_DATASET_MISSING")
         cleanup_error = None
         try:
+            index_name = _index_name(knowledgebase.tenant_id)
+            refresh_idx = getattr(settings.docStoreConn, "refresh_idx", None)
+            if callable(refresh_idx) and refresh_idx(index_name) is False:
+                raise RuntimeError("cloud staging refresh failed before cleanup")
             settings.docStoreConn.delete(
                 {
                     "doc_id": document.id,
                     "parse_run_id": parse_run_id,
                     "chunk_set_id": chunk_set_id,
                 },
-                _index_name(knowledgebase.tenant_id),
+                index_name,
                 document.kb_id,
             )
         except Exception as error:  # noqa: BLE001 -- report either cleanup boundary failure

@@ -150,6 +150,90 @@ def test_merged_placeholder_with_content_is_rejected() -> None:
         _normalize(result, source)
 
 
+@pytest.mark.parametrize("source_format", ["hwp", "hwpx"])
+def test_hwp_table_embeds_cells_once_and_preserves_display_and_location(source_format: str) -> None:
+    from rag.svr.task_executor_refactor.embedding_utils import EmbeddingUtils
+
+    source = b"synthetic-hwp-table"
+    result = _result(source, source_format, [{
+        "type": "table", "pageNumber": 3,
+        "table": {"rows": 3, "cols": 2, "cells": [
+            [{"text": "Merged & <table>", "rowSpan": 2}, {"text": "Value"}],
+            [None, {"text": "flattened duplicate", "blocks": [
+                {"type": "paragraph", "text": "Alpha"},
+                {"type": "paragraph", "text": "Beta"},
+            ]}],
+            [{"text": "Final", "colSpan": 2}, None],
+        ]},
+    }])
+    result["metadata"] = {"pageCount": 3, "pageMode": "layout"}
+
+    document = _normalize(result, source)
+    chunks = chunk_pilot_document(document, source_bytes=source, parser_config={"chunk_token_num": 1})
+
+    # The atomic table remains one chunk, even above the token budget.
+    assert len(chunks) == 1
+    expected_html = (
+        '<table><tr><td rowspan="2">Merged &amp; &lt;table&gt;</td><td>Value</td></tr>'
+        '<tr><td>Alpha<br>Beta</td></tr><tr><td colspan="2">Final</td></tr></table>'
+    )
+    assert document.blocks[0].text == "Merged & <table>\tValue\n\tAlpha\nBeta\nFinal\t"
+    assert chunks[0]["content_with_weight"] == expected_html
+    embedding_input = EmbeddingUtils.prepare_texts_for_embedding(chunks)[1][0]
+    assert embedding_input.count("Alpha") == 1
+    assert embedding_input.count("Beta") == 1
+    assert "&lt;table&gt;" in embedding_input
+    metadata = chunks[0]["metadata"]["parser_platform"]
+    assert metadata["hwp_locator"]["page"] == 3
+    assert metadata["hwp_locator"]["block_locator"] == "kordoc-ir-v1/block/0"
+    assert metadata["source_item_ids"] == ["kordoc-ir-v1/block/0"]
+    assert metadata["stable_block_ids"] == [document.blocks[0].stable_block_id]
+    from rag.parser_platform.search_fields import prepare_parser_platform_standard_chunks
+
+    prepare_parser_platform_standard_chunks(chunks, document_name="synthetic.hwp", language="English")
+    assert "tabl" in chunks[0]["content_ltks"].split()
+
+
+@pytest.mark.parametrize("source_format", ["hwp", "hwpx"])
+def test_hwp_identical_source_tables_remain_distinct_searchable_chunks(source_format: str) -> None:
+    source = b"synthetic-repeated-hwp-tables"
+    table = {"type": "table", "table": {"rows": 1, "cols": 1, "cells": [[{"text": "Repeated value"}]]}}
+    document = _normalize(_result(source, source_format, [table, table]), source)
+    chunks = chunk_pilot_document(document, source_bytes=source)
+
+    assert [chunk["content_with_weight"] for chunk in chunks] == [
+        "<table><tr><td>Repeated value</td></tr></table>",
+        "<table><tr><td>Repeated value</td></tr></table>",
+    ]
+    assert [chunk["metadata"]["parser_platform"]["source_item_ids"] for chunk in chunks] == [
+        ["kordoc-ir-v1/block/0"], ["kordoc-ir-v1/block/1"],
+    ]
+    assert len({chunk["metadata"]["parser_platform"]["stable_block_id"] for chunk in chunks}) == 2
+
+
+@pytest.mark.parametrize("source_format", ["hwp", "hwpx"])
+def test_hwp_table_uri_cell_survives_ephemeral_cleanup_filter(source_format: str, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from rag.parser_platform.ephemeral_metadata import sanitize_ephemeral_chunk
+
+    source = b"synthetic-hwp-uri-table"
+    result = _result(source, source_format, [{
+        "type": "table", "table": {"rows": 1, "cols": 1, "cells": [[{
+            "text": "Use s3://bucket/key and artifact://example as literal cell text",
+        }]]},
+    }])
+    document = _normalize(result, source)
+    chunks = chunk_pilot_document(document, source_bytes=source)
+    sanitized = sanitize_ephemeral_chunk(chunks[0], SimpleNamespace(derived_root=tmp_path))
+
+    assert sanitized["content_with_weight"] == (
+        "<table><tr><td>Use s3://bucket/key and artifact://example as literal cell text</td></tr></table>"
+    )
+    assert "raw_artifact_ref" not in sanitized["metadata"]["parser_platform"]
+    assert sanitized["metadata"]["parser_platform"]["hwp_locator"]["block_locator"] == "kordoc-ir-v1/block/0"
+
+
 def test_hwp_uses_kordoc_blocks_without_rhwp_parser() -> None:
     source = b"synthetic-hwp-source"
     result = _result(source, "hwp", [
@@ -270,6 +354,43 @@ def test_pdf_uses_response_pages_without_reopening_source() -> None:
     }])
     document = _normalize(result, source)
     assert document.blocks[0].provenance[0].bbox == (20, 800, 110, 812)
+
+
+@pytest.mark.parametrize("bbox", [None, {"page": 1, "x": 20, "y": 850, "width": 90, "height": 12}])
+def test_pdf_keeps_text_and_page_when_geometry_unreliable(bbox) -> None:
+    source = b"synthetic-pdf-rotated"
+    result = _result(source, "pdf", [
+        {"type": "paragraph", "text": "known position", "pageNumber": 1,
+         "bbox": {"page": 1, "x": 20, "y": 30, "width": 90, "height": 12}},
+        {"type": "paragraph", "text": "rotated text", "pageNumber": 1, "bbox": bbox},
+    ])
+    document = _normalize(result, source)
+    assert document.blocks[1].provenance[0].page == 1
+    assert document.blocks[1].provenance[0].bbox is None
+    assert "PDF_GEOMETRY_OMITTED" in document.warnings
+    chunks = chunk_pilot_document(document, source_bytes=source, parser_config={"chunk_token_num": 128})
+    assert any("rotated text" in chunk["content_with_weight"] for chunk in chunks)
+    assert all(chunk["page_num_int"] == [1] for chunk in chunks)
+    assert all("position_int" not in chunk and "top_int" not in chunk for chunk in chunks
+               if "rotated text" in chunk["content_with_weight"])
+
+
+@pytest.mark.parametrize("page,bbox_page", [(2, 2), (1, 2), (None, 1)])
+def test_pdf_rejects_unreliable_page_identity(page, bbox_page) -> None:
+    source = b"synthetic-pdf"
+    result = _result(source, "pdf", [{"type": "paragraph", "text": "body", "pageNumber": page,
+                                       "bbox": {"page": bbox_page, "x": 1, "y": 1,
+                                                "width": 10, "height": 10}}])
+    with pytest.raises(ValueError, match="page"):
+        _normalize(result, source)
+
+
+def test_pdf_rejects_partial_ocr_warning_even_with_searchable_text() -> None:
+    source = b"synthetic-pdf"
+    result = _result(source, "pdf", [{"type": "paragraph", "text": "body", "pageNumber": 1}])
+    result["warnings"] = [{"code": "OCR_PARTIAL"}]
+    with pytest.raises(ValueError, match="OCR"):
+        _normalize(result, source)
 
 
 @pytest.mark.parametrize("pages", [[], [{"page": 2, "width": 595, "height": 842,

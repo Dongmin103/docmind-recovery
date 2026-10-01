@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$EnvironmentPath,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$ApprovedDept2Reindex
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,10 +20,13 @@ if (-not (Test-Path -LiteralPath $resolvedEnvironment -PathType Leaf)) {
 }
 
 $requiredPolicy = [ordered]@{
-    DOCMIND_DEV_SECURITY_MODE = 'isolated-synthetic-only'
-    DOCMIND_DEV_DATA_CLASS = 'synthetic-only'
+    DOCMIND_DEV_SECURITY_MODE = $(if ($ApprovedDept2Reindex) { 'isolated-approved-dept2-reindex' } else { 'isolated-synthetic-only' })
+    DOCMIND_DEV_DATA_CLASS = $(if ($ApprovedDept2Reindex) { 'approved-dept2-reindex' } else { 'synthetic-only' })
     DOCMIND_DEV_ALLOW_PLAINTEXT_LOOPBACK = '1'
     DOCMIND_DEV_EXTERNAL_API_POLICY = 'https-only'
+}
+if ($ApprovedDept2Reindex) {
+    $requiredPolicy.DOCMIND_DEV_APPROVED_SOURCE_ID = 'dept-2-e2e'
 }
 $lines = [Collections.Generic.List[string]]::new()
 foreach ($line in [IO.File]::ReadAllLines($resolvedEnvironment)) {
@@ -46,7 +50,7 @@ foreach ($entry in $requiredPolicy.GetEnumerator()) {
     $current = $lines[$matchingIndexes[0]].Substring($entry.Key.Length + 1)
     if ($current -ne $entry.Value) {
         if (-not $Force) {
-            throw "Refusing to replace unsupported $($entry.Key). Re-run with -Force to restore the synthetic-only boundary."
+            throw "Refusing to replace $($entry.Key). Re-run with -Force to apply the selected boundary."
         }
         $lines[$matchingIndexes[0]] = "$($entry.Key)=$($entry.Value)"
     }
@@ -67,6 +71,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to restrict the local environment ACL: $aclOutput"
 }
 
-Write-Output "Applied the synthetic-only security boundary to: $resolvedEnvironment"
+Write-Output "Applied the $(if ($ApprovedDept2Reindex) { 'approved DEPT2 reindex' } else { 'synthetic-only' }) security boundary to: $resolvedEnvironment"
 Write-Output 'Restricted the local environment ACL to the current Windows identity and LocalSystem.'
 Write-Output 'No certificate or production encryption claim was created.'

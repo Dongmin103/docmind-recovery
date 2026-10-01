@@ -472,6 +472,12 @@ def init_settings():
     else:
         STORAGE_IMPL = storage_impl
 
+    audit_root = os.getenv("DOCMIND_STORAGE_AUDIT_ROOT")
+    if audit_root:
+        from common.storage_attempt_audit import StorageAttemptAudit
+
+        STORAGE_IMPL = StorageAttemptAudit(STORAGE_IMPL, audit_root)
+
     global retriever, kg_retriever
     retriever = search.Dealer(docStoreConn)
     from rag.graphrag import search as kg_search

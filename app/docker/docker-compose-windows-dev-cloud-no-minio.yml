@@ -1,0 +1,33 @@
+# Optional cloud-source validation overlay. Keep the ordinary storage service
+# definition and its existing data volume intact for normal file upload use.
+services:
+  minio:
+    profiles: !override [storage-only]
+
+  redis:
+    volumes: !override
+      - redis_benchmark_data:/data
+
+  ragflow-cpu:
+    environment:
+      DOCMIND_STORAGE_AUDIT_ROOT: /run/docmind-storage-audit
+    volumes:
+      - type: bind
+        source: ${DOCMIND_STORAGE_AUDIT_HOST_DIR:-../../.local/kordoc-t-drive-cutover/storage-audit}
+        target: /run/docmind-storage-audit
+    depends_on: !override
+      model-secret-gate:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      es01:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      bge-m3-cpu:
+        condition: service_healthy
+      kordoc-parser:
+        condition: service_healthy
+
+volumes:
+  redis_benchmark_data:
