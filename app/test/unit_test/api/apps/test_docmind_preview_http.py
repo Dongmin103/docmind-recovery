@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -87,6 +88,32 @@ async def test_content_rejects_missing_preview_token(routes):
         assert response.status_code == 403
         assert response.headers["Cache-Control"] == "no-store"
         assert (await response.get_json())["error"] == "PREVIEW_TOKEN_INVALID"
+
+
+async def test_cancel_during_acquisition_releases_eventual_reader(routes):
+    app, namespace, service, _path, _calls = routes
+    entered, finish = threading.Event(), threading.Event()
+    acquire = service.acquire_file
+
+    def blocked(*args):
+        entered.set()
+        assert finish.wait(5)
+        return acquire(*args)
+
+    service.acquire_file = blocked
+    async with app.test_request_context("/content", headers={"X-DocMind-Preview-Token": "secret"}):
+        task = asyncio.create_task(namespace["_preview_binary"]("session"))
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        for _ in range(100):
+            if service.released:
+                break
+            await asyncio.sleep(0.01)
+    assert service.released == ["session"]
+    assert all(stream.closed for stream in service.opened)
 
 
 async def test_create_rejects_client_paths_before_service_call(routes):

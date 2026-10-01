@@ -14,6 +14,18 @@ function ConvertTo-DocMindHex {
     return ([BitConverter]::ToString($Bytes) -replace '-', '').ToLowerInvariant()
 }
 
+function Get-DocMindClaimRequestBody {
+    param([ValidateSet('ingest', 'preview')][string]$Purpose, [Collections.IDictionary]$IngestionBody)
+    if ($Purpose -eq 'ingest') { return $IngestionBody }
+    # Preview has its own admission queue. Ingestion-only filters are not part
+    # of its signed API contract; retain the original ingestion request intact.
+    return [ordered]@{
+        worker_id = $IngestionBody.worker_id
+        protocol_version = $IngestionBody.protocol_version
+        lease_seconds = $IngestionBody.lease_seconds
+    }
+}
+
 function Get-DocMindBytesSha256 {
     param([Parameter(Mandatory = $true)][byte[]]$Bytes)
     $sha = [Security.Cryptography.SHA256]::Create()

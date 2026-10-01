@@ -22,7 +22,10 @@ def main() -> int:
         if page < 1 or page > count:
             return 3
         svg = document.render_svg(page - 1)
-        Path(raw_path).write_bytes(svg.encode("utf-8"))
+        encoded = svg.encode("utf-8")
+        if len(encoded) > 16 * 1024 * 1024:
+            return 4
+        Path(raw_path).write_bytes(encoded)
         Path(metadata_path).write_text(json.dumps({"page_count": count}), encoding="utf-8")
         return 0
     finally:

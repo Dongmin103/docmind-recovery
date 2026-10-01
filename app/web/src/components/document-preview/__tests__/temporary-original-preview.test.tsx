@@ -15,7 +15,7 @@ const ReadySession = {
   preview_id: 'preview-1',
   preview_token: 'session-secret',
   status: 'READY',
-  source_format: 'doc',
+  source_format: 'docx',
   display_format: 'docx',
   viewer_kind: 'word',
   source_version_id: 'source-v1',
@@ -52,6 +52,25 @@ describe('temporary original preview', () => {
       configurable: true,
       value: revoke,
     });
+  });
+
+  it.each(['doc', 'ppt'])('does not request unsupported %s previews', (sourceFormat) => {
+    render(<TemporaryOriginalPreview documentId="d" sourceVersionId="v" chunkSetId="c" sourceFormat={sourceFormat} />);
+    expect(screen.getByText('이 형식은 원문 미리보기를 지원하지 않습니다.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '원문 보기' })).not.toBeInTheDocument();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['PREVIEW_DISABLED', 503, '원문 미리보기 기능이 비활성화되어 있습니다.'],
+    ['PREVIEW_QUEUE_FULL', 429, '미리보기 대기열이 가득 찼습니다. 잠시 후 다시 시도해 주세요.'],
+    ['PREVIEW_QUEUE_TIMEOUT', 410, '미리보기 대기 시간이 120초를 초과했습니다. 다시 시도해 주세요.'],
+    ['PREVIEW_PROCESS_TIMEOUT', 504, '페이지 준비 시간이 60초를 초과했습니다.'],
+  ])('explains %s without calling it general overload', async (code, status, message) => {
+    mockFetch.mockResolvedValue(response(status as number, { error: code }));
+    render(<TemporaryOriginalPreview documentId="d" sourceVersionId="v" chunkSetId="c" />);
+    fireEvent.click(screen.getByRole('button', { name: '원문 보기' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(message as string));
   });
 
   it('starts only after a click, supplies both tokens, and closes on unmount', async () => {

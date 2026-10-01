@@ -516,11 +516,26 @@ async def heartbeat_preview(preview_id: str):
 async def _preview_binary(preview_id: str, page: int | None = None):
     source = None
     handed_off = False
-    try:
-        source, display_format = await asyncio.to_thread(
-            _preview_db, docmind_preview_service.acquire_file,
-            preview_id, str(current_user.id), _preview_header_token(), page,
+    acquisition = asyncio.create_task(asyncio.to_thread(
+        _preview_db, docmind_preview_service.acquire_file,
+        preview_id, str(current_user.id), _preview_header_token(), page,
+    ))
+
+    def discard_acquisition(future):
+        # The native renderer continues after a browser disconnect. Release its
+        # eventual file even if the disconnected request is cancelled again.
+        try:
+            orphan, _ = future.result()
+        except (Exception, asyncio.CancelledError):  # noqa: BLE001 - failed acquisition owns cleanup
+            return  # acquire_file releases its own reservation on failure.
+        orphan.close()
+        released = asyncio.get_running_loop().run_in_executor(
+            None, _preview_db, docmind_preview_service.release_file, preview_id,
         )
+        released.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+
+    try:
+        source, display_format = await asyncio.shield(acquisition)
         size = os.fstat(source.fileno()).st_size
         start, end = 0, size - 1
         status_code = 200
@@ -585,6 +600,13 @@ async def _preview_binary(preview_id: str, page: int | None = None):
             response.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
         handed_off = True
         return response
+    except asyncio.CancelledError:
+        if source is None:
+            acquisition.add_done_callback(discard_acquisition)
+        elif not handed_off:
+            source.close()
+            await asyncio.shield(asyncio.to_thread(_preview_db, docmind_preview_service.release_file, preview_id))
+        raise
     except docmind_preview_service.PreviewError as error:
         if source is not None and not handed_off:
             source.close()

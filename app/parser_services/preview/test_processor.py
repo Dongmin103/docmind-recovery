@@ -39,21 +39,20 @@ class ProcessorTest(unittest.TestCase):
         self.root_patch.start()
         self.addCleanup(self.root_patch.stop)
 
-    def test_direct_formats_return_original_without_conversion(self) -> None:
-        source = self.session / "source.pdf"
-        source.write_bytes(b"%PDF-1.7\nsynthetic")
-        with patch.object(processor, "convert_office", side_effect=AssertionError("converted")):
-            result = processor.process("session-1", str(source), "pdf", str(self.output))
-        self.assertEqual(result["content_path"], str(source))
-        self.assertEqual(result["viewer_kind"], "pdf")
+    def test_only_hwp_formats_are_accepted(self) -> None:
+        for kind in ("doc", "ppt", "pdf", "docx", "pptx", "xls", "xlsx"):
+            source = self.session / ("source." + kind)
+            source.write_bytes(b"%PDF-1.7\nsynthetic")
+            with self.assertRaisesRegex(processor.PreviewError, "UNSUPPORTED_PREVIEW_FORMAT"):
+                processor.process("session-1", str(source), kind, str(self.output))
 
-    def test_package_must_have_expected_structure(self) -> None:
-        source = self.session / "source.pptx"
-        source.write_bytes(package({"[Content_Types].xml": b"x", "ppt/presentation.xml": b"y"}))
-        self.assertEqual(processor.process("session-1", str(source), "pptx", str(self.output))["viewer_kind"], "powerpoint")
-        source.write_bytes(package({"[Content_Types].xml": b"x", "word/document.xml": b"y"}))
+    def test_hwpx_package_must_have_expected_structure(self) -> None:
+        source = self.session / "source.hwpx"
+        source.write_bytes(package({"mimetype": b"x", "Contents/content.hpf": b"y"}))
+        processor.validate_source(source, "hwpx")
+        source.write_bytes(package({"mimetype": b"x"}))
         with self.assertRaisesRegex(processor.PreviewError, "INVALID_PREVIEW_PACKAGE"):
-            processor.process("session-1", str(source), "pptx", str(self.output))
+            processor.validate_source(source, "hwpx")
 
     def test_path_escape_and_symlink_are_rejected(self) -> None:
         source = self.session / "source.pdf"
@@ -126,9 +125,39 @@ class ProcessorTest(unittest.TestCase):
             processor.render_hwp_page(source, self.output, "hwp", 1, "session-1", threading.Event())
         self.assertFalse(raw.exists())
 
+    def test_oversized_input_is_rejected_without_rendering(self) -> None:
+        source = self.session / "source.hwp"
+        with source.open("wb") as stream:
+            stream.truncate(processor.MAX_SOURCE + 1)
+        with self.assertRaisesRegex(processor.PreviewError, "PREVIEW_INPUT_TOO_LARGE"):
+            processor.process("session-1", str(source), "hwp", str(self.output))
+
+    def test_oversized_page_reports_limit_and_cleans_raw(self) -> None:
+        source = self.session / "source.hwp"
+        source.write_bytes(processor.OLE_MAGIC)
+        raw = self.output / "page-1.raw.svg"
+        def render(*_args, **_kwargs):
+            with raw.open("wb") as stream:
+                stream.truncate(processor.MAX_SVG + 1)
+            (self.output / "page-1.json").write_text('{"page_count":1}')
+        with patch.object(processor, "_run", side_effect=render), self.assertRaisesRegex(processor.PreviewError, "PREVIEW_SVG_TOO_LARGE"):
+            processor.render_hwp_page(source, self.output, "hwp", 1, "session-1", threading.Event())
+        self.assertFalse(raw.exists())
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process group required")
+    def test_timeout_kills_child_and_clears_active_process(self) -> None:
+        event = processor.begin_operation("session-1")
+        try:
+            with self.assertRaisesRegex(processor.PreviewError, "PREVIEW_PROCESS_TIMEOUT"):
+                processor._run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1,
+                               session_id="session-1", cancel_event=event)
+            self.assertIsNone(processor._ACTIVE["session-1"][1])
+        finally:
+            processor.end_operation("session-1")
+
     def test_http_process_and_cancel_contract(self) -> None:
-        source = self.session / "source.pdf"
-        source.write_bytes(b"%PDF-1.7\nsynthetic")
+        source = self.session / "source.hwp"
+        source.write_bytes(processor.OLE_MAGIC + b"synthetic")
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -145,11 +174,12 @@ class ProcessorTest(unittest.TestCase):
                     self.assertEqual(response.headers["Cache-Control"], "no-store")
                     return json.loads(response.read())
 
-            result = post(
+            with patch.object(processor, "render_hwp_page", return_value=(self.output / "page-1.svg", 2)):
+                result = post(
                 "/preview/process",
-                {"session_id": "session-1", "input_path": str(source), "source_format": "pdf", "output_dir": str(self.output)},
+                {"session_id": "session-1", "input_path": str(source), "source_format": "hwp", "output_dir": str(self.output)},
             )
-            self.assertEqual(result["content_path"], str(source))
+            self.assertEqual(result["viewer_kind"], "hwp")
             self.assertEqual(post("/preview/cancel", {"session_id": "session-1"}), {"cancelled": True})
         finally:
             server.shutdown()

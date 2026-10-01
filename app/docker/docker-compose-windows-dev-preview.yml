@@ -7,7 +7,7 @@ services:
       DOCMIND_PREVIEW_ROOT: /run/docmind-previews
       DOCMIND_PREVIEW_PROCESSOR_URL: http://docmind-preview-processor:8090
     volumes:
-      - preview_memory:/run/docmind-previews
+      - preview_memory_128m:/run/docmind-previews
     networks:
       docmind-preview-internal: {}
 
@@ -25,16 +25,16 @@ services:
       XDG_CACHE_HOME: /run/docmind-previews/processor-cache
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
-      - preview_memory:/run/docmind-previews
+      - preview_memory_128m:/run/docmind-previews
     networks:
       docmind-preview-internal: {}
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 1g
-    memswap_limit: 1g
-    cpus: 1
-    pids_limit: 128
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
     restart: unless-stopped
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3).read()"]
@@ -49,10 +49,11 @@ networks:
 
 # One shared, RAM-backed filesystem caps retained originals, rendered pages,
 # converter scratch and outputs TOGETHER. No persistent plaintext data volume.
+# Versioned name prevents Docker reusing the previous 256 MiB volume options.
 volumes:
-  preview_memory:
+  preview_memory_128m:
     driver: local
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: size=268435456,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev
+      o: size=134217728,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev

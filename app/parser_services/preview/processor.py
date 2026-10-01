@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import signal
 import stat
 import subprocess
@@ -19,18 +18,11 @@ from defusedxml import ElementTree as SafeET
 
 ROOT = Path(os.environ.get("DOCMIND_PREVIEW_ROOT", "/run/docmind-previews"))
 MAX_SOURCE = 64 * 1024 * 1024
-MAX_DERIVED = 128 * 1024 * 1024
+MAX_DERIVED = 16 * 1024 * 1024
 MAX_SVG = 16 * 1024 * 1024
 OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
-FORMATS = {"pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "hwp", "hwpx"}
-DIRECT = {"pdf", "docx", "pptx", "xls", "xlsx"}
-PACKAGE_PARTS = {
-    "docx": {"[Content_Types].xml", "word/document.xml"},
-    "pptx": {"[Content_Types].xml", "ppt/presentation.xml"},
-    "xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
-    "hwpx": {"mimetype", "Contents/content.hpf"},
-}
-VIEWERS = {"pdf": "pdf", "docx": "word", "pptx": "powerpoint", "xls": "excel", "xlsx": "excel", "hwp": "hwp", "hwpx": "hwp"}
+FORMATS = {"hwp", "hwpx"}
+PACKAGE_PARTS = {"hwpx": {"mimetype", "Contents/content.hpf"}}
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _SVG_NS = "http://www.w3.org/2000/svg"
 _XLINK_NS = "http://www.w3.org/1999/xlink"
@@ -134,9 +126,7 @@ def validate_source(path: Path, source_format: str) -> None:
         raise PreviewError("UNSUPPORTED_PREVIEW_FORMAT")
     with path.open("rb") as stream:
         magic = stream.read(8)
-    if source_format == "pdf" and not magic.startswith(b"%PDF-"):
-        raise PreviewError("INVALID_PREVIEW_SOURCE")
-    if source_format in {"doc", "ppt", "xls", "hwp"} and magic != OLE_MAGIC:
+    if source_format == "hwp" and magic != OLE_MAGIC:
         raise PreviewError("INVALID_PREVIEW_SOURCE")
     if source_format in PACKAGE_PARTS:
         validate_package(path, source_format, MAX_SOURCE)
@@ -162,6 +152,8 @@ def _run(command: list[str], *, timeout: int, session_id: str, cancel_event: thr
         if process.wait(timeout=timeout) != 0:
             if cancel_event.is_set():
                 raise PreviewError("PREVIEW_CANCELLED")
+            if process.returncode == 4:
+                raise PreviewError("PREVIEW_SVG_TOO_LARGE")
             raise PreviewError("PREVIEW_PROCESS_FAILED")
     except subprocess.TimeoutExpired as error:
         os.killpg(process.pid, signal.SIGKILL)
@@ -174,54 +166,6 @@ def _run(command: list[str], *, timeout: int, session_id: str, cancel_event: thr
         with _ACTIVE_LOCK:
             if session_id in _ACTIVE:
                 _ACTIVE[session_id] = (cancel_event, None)
-
-
-def convert_office(source: Path, output_dir: Path, source_format: str, session_id: str, cancel_event: threading.Event) -> Path:
-    target_format = {"doc": "docx", "ppt": "pptx"}[source_format]
-    scratch = output_dir / "processor-scratch"
-    scratch.mkdir(mode=0o700, exist_ok=False)
-    profile, home = scratch / "profile", scratch / "home"
-    profile.mkdir(mode=0o700)
-    home.mkdir(mode=0o700)
-    staged = scratch / ("source." + source_format)
-    # LibreOffice reads its own input path. Hard links avoid a second plaintext copy.
-    os.link(source, staged)
-    target = output_dir / ("display." + target_format)
-    try:
-        command = [
-            "/usr/bin/soffice",
-            "--headless",
-            "--nologo",
-            "--nodefault",
-            "--nofirststartwizard",
-            "--nolockcheck",
-            "--norestore",
-            f"-env:UserInstallation={profile.as_uri()}",
-            "--convert-to",
-            "docx:Office Open XML Text" if source_format == "doc" else "pptx:Impress MS PowerPoint 2007 XML",
-            "--outdir",
-            str(output_dir),
-            str(staged),
-        ]
-        environment = {"HOME": str(home), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin", "TMPDIR": str(scratch)}
-        _run(command, timeout=180, session_id=session_id, cancel_event=cancel_event, environment=environment)
-        if cancel_event.is_set():
-            raise PreviewError("PREVIEW_CANCELLED")
-        produced = output_dir / ("source." + target_format)
-        if not produced.is_file() or produced.is_symlink() or produced.stat().st_size > MAX_DERIVED:
-            raise PreviewError("PREVIEW_CONVERSION_INVALID")
-        validate_package(produced, target_format, MAX_DERIVED)
-        if source_format == "doc":
-            # Keep the existing DOC conversion package contract in one place.
-            from legacy_doc_conversion import validate_docx_package
-
-            validate_docx_package(produced.read_bytes(), max_source_bytes=MAX_DERIVED)
-        if target.exists():
-            raise PreviewError("PREVIEW_OUTPUT_EXISTS")
-        produced.replace(target)
-        return target
-    finally:
-        shutil.rmtree(scratch)
 
 
 def _local_name(name: str) -> str:
@@ -287,8 +231,10 @@ def render_hwp_page(source: Path, output_dir: Path, source_format: str, page: in
             session_id=session_id,
             cancel_event=cancel_event,
         )
-        if not raw.is_file() or raw.is_symlink() or raw.stat().st_size > MAX_SVG or not metadata.is_file():
+        if not raw.is_file() or raw.is_symlink() or not metadata.is_file():
             raise PreviewError("PREVIEW_RENDER_INVALID")
+        if raw.stat().st_size > MAX_SVG:
+            raise PreviewError("PREVIEW_SVG_TOO_LARGE")
         page_count = int(json.loads(metadata.read_text(encoding="utf-8"))["page_count"])
         if page_count < page or page_count > 100000:
             raise PreviewError("PREVIEW_RENDER_INVALID")
@@ -306,12 +252,6 @@ def render_hwp_page(source: Path, output_dir: Path, source_format: str, page: in
 def process(session_id: str, input_path: str, source_format: str, output_dir: str, cancel_event: threading.Event | None = None) -> dict[str, object]:
     source, output = session_paths(session_id, input_path, output_dir)
     validate_source(source, source_format)
-    if source_format in DIRECT:
-        return {"display_format": source_format, "viewer_kind": VIEWERS[source_format], "page_count": None, "content_path": str(source), "first_page_path": None}
-    if source_format in {"doc", "ppt"}:
-        target = convert_office(source, output, source_format, session_id, cancel_event or threading.Event())
-        display_format = "docx" if source_format == "doc" else "pptx"
-        return {"display_format": display_format, "viewer_kind": VIEWERS[display_format], "page_count": None, "content_path": str(target), "first_page_path": None}
     target, page_count = render_hwp_page(source, output, source_format, 1, session_id, cancel_event or threading.Event())
     (output / "page-count.json").write_text(json.dumps({"page_count": page_count}), encoding="utf-8")
     return {"display_format": "svg", "viewer_kind": "hwp", "page_count": page_count, "content_path": None, "first_page_path": str(target)}

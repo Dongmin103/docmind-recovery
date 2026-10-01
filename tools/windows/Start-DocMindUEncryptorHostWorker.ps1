@@ -632,7 +632,8 @@ do {
         foreach ($purpose in $claimOrder) {
             $path = if ($purpose -eq 'preview') { $previewClaimPath } else { $claimPath }
             try {
-                $claimResult = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri $path -Body $claimBody
+                $purposeClaimBody = Get-DocMindClaimRequestBody -Purpose $purpose -IngestionBody $claimBody
+                $claimResult = Invoke-SignedJsonRequest -Method 'POST' -RelativeUri $path -Body $purposeClaimBody
             } catch {
                 if ($purpose -ne 'preview') { throw }
                 Write-Warning 'Preview claim unavailable; ingestion claim will continue.'
