@@ -2,6 +2,12 @@
 
 Approved specification: the user's full DOCMIND file-level change detection plan in this task, 2026-10-01. This checklist preserves its scope; it does not replace it with a smaller deliverable.
 
+## Approved prototype scope update
+
+During implementation the user changed the immediate goal to a fast working prototype. All implementation lanes use SOL agents with the main agent coordinating. Keep file-level incremental processing, durable delivery, basic recovery and stale-job protection. Use focused smoke tests and the existing regression evidence; defer the100k-file/RSS acceptance run, expanded MySQL concurrency/EXPLAIN and exhaustive fault matrix.
+
+The user explicitly deferred both large-scale full-scan optimization (streaming/disk directory state, full list/set elimination and scan throughput tuning) and automatic history cleanup (7-day receipt/detail and30-day summary retention). Basic recovery, signed session ownership, observation ordering and confirmed deletion remain in scope. The tasks below retain the full intended later design; those deferred parts are not completion gates for this prototype. No production cutover is included.
+
 ## Constraints
 
 Automatic reflection, per-file 120-second quiet time, independent observations 10 seconds apart; deletes require two absence checks 2 seconds apart and accessible root. No external OK approval or USN integration. Configured source IDs/roots only. Isolated development and synthetic fixtures only; production cutover is outside this implementation.
