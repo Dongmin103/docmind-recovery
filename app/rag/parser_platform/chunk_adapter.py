@@ -100,13 +100,17 @@ class CommonToStandardChunkAdapter:
                 "metadata": metadata,
             }
             positions = []
+            pdf_pages = []
             for provenance in block.provenance:
                 if isinstance(provenance, PdfProvenance):
-                    left, top, right, bottom = provenance.bbox
-                    positions.append((provenance.page, round(left), round(right), round(top), round(bottom)))
+                    pdf_pages.append(provenance.page)
+                    if provenance.bbox is not None:
+                        left, top, right, bottom = provenance.bbox
+                        positions.append((provenance.page, round(left), round(right), round(top), round(bottom)))
+            if pdf_pages:
+                chunk["page_num_int"] = sorted(set(pdf_pages))
             if positions:
                 chunk["position_int"] = positions
-                chunk["page_num_int"] = sorted({position[0] for position in positions})
                 chunk["top_int"] = [position[3] for position in positions]
             chunks.append(chunk)
         return chunks

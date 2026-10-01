@@ -1,7 +1,7 @@
-"""Offline, selective OOXML trial. No rendering, network access or file writes.
+"""Selective OOXML text extraction for PPTX search ingestion.
 
 Coverage means supported native content, never image OCR or pixel-level fidelity.
-Unsupported structures are reported; production dispatch does not import this module.
+Unsupported native structures are reported for fail-closed indexing.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ NS = {
     "pkg": "http://schemas.openxmlformats.org/package/2006/relationships",
     "dgm": "http://schemas.openxmlformats.org/drawingml/2006/diagram",
 }
-VERSION = "0.1.0-trial"
+VERSION = "1.0.0"
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 EMU_PER_POINT = 12700
 
@@ -397,7 +397,7 @@ def extract(source: bytes) -> Extraction:
                 if slide.get("show") in {"0", "false"}:
                     warnings.add("HIDDEN_SLIDE_INCLUDED")
                 slide_relations = package.relations(part)
-                # This trial does not flatten master/layout inheritance. Detect visible
+                # Native extraction does not flatten master/layout inheritance. Detect visible
                 # inherited content so absence cannot become a complete-coverage claim.
                 pending = [
                     target
@@ -430,7 +430,10 @@ def extract(source: bytes) -> Extraction:
                 if tree is None:
                     raise ValueError("PPTX slide shape tree missing")
 
-                def visit(container, matrix=IDENTITY, path="", depth=0):
+                def visit(
+                    container, matrix=IDENTITY, path="", depth=0, *,
+                    part=part, number=number, slide_relations=slide_relations,
+                ):
                     if depth > 64:
                         raise ValueError("PPTX group depth limit")
                     for index, shape in enumerate(container):

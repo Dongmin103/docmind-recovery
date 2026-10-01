@@ -92,15 +92,21 @@ def _pdf_provenance(block: dict[str, Any], page_sizes: dict[int, tuple[float, fl
 
     bbox = block.get("bbox")
     page = block.get("pageNumber")
-    if not isinstance(bbox, dict) or not isinstance(page, int) or page not in page_sizes or bbox.get("page") != page:
-        raise ValueError("PDF block lacks reliable page geometry")
-    values = [bbox.get(key) for key in ("x", "y", "width", "height")]
-    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in values):
-        raise ValueError("PDF block geometry is invalid")
-    x, y, width, height = (float(value) for value in values)
+    if type(page) is not int or page not in page_sizes:
+        raise ValueError("PDF block lacks reliable page identity")
     page_width, page_height = page_sizes[page]
+    if bbox is None:
+        return PdfProvenance(page=page, rendered_size=(page_width, page_height))
+    if not isinstance(bbox, dict):
+        return PdfProvenance(page=page, rendered_size=(page_width, page_height))
+    if "page" in bbox and bbox["page"] != page:
+        raise ValueError("PDF block bbox page identity mismatch")
+    values = [bbox.get(key) for key in ("x", "y", "width", "height")]
+    if any(type(value) not in {int, float} or not math.isfinite(value) for value in values):
+        return PdfProvenance(page=page, rendered_size=(page_width, page_height))
+    x, y, width, height = (float(value) for value in values)
     if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > page_width + 1 or y + height > page_height + 1:
-        raise ValueError("PDF block geometry is outside the page")
+        return PdfProvenance(page=page, rendered_size=(page_width, page_height))
     return PdfProvenance(
         page=page,
         bbox=(x, max(0.0, page_height - y - height), x + width, min(page_height, page_height - y)),
@@ -108,7 +114,7 @@ def _pdf_provenance(block: dict[str, Any], page_sizes: dict[int, tuple[float, fl
     )
 
 
-def _warning_codes(result: dict[str, Any]) -> tuple[str, ...]:
+def _warning_codes(result: dict[str, Any], *, strict_ocr_warnings: bool = False) -> tuple[str, ...]:
     warnings = result.get("warnings") or []
     if not isinstance(warnings, list):
         raise ValueError("invalid kordoc warnings")
@@ -117,6 +123,10 @@ def _warning_codes(result: dict[str, Any]) -> tuple[str, ...]:
     visible = []
     for code in codes:
         upper = code.upper()
+        if strict_ocr_warnings and upper.startswith("OCR_") and any(
+            marker in upper for marker in ("FAILED", "PARTIAL", "TRUNCATED")
+        ):
+            raise ValueError("incomplete kordoc OCR output")
         if upper.startswith("OCR_") or upper in {"NEEDS_OCR", "IMAGE_BASED_PDF", "SKIPPED_IMAGE"}:
             continue
         if upper in {"PARTIAL_PARSE", "PARTIAL_RESULT", "TRUNCATED_TABLE"} or any(
@@ -358,7 +368,7 @@ def normalize_pilot_document(
         raise ValueError("kordoc source hash mismatch")
     if not result.get("parser_version") or not isinstance(result.get("blocks"), list):
         raise ValueError("incomplete kordoc result")
-    warning_codes = _warning_codes(result)
+    warning_codes = _warning_codes(result, strict_ocr_warnings=source_format == "pdf")
     if source_format in {"xls", "xlsx"}:
         return _normalize_excel_document(
             result, source_document_id=source_document_id,
@@ -408,6 +418,7 @@ def normalize_pilot_document(
         page_sizes, _ = _pdf_pages(result)
 
     blocks: list[ParsedBlock] = []
+    geometry_omitted = False
     heading_stack: list[tuple[int, str]] = []
     for index, raw in enumerate(result["blocks"]):
         block_type = raw.get("type")
@@ -447,6 +458,8 @@ def normalize_pilot_document(
             )
         else:
             provenance = _pdf_provenance(raw, page_sizes)
+            if provenance.bbox is None:
+                diagnostics["pdf_geometry"] = "omitted_unreliable"
         if block_type == "image":
             text, table_html = item["text"].strip(), None
         elif mapped == BlockType.TABLE:
@@ -455,6 +468,8 @@ def normalize_pilot_document(
             text, table_html = str(raw.get("text") or "").strip(), None
         if not text.strip():
             continue
+        if source_format == "pdf" and provenance.bbox is None:
+            geometry_omitted = True
         stable_id = make_stable_block_id(
             source_hash=source_hash, source_format=source_format,
             block_type=mapped.value, source_item_id=source_item_id,
@@ -464,6 +479,7 @@ def normalize_pilot_document(
             stable_block_id=stable_id, source_item_id=source_item_id,
             block_type=mapped, reading_order=len(blocks), text=text,
             table_html=table_html, provenance=(provenance,), diagnostics=diagnostics,
+            warning_codes=("PDF_GEOMETRY_OMITTED",) if source_format == "pdf" and provenance.bbox is None else (),
         ))
     if not blocks:
         raise ValueError("no searchable kordoc content")
@@ -473,7 +489,7 @@ def normalize_pilot_document(
         parse_run_id=parse_run_id, chunk_set_id=chunk_set_id,
         parser_name="kordoc", parser_version=result["parser_version"],
         backend="kordoc-pilot", status=ParserRunStatus.NORMALIZING,
-        warnings=warning_codes, blocks=tuple(blocks),
+        warnings=tuple(sorted(set(warning_codes) | ({"PDF_GEOMETRY_OMITTED"} if geometry_omitted else set()))), blocks=tuple(blocks),
         diagnostics={"pilot": True, "images_ocr_enabled": True},
     )
 

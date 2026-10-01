@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from dataclasses import asdict
 
 from common import settings
 from common.storage_attempt_audit import stage_scope
@@ -50,6 +51,11 @@ class ParserPlatformStandardBridge:
         trace_id: str,
     ) -> ParsedDocument:
         """Parse one source and persist its raw and normalized evidence."""
+        if source_format == SourceFormat.PPTX and prepared.parser_name == "pptx-native":
+            return self._parse_native_pptx(
+                prepared=prepared, source_bytes=source_bytes,
+                source_document_id=source_document_id, source_format=source_format,
+            )
         from rag.parser_platform.kordoc_office_pilot import normalize_pilot_document
         from rag.parser_platform.kordoc_pilot import KordocPageLimitExceeded, KordocServiceError, parse_pilot_service
 
@@ -128,6 +134,50 @@ class ParserPlatformStandardBridge:
                 "PARSER_PDF_PAGE_LIMIT_EXCEEDED",
                 detail=str(error.page_count) if error.page_count is not None else None,
             ) from error
+        except Exception as error:
+            raise parser_error("PARSER_NORMALIZATION_FAILED", detail=str(error)) from error
+
+    def _parse_native_pptx(
+        self, *, prepared: PreparedParserRun, source_bytes: bytes,
+        source_document_id: str, source_format: SourceFormat,
+    ) -> ParsedDocument:
+        from rag.parser_platform.pptx_native_adapter import to_parsed_document
+        from rag.parser_platform.pptx_native_extractor import VERSION, extract
+
+        try:
+            if (not self.config.pptx_native_enabled or prepared.selection.engine != "pptx-native"
+                    or prepared.selection.source_format != source_format
+                    or prepared.backend != "pptx-native-offline"
+                    or prepared.parser_version != VERSION):
+                raise ValueError("native PPTX parser selection mismatch")
+            self._emit("PARSING_PPTX_NATIVE", {"source_format": source_format.value})
+            storage = getattr(settings, "STORAGE_IMPL", None)
+            with stage_scope(storage, "parse_native_pptx", prepared.parse_run_id):
+                extraction = extract(source_bytes)
+            if extraction.source_hash != hashlib.sha256(source_bytes).hexdigest():
+                raise ValueError("native PPTX source hash mismatch")
+            if not extraction.coverage_complete or not extraction.blocks:
+                raise parser_error(
+                    "PARSER_PPTX_NATIVE_UNSUPPORTED",
+                    detail=", ".join(extraction.warnings),
+                )
+            with stage_scope(storage, "normalize_artifacts", prepared.parse_run_id):
+                raw_ref = self.artifacts.write_json(
+                    parse_run_id=prepared.parse_run_id, name="pptx-native-raw",
+                    payload=asdict(extraction),
+                )
+                document = to_parsed_document(
+                    extraction, document_id=source_document_id,
+                    run_id=prepared.parse_run_id, chunk_set_id=prepared.chunk_set_id,
+                ).model_copy(update={"raw_artifact_ref": raw_ref})
+                self.artifacts.write_json(
+                    parse_run_id=prepared.parse_run_id, name="normalized-document",
+                    payload=document.model_dump(mode="json"),
+                )
+            self._emit("NORMALIZING", {"blocks": len(document.blocks)})
+            return document
+        except ParserPlatformError:
+            raise
         except Exception as error:
             raise parser_error("PARSER_NORMALIZATION_FAILED", detail=str(error)) from error
 

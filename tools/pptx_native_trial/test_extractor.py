@@ -6,7 +6,7 @@ from zipfile import ZipFile
 import pytest
 from lxml import etree
 
-from tools.pptx_native_trial.extractor import extract
+from rag.parser_platform.pptx_native_extractor import extract
 from tools.pptx_native_trial.fixtures import rewrite, synthetic_deck
 
 NS = {

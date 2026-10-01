@@ -356,6 +356,43 @@ def test_pdf_uses_response_pages_without_reopening_source() -> None:
     assert document.blocks[0].provenance[0].bbox == (20, 800, 110, 812)
 
 
+@pytest.mark.parametrize("bbox", [None, {"page": 1, "x": 20, "y": 850, "width": 90, "height": 12}])
+def test_pdf_keeps_text_and_page_when_geometry_unreliable(bbox) -> None:
+    source = b"synthetic-pdf-rotated"
+    result = _result(source, "pdf", [
+        {"type": "paragraph", "text": "known position", "pageNumber": 1,
+         "bbox": {"page": 1, "x": 20, "y": 30, "width": 90, "height": 12}},
+        {"type": "paragraph", "text": "rotated text", "pageNumber": 1, "bbox": bbox},
+    ])
+    document = _normalize(result, source)
+    assert document.blocks[1].provenance[0].page == 1
+    assert document.blocks[1].provenance[0].bbox is None
+    assert "PDF_GEOMETRY_OMITTED" in document.warnings
+    chunks = chunk_pilot_document(document, source_bytes=source, parser_config={"chunk_token_num": 128})
+    assert any("rotated text" in chunk["content_with_weight"] for chunk in chunks)
+    assert all(chunk["page_num_int"] == [1] for chunk in chunks)
+    assert all("position_int" not in chunk and "top_int" not in chunk for chunk in chunks
+               if "rotated text" in chunk["content_with_weight"])
+
+
+@pytest.mark.parametrize("page,bbox_page", [(2, 2), (1, 2), (None, 1)])
+def test_pdf_rejects_unreliable_page_identity(page, bbox_page) -> None:
+    source = b"synthetic-pdf"
+    result = _result(source, "pdf", [{"type": "paragraph", "text": "body", "pageNumber": page,
+                                       "bbox": {"page": bbox_page, "x": 1, "y": 1,
+                                                "width": 10, "height": 10}}])
+    with pytest.raises(ValueError, match="page"):
+        _normalize(result, source)
+
+
+def test_pdf_rejects_partial_ocr_warning_even_with_searchable_text() -> None:
+    source = b"synthetic-pdf"
+    result = _result(source, "pdf", [{"type": "paragraph", "text": "body", "pageNumber": 1}])
+    result["warnings"] = [{"code": "OCR_PARTIAL"}]
+    with pytest.raises(ValueError, match="OCR"):
+        _normalize(result, source)
+
+
 @pytest.mark.parametrize("pages", [[], [{"page": 2, "width": 595, "height": 842,
                                            "has_images": False, "ocr_applied": False}]])
 def test_pdf_rejects_incomplete_page_metadata(pages: list[dict]) -> None:

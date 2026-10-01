@@ -1,8 +1,9 @@
 # PPTX native extraction trial
 
-Offline experiment requested on 2026-10-01. **Not a deployed parser.** No production
-dispatch, model bindings, indexes, source documents or worker settings are changed.
-PPTX is read as a ZIP/OOXML package; LibreOffice, PDF conversion and OCR are not used.
+Offline experiment requested on 2026-10-01. The extractor has since moved into
+`app/rag/parser_platform` and is available behind an opt-in production flag.
+This benchmark does not deploy or index source documents. PPTX is read as a
+ZIP/OOXML package; LibreOffice, PDF conversion and OCR are not used.
 
 ## Run
 
@@ -29,16 +30,17 @@ needed. No original document content, images, vectors or credentials are persist
 - SmartArt data-model text nodes and connections, with diagram-level (not node-level) bounds.
 - Deterministic slide/shape locators and block identities via real DocMind contracts.
 
-`extractor.py` returns in-memory blocks. `docmind_adapter.py` maps them to the real
+`app/rag/parser_platform/pptx_native_extractor.py` returns in-memory blocks. `docmind_adapter.py` maps them to the real
 `ParsedDocument`/`ParsedBlock`/`PptxProvenance` classes under parser name `pptx-native`.
 The existing `CommonToStandardChunkAdapter` is exercised unchanged. `contracts.py`
 bypasses only the eager package initializer that imports server settings; it loads
 the real contract source files. This is **not** a test of application startup,
 production routing, database writes, active chunk-set replacement or retrieval.
 
-The existing OfficeChunker still requires `parser_name == "kordoc"`. This experiment
-does not spoof that identity or alter the live guard. Token-budget slide chunking,
-production parser selection/fingerprinting and deployment remain follow-up work.
+The production OfficeChunker now accepts complete `pptx-native` documents and applies
+token-budget slide chunking. This benchmark still measures extraction and schema
+normalization only; production parser selection, chunking and indexing need separate
+tests.
 
 ## Accuracy interpretation
 
@@ -85,7 +87,8 @@ normalized time <=50 ms/slide. It is not the 200 MB / 600-second end-to-end gate
 - SmartArt text is extracted from its data model, not rendered order or diagram semantics.
 - Strict OOXML namespaces, AlternateContent/modern chart extensions, equations, OLE and
   other unsupported shape content are not claimed as supported. Archive/XML limits are
-  enforced; this trial still requires the existing full input-validation boundary on integration.
+  enforced; production dispatch also applies the existing OOXML input-validation boundary.
 
-Warnings propagate into each standard chunk conservatively. A warning-bearing result
-must be evaluated before indexing; this experiment has no code that activates an index.
+The trial adapter retains warnings for evaluation. Production rejects incomplete
+native coverage before writing artifacts or indexing. Supported limited content
+keeps its warnings in normalized blocks and standard chunks.
