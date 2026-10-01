@@ -66,11 +66,11 @@ def acquire_session(*, source_id, worker_id, owner_id, now=None):
             return _response(session)
         values = {"worker_id": worker_id, "owner_id": owner_id, "epoch": 1 if session is None else session.epoch + 1, "last_sequence": 0, "lease_expires_at": now + timedelta(seconds=LEASE_SECONDS)}
         if session is None:
-            session = DocmindSourceSyncSession.create(source_id=source_id, **values)
+            DocmindSourceSyncSession.create(source_id=source_id, **values)
         else:
             DocmindSourceSyncSession.update(**values).where(DocmindSourceSyncSession.source_id == source_id).execute()
-            session = DocmindSourceSyncSession.get_by_id(source_id)
-        return _response(session)
+        # Return the stored timestamp precision, including MySQL DATETIME rounding.
+        return _response(DocmindSourceSyncSession.get_by_id(source_id))
 
 
 def renew_session(*, source_id, worker_id, owner_id, epoch, now=None):
@@ -81,7 +81,7 @@ def renew_session(*, source_id, worker_id, owner_id, epoch, now=None):
         session = _current(source_id, worker_id, owner_id, epoch, now)
         session.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
         session.save(only=[DocmindSourceSyncSession.lease_expires_at])
-        return _response(session)
+        return _response(DocmindSourceSyncSession.get_by_id(source_id))
 
 
 def commit_request(*, source_id, worker_id, owner_id, epoch, sequence, request_id, payload, apply, now=None):
