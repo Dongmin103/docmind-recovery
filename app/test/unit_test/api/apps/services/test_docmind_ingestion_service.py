@@ -502,6 +502,87 @@ def test_explicit_reprocess_preserves_active_chunks_and_fences_replay(ingestion_
     assert next_claim is not None and next_claim.fencing_token == 3
 
 
+def test_pdf_ocr_consent_requeues_only_verified_zero_text_and_is_idempotent(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", parser_id="naive", type="pdf",
+                    created_by="tenant-1", suffix="pdf")
+    DocmindIngestionJob.update(
+        lifecycle_state="FAILED", cleanup_state="COMPLETE", host_cleanup_state="COMPLETE",
+        error_code="PARSER_PDF_NO_SEARCHABLE_TEXT",
+    ).execute()
+    result = service.request_pdf_ocr_consent(
+        "tenant-1", document_id="document-1", expected_source_version_id=claim.version_id,
+        actor_id="tenant-1", idempotency_key="one-click",
+    )
+    job = DocmindIngestionJob.get_by_id(claim.job_id)
+    assert result["job_id"] == claim.job_id
+    assert job.pdf_ocr_requested is True
+    assert job.pdf_ocr_consented_by == "tenant-1"
+    assert job.pdf_ocr_consented_at is not None
+    with pytest.raises(service.DocmindIngestionError) as short_lease:
+        service.claim_next("windows-worker-1", lease_seconds=300)
+    assert short_lease.value.code == "DOCMIND_PDF_OCR_LEASE_TOO_SHORT"
+    assert DocmindIngestionJob.get_by_id(claim.job_id).lifecycle_state == "DISCOVERED"
+    assert job.lifecycle_state == "DISCOVERED"
+    assert service.request_pdf_ocr_consent(
+        "tenant-1", document_id="document-1", expected_source_version_id=claim.version_id,
+        actor_id="tenant-1", idempotency_key="one-click",
+    ) == result
+
+
+def test_pdf_ocr_consent_retains_old_active_index_until_new_activation(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", parser_id="naive", type="pdf",
+                    created_by="tenant-1", suffix="pdf", active_chunk_set_id="chunk-old", status="1")
+    DocmindSourceDocument.update(active_source_version_id=claim.version_id).execute()
+    DocmindSourceVersion.update(lifecycle_state="ACTIVE", chunk_set_id="chunk-old",
+                                parser_run_id="run-old", search_cleanup_complete=True).execute()
+    ParserRun.create(
+        id="run-old", doc_id="document-1", chunk_set_id="chunk-old",
+        idempotency_key="parser-old", source_hash="b" * 64, source_format="PDF",
+        source_fingerprint="c" * 64, config_fingerprint="d" * 64,
+        parser_fingerprint="e" * 64, parser_name="kordoc", parser_version="4.15.7",
+        backend="kordoc-offline", schema_version="parser-platform-v1",
+        lifecycle="READY_WITH_WARNING", warnings=["PDF_IMAGE_OCR_NOT_RUN"], staged_chunk_count=1,
+    )
+    DocmindIngestionJob.update(
+        lifecycle_state="COMPLETE", cleanup_state="COMPLETE", host_cleanup_state="COMPLETE",
+        parser_run_id="run-old", chunk_set_id="chunk-old",
+    ).execute()
+    service.request_pdf_ocr_consent(
+        "tenant-1", document_id="document-1", expected_source_version_id=claim.version_id,
+        actor_id="tenant-1", idempotency_key="one-click",
+    )
+    assert Document.get_by_id("document-1").active_chunk_set_id == "chunk-old"
+    assert DocmindSourceVersion.get_by_id(claim.version_id).parser_run_id == "run-old"
+    assert DocmindSourceDocument.get().active_source_version_id == claim.version_id
+
+
+@pytest.mark.parametrize("reason", ["wrong_tenant", "generic_error", "cleanup_pending", "source_changed", "wrong_version"])
+def test_pdf_ocr_consent_rejects_unverified_or_stale_jobs(ingestion_db, reason):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", parser_id="naive", type="pdf",
+                    created_by="tenant-1", suffix="pdf")
+    DocmindIngestionJob.update(
+        lifecycle_state="FAILED", cleanup_state="COMPLETE", host_cleanup_state="COMPLETE",
+        error_code="PARSER_PDF_NO_SEARCHABLE_TEXT",
+    ).execute()
+    if reason == "generic_error":
+        DocmindIngestionJob.update(error_code="DOCMIND_INGESTION_PIPELINE_FAILED").execute()
+    elif reason == "cleanup_pending":
+        DocmindIngestionJob.update(host_cleanup_state="PENDING").execute()
+    elif reason == "source_changed":
+        DocmindSourceDocument.update(observed_ciphertext_sha256="b" * 64).execute()
+    with pytest.raises(service.DocmindIngestionError):
+        service.request_pdf_ocr_consent(
+            "other-tenant" if reason == "wrong_tenant" else "tenant-1",
+            document_id="document-1",
+            expected_source_version_id="wrong-version" if reason == "wrong_version" else claim.version_id,
+            actor_id="tenant-1", idempotency_key="one-click",
+        )
+    assert DocmindIngestionJob.get_by_id(claim.job_id).pdf_ocr_requested is False
+
+
 @pytest.mark.parametrize("change", ["disabled", "source_changed", "cleanup_pending", "chunk_changed"])
 def test_reprocess_rejects_invalid_preconditions(ingestion_db, change):
     _, claim = _enqueue_and_claim()
@@ -817,6 +898,7 @@ def test_reaper_guard_refuses_live_or_newer_lease(ingestion_db):
 
 def test_bounded_runner_consumes_token_activates_and_waits_for_host_cleanup(ingestion_db):
     _, claim = _enqueue_and_claim()
+    DocmindIngestionJob.update(pdf_ocr_requested=True).where(DocmindIngestionJob.id == claim.job_id).execute()
     plaintext = b"synthetic"
     events = []
 
@@ -834,7 +916,7 @@ def test_bounded_runner_consumes_token_activates_and_waits_for_host_cleanup(inge
 
     class Runner:
         def run(self, **kwargs):
-            events.append(("parse", kwargs["workspace"].input_path))
+            events.append(("parse", kwargs["workspace"].input_path, kwargs["pdf_ocr_requested"]))
             return service.ParserStageResult(
                 service.IndexReadyResult("parser-run-1", "chunk-set-1"),
                 None,
@@ -858,7 +940,7 @@ def test_bounded_runner_consumes_token_activates_and_waits_for_host_cleanup(inge
     assert events == [
         "accepted",
         ("consume", "ephemeral-1"),
-        ("parse", Path("synthetic.pdf")),
+        ("parse", Path("synthetic.pdf"), True),
         "activated",
         "cleaned",
     ]

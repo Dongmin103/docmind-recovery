@@ -26,7 +26,7 @@ class KordocServiceError(RuntimeError):
 
 def parse_pilot_service(
     source_bytes: bytes, source_format: str, *, service_url: str, timeout: int = 900,
-    max_pdf_pages: int | None = None,
+    max_pdf_pages: int | None = None, pdf_ocr_requested: bool = False,
 ) -> dict[str, Any]:
     """Call the isolated Kordoc HTTP service without retaining a source path."""
     if source_format not in PILOT_FORMATS:
@@ -38,6 +38,8 @@ def parse_pilot_service(
     if max_pdf_pages is not None and (isinstance(max_pdf_pages, bool)
                                       or not isinstance(max_pdf_pages, int) or max_pdf_pages < 1):
         raise ValueError("invalid Kordoc PDF page limit")
+    if pdf_ocr_requested is not False:
+        raise ValueError("PDF OCR must use the isolated Surya service")
     source_hash = hashlib.sha256(source_bytes).hexdigest()
     request_payload = {
         "source_base64": base64.b64encode(source_bytes).decode("ascii"),

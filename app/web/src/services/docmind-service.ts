@@ -140,6 +140,8 @@ export interface DocMindHierarchyNode {
   index_error_code?: string | null;
   index_partial_coverage?: boolean;
   index_image_ocr_not_run?: boolean;
+  index_pdf_ocr_option?: 'zero_text' | 'partial_images' | null;
+  index_pdf_ocr_version_id?: string | null;
   searchable?: boolean;
   semantic_folder_id?: string;
   mutation_capabilities?: {
@@ -220,6 +222,15 @@ export const getDocMindRegistrations = (states?: DocMindRegistrationState[]) =>
 
 export const getDocMindHierarchy = () =>
   request.get('/api/v1/docmind/admin/hierarchy');
+
+export const requestDocMindPdfOcr = (
+  documentId: string,
+  expectedSourceVersionId: string,
+  idempotencyKey: string,
+) => request.post(`/api/v1/docmind/documents/${documentId}/pdf-ocr`, {
+  data: { expected_source_version_id: expectedSourceVersionId, consent: true },
+  headers: { 'Idempotency-Key': idempotencyKey },
+});
 
 export const getDocMindImportJobs = () =>
   request.get('/api/v1/docmind/admin/hierarchy/imports');

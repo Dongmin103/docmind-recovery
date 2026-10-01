@@ -386,6 +386,7 @@ def normalize_pilot_document(
         )
 
     page_sizes: dict[int, tuple[float, float]] = {}
+    has_unprocessed_pdf_images = False
     image_ocr = result.get("image_ocr", []) if source_format in {"doc", "docx"} else []
     if not isinstance(image_ocr, list):
         raise ValueError("kordoc image OCR result is invalid")
@@ -415,7 +416,7 @@ def normalize_pilot_document(
             if media:
                 media.close()
     else:
-        page_sizes, _ = _pdf_pages(result)
+        page_sizes, has_unprocessed_pdf_images = _pdf_pages(result)
 
     blocks: list[ParsedBlock] = []
     geometry_omitted = False
@@ -431,6 +432,8 @@ def normalize_pilot_document(
         if block_type == "image" and raw.get("text") not in ocr_by_name:
             continue
         diagnostics: dict[str, Any] = {}
+        if source_format == "pdf" and raw.get("docmind_ocr_engine") == "surya":
+            diagnostics["ocr_engine"] = "surya"
         if block_type == "image":
             item = ocr_by_name[raw["text"]]
             diagnostics = {
@@ -468,6 +471,10 @@ def normalize_pilot_document(
             text, table_html = str(raw.get("text") or "").strip(), None
         if not text.strip():
             continue
+        if source_format == "pdf" and not any(
+            character.isprintable() and not character.isspace() for character in text
+        ):
+            continue
         if source_format == "pdf" and provenance.bbox is None:
             geometry_omitted = True
         stable_id = make_stable_block_id(
@@ -482,15 +489,16 @@ def normalize_pilot_document(
             warning_codes=("PDF_GEOMETRY_OMITTED",) if source_format == "pdf" and provenance.bbox is None else (),
         ))
     if not blocks:
-        raise ValueError("no searchable kordoc content")
+        raise ValueError("PDF_NO_SEARCHABLE_TEXT" if source_format == "pdf" else "no searchable kordoc content")
     return ParsedDocument(
         schema_version="parser-platform-v1", source_document_id=source_document_id,
         source_hash=source_hash, source_format=SourceFormat(source_format),
         parse_run_id=parse_run_id, chunk_set_id=chunk_set_id,
         parser_name="kordoc", parser_version=result["parser_version"],
         backend="kordoc-pilot", status=ParserRunStatus.NORMALIZING,
-        warnings=tuple(sorted(set(warning_codes) | ({"PDF_GEOMETRY_OMITTED"} if geometry_omitted else set()))), blocks=tuple(blocks),
-        diagnostics={"pilot": True, "images_ocr_enabled": True},
+        warnings=tuple(sorted(set(warning_codes) | ({"PDF_GEOMETRY_OMITTED"} if geometry_omitted else set())
+                              | ({"PDF_IMAGE_OCR_NOT_RUN"} if has_unprocessed_pdf_images else set()))), blocks=tuple(blocks),
+        diagnostics={"pilot": True, "images_ocr_enabled": source_format != "pdf" or not has_unprocessed_pdf_images},
     )
 
 

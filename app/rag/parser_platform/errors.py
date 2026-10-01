@@ -224,6 +224,12 @@ ERRORS = {
         "PDF 페이지 수가 분석 한도를 초과했습니다.",
         False,
     ),
+    "PARSER_PDF_NO_SEARCHABLE_TEXT": ParserPlatformErrorInfo(
+        "PARSER_PDF_NO_SEARCHABLE_TEXT", "PDF에서 검색 가능한 글자를 찾지 못했습니다. OCR 선택이 필요합니다.", False,
+    ),
+    "PARSER_PDF_OCR_NO_TEXT": ParserPlatformErrorInfo(
+        "PARSER_PDF_OCR_NO_TEXT", "OCR 후에도 PDF에서 검색 가능한 글자를 찾지 못했습니다.", False,
+    ),
     "PARSER_MEDIA_OCR_FAILED": ParserPlatformErrorInfo(
         "PARSER_MEDIA_OCR_FAILED",
         "필수 Office 이미지의 글자를 읽지 못했습니다.",

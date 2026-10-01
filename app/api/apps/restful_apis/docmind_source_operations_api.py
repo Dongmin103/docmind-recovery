@@ -2,7 +2,8 @@ import logging
 
 from quart import request
 
-from api.apps import login_required
+from api.apps import current_user, login_required
+from api.apps.services import docmind_ingestion_service
 from api.apps.services import docmind_source_operation_service as source_operations
 from api.utils.api_utils import add_tenant_id_to_kwargs, get_error_data_result, get_result
 
@@ -49,6 +50,29 @@ async def get_source_document(tenant_id: str, document_id: str):
     except Exception:
         logger.exception("DocMind source document lookup failed")
         return get_error_data_result(message="SOURCE_OPERATION_INTERNAL_ERROR"), 500
+
+
+@manager.route("/docmind/documents/<document_id>/pdf-ocr", methods=["POST"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def request_pdf_ocr(tenant_id: str, document_id: str):
+    try:
+        payload = await request.get_json(silent=True)
+        if (not isinstance(payload, dict) or set(payload) != {"expected_source_version_id", "consent"}
+                or payload.get("consent") is not True or not isinstance(payload.get("expected_source_version_id"), str)):
+            return get_error_data_result(message="DOCMIND_PDF_OCR_REQUEST_INVALID"), 400
+        result = docmind_ingestion_service.request_pdf_ocr_consent(
+            tenant_id, document_id=document_id,
+            expected_source_version_id=payload["expected_source_version_id"],
+            actor_id=str(current_user.id),
+            idempotency_key=str(request.headers.get("Idempotency-Key") or ""),
+        )
+        return get_result(data=result)
+    except docmind_ingestion_service.DocmindIngestionError as error:
+        return get_error_data_result(message=error.code), 409
+    except Exception:
+        logger.exception("DocMind PDF OCR request failed")
+        return get_error_data_result(message="DOCMIND_PDF_OCR_INTERNAL_ERROR"), 500
 
 
 @manager.route("/docmind/folders/<folder_id>/children", methods=["GET"])  # noqa: F821

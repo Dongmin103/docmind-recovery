@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import re
+import traceback
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +43,17 @@ SUPPORTED_FORMATS = {
     ".hwp": SourceFormat.HWP,
     ".hwpx": SourceFormat.HWPX,
 }
+
+
+def _log_private_stage_failure(stage: str, error: Exception) -> None:
+    """Log bounded code location only; exception text may contain source material."""
+    frames = traceback.extract_tb(error.__traceback__)
+    last = frames[-1] if frames else None
+    logging.getLogger(__name__).warning(
+        "DocMind parser stage failure stage=%s class=%s code_file=%s code_line=%s",
+        stage, type(error).__name__, Path(last.filename).name if last else "unknown",
+        last.lineno if last else 0,
+    )
 
 
 def _stable_id(*parts: str) -> str:
@@ -103,6 +116,7 @@ class ProductionTemporaryParserInputRunner:
         workspace: TemporaryParserWorkspace,
         deadline_at: datetime,
         max_pdf_pages: int | None = None,
+        pdf_ocr_requested: bool = False,
     ) -> ParserStageResult:
         remaining = (deadline_at - _now()).total_seconds()
         if remaining <= 0:
@@ -113,14 +127,25 @@ class ProductionTemporaryParserInputRunner:
         source_format = SUPPORTED_FORMATS.get(Path(workspace.input_path).suffix.lower())
         if source_format is None:
             raise DocmindIngestionError("DOCMIND_INGESTION_FORMAT_UNSUPPORTED")
-        source_bytes = workspace.input_path.read_bytes()
-        config = replace(
-            ParserPlatformConfig.from_env(),
-            artifact_root=str(workspace.derived_root / "parser-artifacts"),
-        )
-        if source_format == SourceFormat.PDF and max_pdf_pages is not None:
-            config = replace(config, max_pdf_pages=min(config.max_pdf_pages, max_pdf_pages))
-        prepared = self._prepare_run(document.to_dict(), source_bytes, source_format, config)
+        if pdf_ocr_requested and source_format != SourceFormat.PDF:
+            raise DocmindIngestionError("DOCMIND_PDF_OCR_REQUEST_INVALID")
+        stage = "read_source"
+        try:
+            source_bytes = workspace.input_path.read_bytes()
+            stage = "configure"
+            config = replace(
+                ParserPlatformConfig.from_env(),
+                artifact_root=str(workspace.derived_root / "parser-artifacts"),
+                pdf_ocr_requested=pdf_ocr_requested,
+            )
+            if source_format == SourceFormat.PDF and max_pdf_pages is not None:
+                config = replace(config, max_pdf_pages=min(config.max_pdf_pages, max_pdf_pages))
+            stage = "prepare"
+            prepared = self._prepare_run(document.to_dict(), source_bytes, source_format, config)
+        except Exception as error:
+            if not getattr(error, "code", None):
+                _log_private_stage_failure(stage, error)
+            raise
         try:
             remaining = (deadline_at - _now()).total_seconds()
             if remaining <= 0:
@@ -141,6 +166,8 @@ class ProductionTemporaryParserInputRunner:
             )
             if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9_]{1,64}", code):
                 code = "DOCMIND_INGESTION_PIPELINE_FAILED"
+            if code == "DOCMIND_INGESTION_PIPELINE_FAILED":
+                _log_private_stage_failure("execute", error)
             try:
                 self._cleanup_failed_staging(
                     document=document,

@@ -56,15 +56,20 @@ class ParserPlatformStandardBridge:
                 prepared=prepared, source_bytes=source_bytes,
                 source_document_id=source_document_id, source_format=source_format,
             )
-        from rag.parser_platform.kordoc_office_pilot import normalize_pilot_document
+        from rag.parser_platform.kordoc_office_pilot import _table_content, normalize_pilot_document
         from rag.parser_platform.kordoc_pilot import KordocPageLimitExceeded, KordocServiceError, parse_pilot_service
 
         try:
-            if prepared.parser_name != "kordoc" or prepared.selection.source_format != source_format:
+            if (prepared.parser_name not in {"kordoc", "kordoc-surya"}
+                    or prepared.selection.source_format != source_format
+                    or (prepared.parser_name == "kordoc-surya") != (
+                        source_format == SourceFormat.PDF and self.config.pdf_ocr_requested
+                    )):
                 raise ValueError("parser selection does not match Kordoc source")
             if source_format not in SourceFormat:
                 raise ValueError("unsupported Kordoc source format")
-            self._emit("PARSING_KORDOC", {"source_format": source_format.value})
+            self._emit("PARSING_SURYA" if prepared.parser_name == "kordoc-surya" else "PARSING_KORDOC",
+                       {"source_format": source_format.value})
             storage = getattr(settings, "STORAGE_IMPL", None)
             with stage_scope(storage, "parse_http", prepared.parse_run_id):
                 try:
@@ -89,7 +94,7 @@ class ParserPlatformStandardBridge:
                         raise error
             with stage_scope(storage, "normalize_artifacts", prepared.parse_run_id):
                 if (result.get("schema_version") != "docmind-kordoc-v2"
-                        or result.get("parser_version") != prepared.parser_version
+                        or result.get("parser_version") != self.config.kordoc_parser_version
                         or result.get("patch_revision") != self.config.kordoc_patch_revision
                         or result.get("source_format") != source_format.value
                         or result.get("source_hash") != hashlib.sha256(source_bytes).hexdigest()):
@@ -105,17 +110,62 @@ class ParserPlatformStandardBridge:
                         raise ValueError("Kordoc PDF page count mismatch")
                     if len(result.get("pdf_pages") or []) != pdf_page_count:
                         raise ValueError("Kordoc PDF page metadata incomplete")
-                raw_ref = self.artifacts.write_json(
-                    parse_run_id=prepared.parse_run_id, name="kordoc-raw", payload=result,
-                )
+                    if self.config.pdf_ocr_requested:
+                        from rag.parser_platform.surya_pdf_adapter import merge_surya_pdf
+                        from rag.parser_platform.surya_pdf_client import parse_surya_pdf
+
+                        has_native_text = False
+                        for block in result["blocks"]:
+                            if block.get("type") in {"image", "separator"}:
+                                continue
+                            native_text = (_table_content(block.get("table") or {}, render_html=False)[0]
+                                           if block.get("type") == "table" else str(block.get("text") or ""))
+                            if any(character.isprintable() and not character.isspace()
+                                   for character in native_text):
+                                has_native_text = True
+                                break
+                        targets = ([page["page"] for page in result["pdf_pages"] if page["has_images"]]
+                                   if has_native_text else list(range(1, pdf_page_count + 1)))
+                        if not targets:
+                            raise ValueError("Surya OCR request has no eligible PDF pages")
+                        with stage_scope(storage, "parse_http", prepared.parse_run_id):
+                            ocr_result = parse_surya_pdf(
+                                source_bytes, service_url=self.config.surya_service_url,
+                                timeout=self.config.surya_deadline_seconds,
+                                parse_run_id=prepared.parse_run_id,
+                                parser_fingerprint=prepared.parser_fingerprint,
+                                expected_page_count=pdf_page_count, requested_page_numbers=targets,
+                                parser_version=self.config.surya_parser_version,
+                                model_version=self.config.surya_model_revision,
+                                backend=self.config.surya_backend,
+                            )
+                        result = merge_surya_pdf(result, ocr_result)
+                        result["surya_response"] = ocr_result
                 document = normalize_pilot_document(
                     result, source_bytes,
                     source_document_id=source_document_id,
                     parse_run_id=prepared.parse_run_id,
                     chunk_set_id=prepared.chunk_set_id,
-                ).model_copy(update={"raw_artifact_ref": raw_ref, "backend": prepared.backend})
+                )
                 if document.status in {ParserRunStatus.FAILED_RETRYABLE, ParserRunStatus.FAILED_TERMINAL}:
                     raise ValueError("Kordoc produced an incomplete document")
+                if prepared.parser_name == "kordoc-surya":
+                    document = document.model_copy(update={
+                        "parser_name": prepared.parser_name,
+                        "parser_version": prepared.parser_version,
+                        "model_version": prepared.model_version,
+                        "backend": prepared.backend,
+                        "diagnostics": {**document.diagnostics, "ocr_engine": "surya",
+                                        "ocr_model_revision": self.config.surya_model_revision,
+                                        "native_parser_version": self.config.kordoc_parser_version,
+                                        "ocr_requested_pages": targets},
+                    })
+                raw_ref = self.artifacts.write_json(
+                    parse_run_id=prepared.parse_run_id,
+                    name="kordoc-surya-raw" if prepared.parser_name == "kordoc-surya" else "kordoc-raw",
+                    payload=result,
+                )
+                document = document.model_copy(update={"raw_artifact_ref": raw_ref, "backend": prepared.backend})
                 self.artifacts.write_json(
                     parse_run_id=prepared.parse_run_id,
                     name="normalized-document",
@@ -134,6 +184,12 @@ class ParserPlatformStandardBridge:
                 "PARSER_PDF_PAGE_LIMIT_EXCEEDED",
                 detail=str(error.page_count) if error.page_count is not None else None,
             ) from error
+        except ValueError as error:
+            if source_format == SourceFormat.PDF and str(error) == "PDF_NO_SEARCHABLE_TEXT":
+                raise parser_error(
+                    "PARSER_PDF_OCR_NO_TEXT" if self.config.pdf_ocr_requested else "PARSER_PDF_NO_SEARCHABLE_TEXT"
+                ) from error
+            raise parser_error("PARSER_NORMALIZATION_FAILED", detail=str(error)) from error
         except Exception as error:
             raise parser_error("PARSER_NORMALIZATION_FAILED", detail=str(error)) from error
 

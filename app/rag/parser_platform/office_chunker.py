@@ -35,6 +35,7 @@ def _merge_source_chunks(chunks: list[dict], text: str) -> dict:
         source_locators=_unique(
             [value for item in source_metadata for value in (item.get("source_locators") or [item["source_item_id"]])]
         ),
+        ocr_engines=_unique([item.get("ocr_engine") for item in source_metadata]),
         children_ids=_unique([value for item in source_metadata for value in item.get("children_ids", [])]),
         warning_codes=_unique([value for item in source_metadata for value in item.get("warning_codes", [])]),
         chunk_headings=_unique([value for item in source_metadata for value in item.get("chunk_headings", [])]),
@@ -59,7 +60,7 @@ class OfficeChunker:
     """Apply format-specific Office boundaries to normalized blocks."""
 
     def chunk(self, document: ParsedDocument, *, parser_config: dict, source_bytes: bytes) -> list[dict]:
-        if document.parser_name != "kordoc" and not (
+        if document.parser_name not in {"kordoc", "kordoc-surya"} and not (
             document.parser_name == "pptx-native" and document.source_format == SourceFormat.PPTX
             and (document.diagnostics.get("native_coverage_complete") is True or (
                 document.diagnostics.get("native_coverage_state") == "partial"

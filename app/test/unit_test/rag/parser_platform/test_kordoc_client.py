@@ -39,3 +39,18 @@ class KordocClientTest(unittest.TestCase):
                 parse_pilot_service(b"synthetic", "pptx", service_url="http://kordoc-parser:8095")
         self.assertEqual(caught.exception.code, "PARSER_INVALID_INPUT")
         self.assertNotIn("private", str(caught.exception))
+
+    def test_pdf_ocr_flag_is_never_sent_to_kordoc(self):
+        seen = []
+
+        def fail(request, *, timeout):
+            seen.append(json.loads(request.data))
+            raise HTTPError(request.full_url, 400, "invalid", {}, io.BytesIO(b'{}'))
+
+        with patch("rag.parser_platform.kordoc_pilot.urllib.request.urlopen", side_effect=fail):
+            with self.assertRaises(KordocServiceError):
+                parse_pilot_service(b"synthetic", "pdf", service_url="http://kordoc-parser:8095")
+        self.assertNotIn("pdf_ocr_requested", seen[0])
+        with self.assertRaises(ValueError):
+            parse_pilot_service(b"synthetic", "pdf", service_url="http://kordoc-parser:8095",
+                                pdf_ocr_requested=True)

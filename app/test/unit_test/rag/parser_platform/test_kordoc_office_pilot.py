@@ -84,6 +84,28 @@ def test_pdf_geometry_uses_page_coordinates_and_existing_pdf_chunker() -> None:
     assert any("Alpha funding 123" in chunk["content_with_weight"] for chunk in chunks)
 
 
+def test_pdf_with_native_text_and_unprocessed_images_remains_searchable_with_warning() -> None:
+    source = (FIXTURES / "office-sample.pdf").read_bytes()
+    result = _result(source, "pdf", [{"type": "paragraph", "text": "Native text", "pageNumber": 1}])
+    result["pdf_pages"][0]["has_images"] = True
+    document = _normalize(result, source)
+    assert [block.text for block in document.blocks] == ["Native text"]
+    assert "PDF_IMAGE_OCR_NOT_RUN" in document.warnings
+
+
+def test_pdf_without_usable_text_has_distinct_signal_only_after_valid_page_metadata() -> None:
+    source = (FIXTURES / "office-sample.pdf").read_bytes()
+    result = _result(source, "pdf", [{"type": "paragraph", "text": "  \n\t", "pageNumber": 1}])
+    with pytest.raises(ValueError, match="PDF_NO_SEARCHABLE_TEXT"):
+        _normalize(result, source)
+    result["blocks"][0]["text"] = "\x00\x1f\u200b"
+    with pytest.raises(ValueError, match="PDF_NO_SEARCHABLE_TEXT"):
+        _normalize(result, source)
+    result["pdf_pages"] = []
+    with pytest.raises(ValueError, match="PDF page metadata/count mismatch"):
+        _normalize(result, source)
+
+
 def test_xlsx_chunks_kordoc_table_without_reopening_original_grid() -> None:
     source = (FIXTURES / "office-sample.xlsx").read_bytes()
     result = _result(source, "xlsx", [

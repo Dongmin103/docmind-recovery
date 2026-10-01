@@ -1871,6 +1871,10 @@ class DocmindIngestionJob(DataBaseModel):
     cleanup_state = CharField(max_length=32, null=False, default="NOT_STARTED", index=True)
     error_code = CharField(max_length=64, null=True, index=True)
     error_message = TextField(null=True)
+    pdf_ocr_requested = BooleanField(default=False, null=False)
+    pdf_ocr_consented_by = CharField(max_length=32, null=True)
+    pdf_ocr_consented_at = DateTimeField(null=True)
+    pdf_ocr_consent_key_hash = CharField(max_length=64, null=True)
 
     class Meta:
         db_table = "docmind_ingestion_job"
@@ -3184,6 +3188,10 @@ def migrate_db():
         "retry_not_before",
         DateTimeField(null=True, index=True),
     )
+    alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_requested", BooleanField(default=False, null=False))
+    alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_consented_by", CharField(max_length=32, null=True))
+    alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_consented_at", DateTimeField(null=True))
+    alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_consent_key_hash", CharField(max_length=64, null=True))
     alter_db_add_column(
         migrator,
         "docmind_source_version",

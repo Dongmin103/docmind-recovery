@@ -86,7 +86,7 @@ def _searchable(mapping, version, job, run, document, project_id: str) -> bool:
     )
 
 
-def _index_status(job, *, searchable: bool, run=None) -> dict[str, Any]:
+def _index_status(job, *, searchable: bool, run=None, pdf_ocr_option=None, pdf_ocr_version_id=None) -> dict[str, Any]:
     """Describe ingestion separately from access to a previously active index."""
     state = job.lifecycle_state if job is not None else None
     cleanup_states = {job.cleanup_state, job.host_cleanup_state} if job is not None else set()
@@ -116,17 +116,26 @@ def _index_status(job, *, searchable: bool, run=None) -> dict[str, Any]:
             "DOCMIND_INGESTION_CLEANUP_FAILED", "DOCMIND_INGESTION_STAGING_CLEANUP_FAILED",
             "DOCMIND_INGESTION_SOURCE_CHANGED", "DOCMIND_INGESTION_RETRY_EXHAUSTED",
             "EPHEMERAL_CLEANUP_FAILED", "EPHEMERAL_CLEANUP_STATE_FAILED",
+            "PARSER_PDF_NO_SEARCHABLE_TEXT", "PARSER_PDF_OCR_NO_TEXT",
         }
         if error_code not in allowed_errors:
             error_code = "DOCMIND_INGESTION_FAILED"
     native_warnings = set(run.warnings or ()) if searchable and run is not None and run.parser_name == "pptx-native" else set()
+    pdf_warnings = (
+        set(run.warnings or ())
+        if searchable and run is not None and run.parser_name in {"kordoc", "kordoc-surya"}
+        and run.source_format.lower() == "pdf"
+        else set()
+    )
     return {
         "index_state": index_state,
         "index_cleanup_state": cleanup,
         "index_error_code": error_code,
         "searchable": searchable,
         "index_partial_coverage": "PPTX_NATIVE_PARTIAL_COVERAGE" in native_warnings,
-        "index_image_ocr_not_run": "IMAGE_OCR_NOT_RUN" in native_warnings,
+        "index_image_ocr_not_run": "IMAGE_OCR_NOT_RUN" in native_warnings or "PDF_IMAGE_OCR_NOT_RUN" in pdf_warnings,
+        "index_pdf_ocr_option": pdf_ocr_option,
+        "index_pdf_ocr_version_id": pdf_ocr_version_id,
     }
 
 
@@ -192,6 +201,7 @@ def load(tenant_id: str) -> SourceProjection | None:
             DocmindIngestionJob.source_id, DocmindIngestionJob.document_id,
             DocmindIngestionJob.lifecycle_state, DocmindIngestionJob.cleanup_state,
             DocmindIngestionJob.host_cleanup_state, DocmindIngestionJob.error_code,
+            DocmindIngestionJob.version_id, DocmindIngestionJob.pdf_ocr_requested,
         ).where(
             (DocmindIngestionJob.project_id == project.id)
             & (DocmindIngestionJob.source_document_id.in_(mapping_ids[offset : offset + 500]))
@@ -200,6 +210,9 @@ def load(tenant_id: str) -> SourceProjection | None:
             mapping = mappings_by_id[candidate.source_document_id]
             if candidate.source_id == mapping.source_id and candidate.document_id == mapping.document_id:
                 latest_jobs.setdefault(mapping.id, candidate)
+    latest_versions = _records_by_id(
+        DocmindSourceVersion, {job.version_id for job in latest_jobs.values()}
+    )
 
     root_id = _id("docmind-source-root", project.id)
     folder_rows: dict[str, dict[str, Any]] = {}
@@ -288,6 +301,29 @@ def load(tenant_id: str) -> SourceProjection | None:
         if document is not None and document.kb_id != project.dataset_id:
             eligible = False
         version_members.append((mapping.id, path, version.id if version is not None else None, eligible))
+        latest_job = latest_jobs.get(mapping.id)
+        latest_version = latest_versions.get(latest_job.version_id) if latest_job is not None else None
+        pdf_ocr_option = None
+        if (
+            latest_job is not None and latest_version is not None
+            and path.lower().endswith(".pdf") and not latest_job.pdf_ocr_requested
+            and latest_job.cleanup_state == "COMPLETE" and latest_job.host_cleanup_state == "COMPLETE"
+            and latest_version.source_document_id == mapping.id
+            and latest_version.document_id == mapping.document_id
+            and mapping.observed_ciphertext_sha256 == latest_version.ciphertext_sha256
+            and mapping.observed_size == latest_version.ciphertext_size
+            and mapping.observed_mtime_ns == latest_version.source_mtime_ns
+        ):
+            if latest_job.lifecycle_state == "FAILED" and latest_job.error_code == "PARSER_PDF_NO_SEARCHABLE_TEXT":
+                pdf_ocr_option = "zero_text"
+            elif (
+                latest_job.lifecycle_state == "COMPLETE" and eligible
+                and version is not None and version.id == latest_version.id
+                and run is not None and run.parser_name == "kordoc"
+                and run.source_format.lower() == "pdf"
+                and "PDF_IMAGE_OCR_NOT_RUN" in (run.warnings or [])
+            ):
+                pdf_ocr_option = "partial_images"
 
         parent_id = _id("docmind-source-folder", project.id, source.id, "")
         for depth, index in enumerate(range(1, len(parts)), start=2):
@@ -307,7 +343,9 @@ def load(tenant_id: str) -> SourceProjection | None:
             "type": "file",
             "document_id": mapping.document_id,
             "document_exists": document is not None,
-            **_index_status(latest_jobs.get(mapping.id), searchable=eligible, run=run),
+            **_index_status(latest_job, searchable=eligible, run=run,
+                            pdf_ocr_option=pdf_ocr_option,
+                            pdf_ocr_version_id=latest_version.id if pdf_ocr_option else None),
         }
         nodes[parent_id]["child_count"] += 1
         if eligible:

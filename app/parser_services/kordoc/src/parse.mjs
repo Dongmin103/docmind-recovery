@@ -60,11 +60,12 @@ export async function parseDocument(payload, {
   if (hash !== payload.source_hash) {
     throw new Error('source hash mismatch');
   }
+  if (payload.pdf_ocr_requested !== undefined) throw new Error('PDF OCR runs in the isolated Surya service');
   const ocrEnabled = process.env.KORDOC_OCR_ENABLED !== '0';
   const parseFormat = payload.source_format === 'doc' ? 'docx' : payload.source_format === 'pptx' ? 'pdf' : payload.source_format;
   const parseSource = parseFormat === payload.source_format ? source : await convertOfficeFn(source, payload.source_format, { workDir });
   const result = await parseFn(parseSource, {
-    images: parseFormat === 'docx', ocr: ocrEnabled && parseFormat === 'pdf',
+    images: parseFormat === 'docx', ocr: false,
     ...(parseFormat === 'pdf' ? { removeHeaderFooter: false, maxPages: requestedPdfPageLimit(payload) } : {}),
   });
   if (!result.success) {
@@ -79,10 +80,10 @@ export async function parseDocument(payload, {
   if (result.fileType !== parseFormat) {
     throw new Error('source format mismatch');
   }
-  if (!result.blocks.length) {
+  const pdfPages = parseFormat === 'pdf' ? completePdfPages(result) : undefined;
+  if (!result.blocks.length && payload.source_format !== 'pdf') {
     throw new Error('empty parse result');
   }
-  const pdfPages = parseFormat === 'pdf' ? completePdfPages(result) : undefined;
   const imageOcr = [];
   if (parseFormat === 'docx' && ocrEnabled) {
     const images = new Map((result.images || []).map(item => [item.filename, item]));

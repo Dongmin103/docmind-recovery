@@ -190,6 +190,42 @@ def test_active_native_pptx_warning_flags_reach_source_node(source_db):
     assert node["index_image_ocr_not_run"] is True
 
 
+def test_pdf_ocr_options_are_exposed_only_for_verified_current_source_version(source_db):
+    _mapping("home", "doc-a", "Manuals/slides.pdf", complete=True)
+    mapping = DocmindSourceDocument.get_by_id("map-doc-a")
+    DocmindSourceDocument.update(
+        observed_ciphertext_sha256="a" * 64, observed_size=42, observed_mtime_ns=1,
+    ).where(DocmindSourceDocument.id == mapping.id).execute()
+    run = ParserRun.get_by_id("run-doc-a")
+    run.parser_name = "kordoc"
+    run.source_format = "PDF"
+    run.lifecycle = "READY_WITH_WARNING"
+    run.warnings = ["PDF_IMAGE_OCR_NOT_RUN"]
+    run.save()
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_pdf_ocr_option"] == "partial_images"
+    assert node["index_pdf_ocr_version_id"] == "version-doc-a"
+    assert node["index_image_ocr_not_run"] is True
+    DocmindIngestionJob.update(pdf_ocr_requested=True).execute()
+    run.parser_name = "kordoc-surya"
+    run.save()
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_pdf_ocr_option"] is None
+    assert node["index_image_ocr_not_run"] is True
+    DocmindIngestionJob.update(pdf_ocr_requested=False).execute()
+    DocmindIngestionJob.update(lifecycle_state="DISCOVERED").execute()
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["searchable"] is True
+    assert node["index_state"] == "PENDING"
+
+    DocmindIngestionJob.update(lifecycle_state="FAILED", error_code="PARSER_PDF_NO_SEARCHABLE_TEXT").execute()
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_pdf_ocr_option"] == "zero_text"
+    DocmindIngestionJob.update(error_code="DOCMIND_INGESTION_PIPELINE_FAILED").execute()
+    node = next(row for row in projection.load("tenant-1").hierarchy_nodes if row.get("document_id") == "doc-a")
+    assert node["index_pdf_ocr_option"] is None
+
+
 def test_tombstone_disabled_source_and_failed_cleanup_are_excluded(source_db):
     mapping = _mapping("home", "doc-a", "Manuals/guide.doc", complete=True)
     _mapping("dept", "doc-b", "Manuals/guide.doc", complete=True)
