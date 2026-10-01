@@ -24,7 +24,7 @@ def generate():
             escaped = "".join("\\u%04x" % unit for unit in [int.from_bytes(folded.encode("utf-16-le")[i:i+2], "little") for i in range(0, len(folded.encode("utf-16-le")), 2)])
             lines.append(f'case 0x{code:x}: result.Append("{escaped}"); break;')
     lines += ["default: result.Append(Char.ConvertFromUtf32(code)); break;", "}", "}", "return result.ToString();", "}", "}", "}"]
-    Path(__file__).with_name("DocMindUnicodeCaseFold.cs").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    Path(__file__).with_name("DocMindUnicodeCaseFold.cs").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":
