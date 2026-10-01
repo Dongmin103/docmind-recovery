@@ -114,6 +114,32 @@ def _pdf_provenance(block: dict[str, Any], page_sizes: dict[int, tuple[float, fl
     )
 
 
+def _pdf_blocks_with_locators(raw_blocks: list[dict[str, Any]]):
+    """Visit PDF list children in source order without changing root block IDs."""
+    stack = [(raw, f"kordoc-ir-v1/block/{index}", 0)
+             for index, raw in reversed(list(enumerate(raw_blocks)))]
+    child_count = 0
+    while stack:
+        raw, locator, depth = stack.pop()
+        if not isinstance(raw, dict):
+            raise ValueError("invalid kordoc PDF block")
+        children = raw.get("children")
+        if children is not None and not isinstance(children, list):
+            raise ValueError("nested kordoc blocks require explicit support")
+        if children:
+            if raw.get("type") != "list":
+                raise ValueError("nested kordoc blocks require explicit support")
+            child_count += len(children)
+            if depth >= 32 or child_count > 100_000:
+                raise ValueError("nested kordoc PDF list exceeds safe limits")
+            for child_index in range(len(children) - 1, -1, -1):
+                child = children[child_index]
+                if not isinstance(child, dict) or child.get("type") != "list":
+                    raise ValueError("nested kordoc blocks require explicit support")
+                stack.append((child, f"{locator}/children/{child_index}", depth + 1))
+        yield raw, locator
+
+
 def _warning_codes(result: dict[str, Any], *, strict_ocr_warnings: bool = False) -> tuple[str, ...]:
     warnings = result.get("warnings") or []
     if not isinstance(warnings, list):
@@ -421,9 +447,11 @@ def normalize_pilot_document(
     blocks: list[ParsedBlock] = []
     geometry_omitted = False
     heading_stack: list[tuple[int, str]] = []
-    for index, raw in enumerate(result["blocks"]):
+    located_blocks = (_pdf_blocks_with_locators(result["blocks"]) if source_format == "pdf" else
+                      ((raw, f"kordoc-ir-v1/block/{index}") for index, raw in enumerate(result["blocks"])))
+    for raw, source_item_id in located_blocks:
         block_type = raw.get("type")
-        if raw.get("children"):
+        if raw.get("children") and source_format != "pdf":
             raise ValueError("nested kordoc blocks require explicit support")
         if block_type == "separator":
             continue
@@ -453,7 +481,6 @@ def normalize_pilot_document(
             while heading_stack and heading_stack[-1][0] >= level:
                 heading_stack.pop()
             heading_stack.append((level, str(raw.get("text") or "").strip()))
-        source_item_id = f"kordoc-ir-v1/block/{index}"
         if source_format in {"doc", "docx"}:
             provenance = DocxProvenance(
                 item_locator=source_item_id,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -104,6 +105,136 @@ def test_pdf_without_usable_text_has_distinct_signal_only_after_valid_page_metad
     result["pdf_pages"] = []
     with pytest.raises(ValueError, match="PDF page metadata/count mismatch"):
         _normalize(result, source)
+
+
+@pytest.mark.parametrize("child_counts", [(3, 5, 3), (3,)])
+def test_pdf_nested_lists_keep_parent_and_every_child_in_preorder(child_counts) -> None:
+    source = b"synthetic-pdf-nested-lists"
+    raw_blocks = [{"type": "paragraph", "text": "Before", "pageNumber": 1}]
+    expected_text = ["Before"]
+    expected_ids = ["kordoc-ir-v1/block/0"]
+    expected_pages = [1]
+    for parent_offset, child_count in enumerate(child_counts, start=1):
+        page = parent_offset
+        parent_text = f"Parent {parent_offset}"
+        children = []
+        raw_blocks.append({
+            "type": "list", "text": parent_text, "pageNumber": page,
+            "bbox": {"page": page, "x": 10, "y": 10, "width": 100, "height": 12},
+            "children": children,
+        })
+        expected_text.append(parent_text)
+        expected_ids.append(f"kordoc-ir-v1/block/{parent_offset}")
+        expected_pages.append(page)
+        for child_index in range(child_count):
+            child_text = parent_text if child_index == 0 else f"Child {parent_offset}.{child_index}"
+            children.append({
+                "type": "list", "text": child_text, "pageNumber": page,
+                "bbox": {"page": page, "x": 20, "y": 20 + child_index * 15,
+                         "width": 100, "height": 12},
+            })
+            expected_text.append(child_text)
+            expected_ids.append(f"kordoc-ir-v1/block/{parent_offset}/children/{child_index}")
+            expected_pages.append(page)
+    raw_blocks.append({"type": "paragraph", "text": "After", "pageNumber": 1})
+    expected_text.append("After")
+    expected_ids.append(f"kordoc-ir-v1/block/{len(raw_blocks) - 1}")
+    expected_pages.append(1)
+    result = _result(source, "pdf", raw_blocks)
+    result["metadata"]["pageCount"] = len(child_counts)
+    result["pdf_pages"] = [
+        {"page": page, "width": 595, "height": 842, "has_images": False, "ocr_applied": False}
+        for page in range(1, len(child_counts) + 1)
+    ]
+    original = deepcopy(result)
+
+    document = _normalize(result, source)
+    assert result == original
+    assert [block.text for block in document.blocks] == expected_text
+    assert [block.source_item_id for block in document.blocks] == expected_ids
+    assert [block.provenance[0].page for block in document.blocks] == expected_pages
+    assert [block.reading_order for block in document.blocks] == list(range(len(expected_text)))
+    assert len({block.stable_block_id for block in document.blocks}) == len(expected_text)
+    assert [block.stable_block_id for block in _normalize(result, source).blocks] == [
+        block.stable_block_id for block in document.blocks
+    ]
+
+
+def test_pdf_nested_list_uses_child_own_page_and_depth_first_order() -> None:
+    source = b"synthetic-pdf-nested-pages"
+    result = _result(source, "pdf", [{
+        "type": "list", "text": "Parent", "pageNumber": 1,
+        "children": [{
+            "type": "list", "text": "Child", "pageNumber": 2,
+            "children": [{"type": "list", "text": "Grandchild", "pageNumber": 2}],
+        }],
+    }])
+    result["metadata"]["pageCount"] = 2
+    result["pdf_pages"].append({"page": 2, "width": 595, "height": 842,
+                                 "has_images": False, "ocr_applied": False})
+    document = _normalize(result, source)
+    assert [block.text for block in document.blocks] == ["Parent", "Child", "Grandchild"]
+    assert [block.provenance[0].page for block in document.blocks] == [1, 2, 2]
+    assert [block.source_item_id for block in document.blocks] == [
+        "kordoc-ir-v1/block/0", "kordoc-ir-v1/block/0/children/0",
+        "kordoc-ir-v1/block/0/children/0/children/0",
+    ]
+
+
+def test_pdf_nested_list_keeps_child_when_parent_has_no_usable_text() -> None:
+    source = b"synthetic-pdf-blank-list-parent"
+    result = _result(source, "pdf", [{
+        "type": "list", "text": " \x00 ", "pageNumber": 1,
+        "children": [{"type": "list", "text": "Child only", "pageNumber": 1}],
+    }])
+    document = _normalize(result, source)
+    assert [block.text for block in document.blocks] == ["Child only"]
+    assert document.blocks[0].source_item_id == "kordoc-ir-v1/block/0/children/0"
+
+
+@pytest.mark.parametrize("source_format,block", [
+    ("pdf", {"type": "paragraph", "text": "Parent", "pageNumber": 1,
+             "children": [{"type": "list", "text": "Child", "pageNumber": 1}]}),
+    ("pdf", {"type": "list", "text": "Parent", "pageNumber": 1,
+             "children": [{"type": "paragraph", "text": "Child", "pageNumber": 1}]}),
+    ("pdf", {"type": "list", "text": "Parent", "pageNumber": 1,
+             "children": {"type": "list", "text": "Child"}}),
+    ("pdf", {"type": "list", "text": "Parent", "pageNumber": 1,
+             "children": {}}),
+    ("docx", {"type": "list", "text": "Parent",
+              "children": [{"type": "list", "text": "Child"}]}),
+])
+def test_nested_blocks_outside_pdf_list_tree_still_fail_closed(source_format, block) -> None:
+    source = ((FIXTURES / "office-sample.docx").read_bytes() if source_format == "docx"
+              else b"synthetic-nested-unsupported")
+    with pytest.raises(ValueError, match="nested kordoc blocks require explicit support"):
+        _normalize(_result(source, source_format, [block]), source)
+
+
+@pytest.mark.parametrize("child", [
+    {"type": "list", "text": "Child", "pageNumber": 2},
+    {"type": "list", "text": "Child", "pageNumber": 1,
+     "bbox": {"page": 2, "x": 10, "y": 10, "width": 20, "height": 10}},
+    {"type": "list", "text": "Child"},
+])
+def test_pdf_nested_list_requires_child_own_valid_page_identity(child) -> None:
+    source = b"synthetic-nested-invalid-page"
+    result = _result(source, "pdf", [{"type": "list", "text": "Parent", "pageNumber": 1,
+                                      "children": [child]}])
+    with pytest.raises(ValueError, match="page"):
+        _normalize(result, source)
+
+
+def test_pdf_nested_list_has_bounded_depth() -> None:
+    source = b"synthetic-pdf-deep-list"
+    root = {"type": "list", "text": "Root", "pageNumber": 1}
+    current = root
+    for depth in range(33):
+        child = {"type": "list", "text": f"Child {depth}", "pageNumber": 1}
+        current["children"] = [child]
+        current = child
+    with pytest.raises(ValueError, match="nested kordoc PDF list exceeds safe limits"):
+        _normalize(_result(source, "pdf", [root]), source)
 
 
 def test_xlsx_chunks_kordoc_table_without_reopening_original_grid() -> None:
