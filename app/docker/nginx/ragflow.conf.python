@@ -21,6 +21,11 @@ server {
     }
 
 
+    location = / { absolute_redirect off; return 302 /docmind$is_args$args; }
+    location = /home { absolute_redirect off; return 302 /docmind$is_args$args; }
+    location = /login { absolute_redirect off; return 302 /docmind$is_args$args; }
+    location = /login-next { absolute_redirect off; return 302 /docmind$is_args$args; }
+
     location / {
         index index.html;
         try_files $uri $uri/ /index.html;
