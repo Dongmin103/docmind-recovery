@@ -10,11 +10,11 @@
   "cleanup_receipt_root": "C:\\DocMindHost\\cleanup-receipts",
   "cleanup_receipt_replay_seconds": 60,
   "job_timeout_seconds": 120,
+  "sync_state_root": "C:\\DocMindHost\\sync-state",
   "claim_lease_seconds": 1800,
   "preview_enabled": false,
   "lease_safety_seconds": 10,
   "reaper_minimum_age_seconds": 300,
-  "initial_scan_on_startup": true,
   "scan_batch_size": 250,
   "daily_reconciliation_timezone": "Asia/Seoul",
   "daily_reconciliation_local_time": "00:00",
@@ -23,13 +23,7 @@
   "sources": [
     {
       "source_id": "source-1",
-      "root": "D:\\RegisteredEncryptedRoot",
-      "documents": [
-        {
-          "document_id": "registered-document-1",
-          "relative_path": "folder\\document.enc"
-        }
-      ]
+      "root": "D:\\RegisteredEncryptedRoot"
     }
   ]
 }

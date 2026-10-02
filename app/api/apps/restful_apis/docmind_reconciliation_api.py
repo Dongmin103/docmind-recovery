@@ -62,7 +62,7 @@ def _occurred_at(value: object) -> datetime:
 
 
 def _base(req: object) -> dict:
-    if not isinstance(req, dict) or req.get("protocol_version") != 1:
+    if not isinstance(req, dict) or req.get("protocol_version") not in {1, 2}:
         raise docmind_reconciliation_service.DocmindReconciliationError(
             "DOCMIND_RECONCILIATION_REQUEST_INVALID"
         )
@@ -78,6 +78,10 @@ async def source_scan_event():
         req = _base(await request.get_json(silent=True))
         event = req.get("event")
         common = {"protocol_version", "worker_id", "source_id", "scan_id", "event", "occurred_at"}
+        v2 = req["protocol_version"] == 2
+        if v2:
+            common |= {"owner_id", "epoch"}
+        fence = {"owner_id": req.get("owner_id"), "epoch": req.get("epoch")} if v2 else {}
         _occurred_at(req.get("occurred_at"))
         if event == "started":
             expected = common | {"reason", "root_access_confirmed"}
@@ -87,7 +91,7 @@ async def source_scan_event():
                 raise docmind_reconciliation_service.DocmindReconciliationError(
                     "DOCMIND_RECONCILIATION_REQUEST_INVALID"
                 )
-            if req.get("reason") not in {"startup", "scheduled", "manual"}:
+            if req.get("reason") not in ({"startup", "restart", "watcher_error", "scheduled"} if v2 else {"startup", "scheduled", "manual"}):
                 raise docmind_reconciliation_service.DocmindReconciliationError(
                     "DOCMIND_RECONCILIATION_REQUEST_INVALID"
                 )
@@ -98,6 +102,7 @@ async def source_scan_event():
                 root_access_confirmed=req.get("root_access_confirmed") is True,
                 trigger=f"HOST_{str(req['reason']).upper()}",
                 schedule_fencing_token=req.get("schedule_fencing_token"),
+                protocol_version=req["protocol_version"], **fence,
             )
         elif event == "batch":
             if set(req) != common | {"batch_index", "documents"}:
@@ -110,6 +115,7 @@ async def source_scan_event():
                 worker_id=req["worker_id"],
                 batch_index=req["batch_index"],
                 documents=req["documents"],
+                **fence,
             )
         elif event == "completed":
             if set(req) != common | {"complete", "file_count", "batch_count"}:
@@ -123,6 +129,7 @@ async def source_scan_event():
                 complete=req.get("complete") is True,
                 file_count=req["file_count"],
                 batch_count=req["batch_count"],
+                **fence,
             )
         elif event == "failed":
             expected = common | {
@@ -145,6 +152,8 @@ async def source_scan_event():
                 error_code=req["error_code"],
                 root_access_confirmed=req.get("root_access_confirmed") is True,
                 schedule_fencing_token=req.get("schedule_fencing_token"),
+                protocol_version=req["protocol_version"],
+                **fence,
             )
         else:
             raise docmind_reconciliation_service.DocmindReconciliationError(
@@ -162,6 +171,31 @@ async def source_scan_event():
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
 
 
+@manager.route("/cloud-sync/host-worker/scans/candidates", methods=["POST"])  # noqa: F821
+async def source_scan_candidates():
+    body = await request.get_data()
+    key_id = ""
+    try:
+        key_id = await _authenticate(body)
+        req = _base(await request.get_json(silent=True))
+        expected = {"protocol_version", "worker_id", "owner_id", "epoch", "source_id", "scan_id", "after_document_id", "limit"}
+        if req["protocol_version"] != 2 or set(req) != expected:
+            raise docmind_reconciliation_service.DocmindReconciliationError("DOCMIND_RECONCILIATION_REQUEST_INVALID")
+        result = docmind_reconciliation_service.missing_scan_candidates(
+            source_id=req["source_id"], scan_id=req["scan_id"], worker_id=req["worker_id"],
+            owner_id=req["owner_id"], epoch=req["epoch"],
+            after_document_id=req["after_document_id"], limit=req["limit"],
+        )
+        return _signed(result, key_id)
+    except docmind_worker_auth.WorkerAuthenticationError:
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
+    except docmind_reconciliation_service.DocmindReconciliationError as error:
+        return _signed({"error": error.code}, key_id, 409)
+    except Exception:
+        logger.exception("DocMind scan candidate page failed")
+        if key_id:
+            return _signed({"error": "DOCMIND_RECONCILIATION_INTERNAL_ERROR"}, key_id, 500)
+        return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
 @manager.route("/cloud-sync/host-worker/deletions", methods=["POST"])  # noqa: F821
 async def source_deletion_event():
     body = await request.get_data()
@@ -169,6 +203,10 @@ async def source_deletion_event():
     try:
         key_id = await _authenticate(body)
         req = _base(await request.get_json(silent=True))
+        if req["protocol_version"] != 1:
+            raise docmind_reconciliation_service.DocmindReconciliationError(
+                "DOCMIND_RECONCILIATION_PROTOCOL_OUTDATED"
+            )
         expected = {
             "protocol_version",
             "worker_id",
@@ -229,10 +267,21 @@ async def claim_reconciliation():
         retries = docmind_reconciliation_service.reschedule_retryable_jobs(
             source_id=source_id
         )
+        exclusions_finished = 0
+        exclusions_retry_failed = False
+        try:
+            exclusions_finished = docmind_reconciliation_service.retry_pending_authoritative_deletions(
+                source_id=source_id, limit=100
+            )
+        except Exception:
+            logger.exception("DocMind pending search exclusion retry failed")
+            exclusions_retry_failed = True
         scan = docmind_reconciliation_service.claim_due_midnight_scan(
             worker_id, lease_seconds=lease_seconds, source_id=source_id
         )
-        return _signed({"scan": scan, "retries_scheduled": len(retries)}, key_id)
+        return _signed({"scan": scan, "retries_scheduled": len(retries),
+                        "exclusions_finished": exclusions_finished,
+                        "exclusions_retry_failed": exclusions_retry_failed}, key_id)
     except docmind_worker_auth.WorkerAuthenticationError:
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
     except docmind_reconciliation_service.DocmindReconciliationError as error:

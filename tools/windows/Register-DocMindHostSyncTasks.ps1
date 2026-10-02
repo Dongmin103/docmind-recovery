@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$ConfigPath,
-    [switch]$AllowFullScan
+    [Parameter(Mandatory = $true)][string]$ConfigPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,9 +20,7 @@ foreach ($rule in $rules) {
 }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($config.PSObject.Properties.Name -notcontains 'sources' -or @($config.sources).Count -eq 0) { throw 'No configured sources are available.' }
-if (-not $AllowFullScan -and ($config.PSObject.Properties.Name -notcontains 'initial_scan_on_startup' -or [bool]$config.initial_scan_on_startup)) {
-    throw 'initial_scan_on_startup must be false before registering observation-only tasks.'
-}
+if ($config.PSObject.Properties.Name -notcontains 'sync_state_root') { throw 'sync_state_root is required for the incremental watcher.' }
 $sourceIds = @{}
 foreach ($source in @($config.sources)) {
     if ([string]::IsNullOrWhiteSpace([string]$source.source_id) -or [string]::IsNullOrWhiteSpace([string]$source.root)) { throw 'Every configured source needs an ID and root.' }
@@ -31,8 +28,7 @@ foreach ($source in @($config.sources)) {
     $sourceIds[[string]$source.source_id] = $true
 }
 
-$plan = & (Join-Path $PSScriptRoot 'Get-DocMindReconciliationTaskPlan.ps1') -ConfigPath $configFile
-$shell = [string]$plan.execute
+$shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $shell -PathType Leaf)) { throw 'Task PowerShell executable is unavailable.' }
 if ($configFile.Contains('"') -or $PSScriptRoot.Contains('"')) { throw 'Task paths containing quotation marks are unsupported.' }
 
@@ -75,9 +71,6 @@ function Register-DocMindTask {
 }
 
 $worker = Register-DocMindTask -Name 'DocMind Host Worker' -Script 'Start-DocMindUEncryptorHostWorker.ps1' -Arguments '' -RepeatMinutes 15 -AtLogon
-$watchArguments = if ($AllowFullScan) { '-EnableDiscovery' } else { '' }
-$watcher = Register-DocMindTask -Name 'DocMind Source Watcher' -Script 'Watch-DocMindEncryptedSources.ps1' -Arguments $watchArguments -RepeatMinutes 15 -AtLogon
-$reconciliation = Register-DocMindTask -Name ([string]$plan.task_name) -Script 'Invoke-DocMindSourceReconciliation.ps1' -Arguments '-Reason scheduled' -RepeatMinutes ([int]$plan.repeat_every_minutes) -Disabled:(-not $AllowFullScan)
+$watcher = Register-DocMindTask -Name 'DocMind Source Watcher' -Script 'Watch-DocMindEncryptedSources.ps1' -Arguments '' -RepeatMinutes 15 -AtLogon
 $worker
 $watcher
-$reconciliation

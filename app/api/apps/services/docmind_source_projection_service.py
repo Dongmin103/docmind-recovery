@@ -99,7 +99,7 @@ def _index_status(job, *, searchable: bool, run=None, pdf_ocr_option=None, pdf_o
         index_state = state
     elif state in {"DECRYPTING", "PARSING", "INDEXING"}:
         index_state = "PROCESSING"
-    elif state in {"DISCOVERED", "WAITING_SOURCE_STABLE"}:
+    elif state in {"DISCOVERED", "WAITING_SOURCE_STABLE", "SUPERSEDED"}:
         index_state = "PENDING"
     elif searchable:
         index_state = "INDEXED"

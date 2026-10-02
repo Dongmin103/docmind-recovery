@@ -36,8 +36,7 @@ foreach ($sourceId in $selectedIds) {
     if (-not $configuredIds.ContainsKey($sourceId)) { throw 'Selected source_id is absent from host config.' }
 }
 
-$taskPlan = & (Join-Path $PSScriptRoot 'Get-DocMindReconciliationTaskPlan.ps1') -ConfigPath $configFile
-$shell = [string]$taskPlan.execute
+$shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $shell -PathType Leaf)) { throw 'Task PowerShell executable is unavailable.' }
 if ($configFile.Contains('"') -or $PSScriptRoot.Contains('"')) { throw 'Task paths containing quotation marks are unsupported.' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -54,18 +53,10 @@ $definitions = @(
         [pscustomobject]@{
             task_name = "DocMind Source Watcher ($sourceId)"
             source_id = $sourceId
-            kind = 'discovery'
+            kind = 'incremental-sync'
             script = 'Watch-DocMindEncryptedSources.ps1'
-            extra_arguments = "-SourceId $sourceId -EnableDiscovery"
+            extra_arguments = "-SourceId $sourceId"
             at_logon = $true
-        }
-        [pscustomobject]@{
-            task_name = "DocMind source reconciliation (Asia-Seoul midnight, $sourceId)"
-            source_id = $sourceId
-            kind = 'scheduled-reconciliation'
-            script = 'Invoke-DocMindSourceReconciliation.ps1'
-            extra_arguments = "-Reason scheduled -SourceId $sourceId"
-            at_logon = $false
         }
     }
 )

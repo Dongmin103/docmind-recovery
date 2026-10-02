@@ -2,7 +2,7 @@ import hashlib
 import importlib.util
 import json
 import sys
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,19 +10,21 @@ from types import SimpleNamespace
 import pytest
 from peewee import SqliteDatabase
 from pypdf import PdfWriter
-from common import settings
-from common.storage_attempt_audit import StorageAttemptAudit, job_stage_scope
 
 from api.db.db_models import (
     DocmindFolder,
     DocmindIngestionJob,
     DocmindProject,
     DocmindSource,
+    DocmindSourceDeletion,
     DocmindSourceDocument,
+    DocmindSourceSyncSession,
     DocmindSourceVersion,
     Document,
     ParserRun,
 )
+from common import settings
+from common.storage_attempt_audit import StorageAttemptAudit, job_stage_scope
 
 SERVICE_PATH = Path(__file__).resolve().parents[5] / "api" / "apps" / "services" / "docmind_ingestion_service.py"
 SPEC = importlib.util.spec_from_file_location("docmind_ingestion_service_under_test", SERVICE_PATH)
@@ -37,6 +39,8 @@ MODELS = [
     DocmindProject,
     DocmindFolder,
     DocmindSource,
+    DocmindSourceDeletion,
+    DocmindSourceSyncSession,
     DocmindSourceDocument,
     DocmindSourceVersion,
     DocmindIngestionJob,
@@ -111,6 +115,93 @@ def test_observation_requires_repeat_and_is_idempotent(ingestion_db):
     assert DocmindIngestionJob.select().count() == 1
 
 
+def test_dirty_document_cannot_be_claimed_even_before_new_hash(ingestion_db):
+    _observe()
+    _observe()
+    DocmindSourceDocument.update(source_dirty=True).execute()
+    assert service.claim_next("worker-1") is None
+    assert DocmindIngestionJob.get().lifecycle_state == "DISCOVERED"
+
+
+@pytest.mark.parametrize("changes", [
+    {"source_dirty": True},
+    {"observation_epoch": 1},
+    {"observation_generation": 1},
+    {"latest_target_version_id": "another-version"},
+])
+def test_obsolete_observation_cannot_activate_identical_hash(ingestion_db, changes):
+    _, claim = _enqueue_and_claim()
+    DocmindIngestionJob.update(lifecycle_state="PARSING").execute()
+    DocmindSourceDocument.update(**changes).execute()
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_SOURCE_CHANGED"):
+        service.activate_indexed_version(
+            claim.job_id, fencing_token=claim.fencing_token,
+            result=service.IndexReadyResult("parser-1", "chunks-1"),
+            expected_active_chunk_set_id=None,
+            activator=SimpleNamespace(activate=lambda **_: pytest.fail("obsolete result activated")),
+        )
+    assert DocmindSourceDocument.get().active_source_version_id is None
+
+
+def test_dirty_after_candidate_selection_prevents_claim(ingestion_db, monkeypatch):
+    _observe()
+    _observe()
+    original_atomic = ingestion_db.atomic
+    from contextlib import contextmanager
+    @contextmanager
+    def dirty_before_transaction(*args, **kwargs):
+        DocmindSourceDocument.update(source_dirty=True).execute()
+        with original_atomic(*args, **kwargs) as txn:
+            yield txn
+    monkeypatch.setattr(ingestion_db, "atomic", dirty_before_transaction)
+    assert service.claim_next("worker-1") is None
+
+
+def test_dirty_before_artifact_upload_does_not_start_parser(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    DocmindSourceDocument.update(source_dirty=True).execute()
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_SOURCE_CHANGED"):
+        service.accept_decrypted_artifact(
+            claim.job_id, worker_id="windows-worker-1", version_id=claim.version_id,
+            fencing_token=claim.fencing_token, plaintext=b"synthetic",
+            plaintext_sha256=hashlib.sha256(b"synthetic").hexdigest(), plaintext_size=9,
+            adapter=SimpleNamespace(accept=lambda **_: pytest.fail("obsolete input parsed")),
+        )
+
+
+def test_change_during_parsing_discards_staging_and_finishes_superseded(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    events = []
+    class Adapter:
+        def accept(self, **_):
+            return service.ParserInputReceipt("ephemeral-1")
+        def consume(self, receipt, callback):
+            try:
+                return callback(SimpleNamespace(input_path=Path("synthetic.pdf"), derived_root=Path("derived")))
+            finally:
+                events.append("plaintext-cleaned")
+    class Runner:
+        def run(self, **_):
+            DocmindSourceDocument.update(source_dirty=True, observation_generation=1).execute()
+            return service.ParserStageResult(service.IndexReadyResult("parser-new", "chunks-new"), None)
+    activator = SimpleNamespace(
+        activate=lambda **_: pytest.fail("superseded output activated"),
+        discard_staging=lambda **_: events.append("staging-discarded"),
+    )
+    with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_SOURCE_CHANGED"):
+        service.process_decrypted_artifact(
+            claim.job_id, worker_id="windows-worker-1", version_id=claim.version_id, fencing_token=claim.fencing_token,
+            plaintext=b"synthetic", plaintext_sha256=hashlib.sha256(b"synthetic").hexdigest(), plaintext_size=9,
+            adapter=Adapter(), runner=Runner(), activator=activator,
+        )
+    assert events == ["staging-discarded", "plaintext-cleaned"]
+    assert DocmindIngestionJob.get().lifecycle_state == "SUPERSEDED"
+    service.record_worker_status(claim.job_id, worker_id="windows-worker-1", version_id=claim.version_id,
+                                 fencing_token=claim.fencing_token, status="FAILED")
+    assert DocmindIngestionJob.get().lifecycle_state == "SUPERSEDED"
+    assert DocmindIngestionJob.get().host_cleanup_state == "COMPLETE"
+
+
 def test_mapping_requires_registered_source_and_folder(ingestion_db):
     with pytest.raises(service.DocmindIngestionError, match="DOCMIND_INGESTION_SOURCE_UNAUTHORIZED"):
         service.register_source_document_mapping(
@@ -142,6 +233,21 @@ def test_worker_observation_uses_mapping_project_when_tenant_has_multiple_projec
     )
 
     assert result["state"] == "WAITING_SOURCE_STABLE"
+
+
+def test_legacy_worker_observation_rejected_after_incremental_session(ingestion_db):
+    DocmindSourceSyncSession.create(
+        source_id="home-test1", worker_id="worker-1", owner_id="owner-1",
+        epoch=1, last_sequence=0,
+        lease_expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5),
+    )
+    with pytest.raises(service.DocmindIngestionError, match="PROTOCOL_OUTDATED"):
+        service.observe_source_version_from_worker(
+            source_id="home-test1", document_id="document-1",
+            relative_path="reports/document.pdf", ciphertext_sha256="a" * 64,
+            ciphertext_size=123, source_mtime_ns=456,
+        )
+    assert DocmindSourceVersion.select().count() == 0
 
 
 @pytest.mark.parametrize(
@@ -696,6 +802,66 @@ def test_index_activation_uses_cas_adapter_then_switches_source_version(ingestio
     assert DocmindSourceDocument.get().active_source_version_id == claim.version_id
     assert DocmindSourceVersion.get().lifecycle_state == "ACTIVE"
     assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP"
+
+
+@pytest.mark.parametrize("activation_fails", [False, True])
+def test_recreated_document_restores_search_only_with_atomic_activation(ingestion_db, activation_fails):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", created_by="tenant-1", status="0", parser_id="naive", type="pdf", suffix="pdf", source_type="docmind_cloud")
+    DocmindIngestionJob.update(lifecycle_state="PARSING").execute()
+    DocmindSourceDocument.update(generation=3).execute()
+    mapping = DocmindSourceDocument.get()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    deletion = DocmindSourceDeletion.create(
+        id="deletion-1", project_id="project-1", source_id="home-test1",
+        source_document_id=mapping.id, document_id="document-1",
+        authority_kind="INCREMENTAL_ABSENCE", deletion_generation=1,
+        confirmed_at=now, search_excluded_at=now, retained_until=now + timedelta(days=30),
+        lifecycle_state="INACTIVE_RETAINED",
+    )
+
+    def activate(**kwargs):
+        # The real chunk-set store rejects status=0. Both writes must share
+        # the source transaction, including a failure after the pointer swap.
+        assert Document.get_by_id("document-1").status == "1"
+        Document.update(active_chunk_set_id=kwargs["chunk_set_id"]).execute()
+        if activation_fails:
+            raise RuntimeError("activation failed")
+
+    def attempt():
+        service.activate_indexed_version(
+            claim.job_id, fencing_token=claim.fencing_token,
+            result=service.IndexReadyResult("parser-run-1", "chunk-set-1"),
+            expected_active_chunk_set_id=None, activator=SimpleNamespace(activate=activate),
+        )
+
+    if activation_fails:
+        with pytest.raises(RuntimeError, match="activation failed"):
+            attempt()
+        assert Document.get().status == "0"
+        assert Document.get().active_chunk_set_id is None
+        assert DocmindSourceDeletion.get_by_id(deletion.id).lifecycle_state == "INACTIVE_RETAINED"
+        assert DocmindIngestionJob.get().lifecycle_state == "PARSING"
+    else:
+        attempt()
+        assert Document.get().status == "1"
+        assert Document.get().active_chunk_set_id == "chunk-set-1"
+        assert DocmindSourceDeletion.get_by_id(deletion.id).lifecycle_state == "RESTORED"
+        assert DocmindIngestionJob.get().lifecycle_state == "CLEANUP"
+
+
+def test_inactive_document_without_source_deletion_cannot_be_restored(ingestion_db):
+    _, claim = _enqueue_and_claim()
+    Document.create(id="document-1", kb_id="dataset-1", created_by="tenant-1", status="0", parser_id="naive", type="pdf", suffix="pdf", source_type="docmind_cloud")
+    DocmindIngestionJob.update(lifecycle_state="PARSING").execute()
+    with pytest.raises(service.DocmindIngestionError, match="DOCUMENT_INACTIVE"):
+        service.activate_indexed_version(
+            claim.job_id, fencing_token=claim.fencing_token,
+            result=service.IndexReadyResult("parser-run-1", "chunk-set-1"),
+            expected_active_chunk_set_id=None,
+            activator=SimpleNamespace(activate=lambda **_: pytest.fail("inactive document activated")),
+        )
+    assert Document.get().status == "0"
 
 
 def test_distinct_content_replacement_keeps_old_version_until_new_activation(ingestion_db):

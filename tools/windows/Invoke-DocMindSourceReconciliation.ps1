@@ -1,9 +1,11 @@
 [CmdletBinding()]
 param(
     [string]$ConfigPath = $env:DOCMIND_HOST_WORKER_CONFIG,
-    [ValidateSet('startup', 'scheduled', 'manual')][string]$Reason = 'manual',
+    [ValidateSet('startup', 'restart', 'watcher_error', 'scheduled', 'manual')][string]$Reason = 'manual',
     [string]$SourceId,
-    [ValidateRange(1, 1000)][int]$BatchSize = 250
+    [string]$OwnerId,
+    [Int64]$Epoch,
+    [ValidateRange(1, 500)][int]$BatchSize = 250
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,6 +16,11 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) { throw 'DOCMIND_HOST_WORKER_CONF
 $configFile = [IO.Path]::GetFullPath($ConfigPath)
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { throw 'Host worker config file is missing.' }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($OwnerId) -or $Epoch -lt 1) { throw 'LIVE_CHANGE_SESSION_REQUIRED' }
+Assert-DocMindIdentifier -Value $OwnerId -Name 'owner_id'
+if ($config.PSObject.Properties.Name -notcontains 'sync_state_root') { throw 'sync_state_root is required.' }
+Add-Type -Path @((Join-Path $PSScriptRoot 'DocMindSyncQueue.cs'),(Join-Path $PSScriptRoot 'DocMindUnicodeCaseFold.cs'))
+$queue = [DocMind.SyncQueue]::new((Join-Path ([IO.Path]::GetFullPath([string]$config.sync_state_root)) 'sync.sqlite'))
 foreach ($name in @('worker_id', 'api_base_uri', 'key_id', 'shared_secret_file', 'sources')) {
     if ($config.PSObject.Properties.Name -notcontains $name -or $null -eq $config.$name) { throw "Host worker config is missing $name." }
 }
@@ -21,13 +28,14 @@ Assert-DocMindIdentifier -Value ([string]$config.worker_id) -Name 'worker_id'
 Assert-DocMindIdentifier -Value ([string]$config.key_id) -Name 'key_id'
 if (-not [string]::IsNullOrWhiteSpace($SourceId)) { Assert-DocMindIdentifier -Value $SourceId -Name 'source_id' }
 if ($PSBoundParameters.Keys -notcontains 'BatchSize' -and $config.PSObject.Properties.Name -contains 'scan_batch_size') { $BatchSize = [int]$config.scan_batch_size }
-if ($BatchSize -lt 1 -or $BatchSize -gt 1000) { throw 'scan_batch_size must be between 1 and 1000.' }
+if ($BatchSize -lt 1 -or $BatchSize -gt 500) { throw 'scan_batch_size must be between 1 and 500.' }
 
 $apiBase = [Uri]::new([string]$config.api_base_uri)
 if (-not $apiBase.IsAbsoluteUri -or -not $apiBase.IsLoopback -or @('http', 'https') -notcontains $apiBase.Scheme -or $apiBase.UserInfo) { throw 'api_base_uri must be a loopback HTTP(S) endpoint.' }
 $secret = Read-DocMindSharedSecret -LiteralPath ([IO.Path]::GetFullPath([string]$config.shared_secret_file))
 $endpoint = '/api/v1/cloud-sync/host-worker/scans/events'
 $claimEndpoint = '/api/v1/cloud-sync/host-worker/reconciliation/claim'
+$candidateEndpoint = '/api/v1/cloud-sync/host-worker/scans/candidates'
 $responseNonces = @{}
 
 function Get-RequiredHeader {
@@ -94,8 +102,10 @@ function Send-ScanEvent {
 function New-BaseEvent {
     param([string]$Source, [string]$Scan, [string]$Event)
     return [ordered]@{
-        protocol_version = 1
+        protocol_version = 2
         worker_id = [string]$config.worker_id
+        owner_id = $OwnerId
+        epoch = $Epoch
         source_id = $Source
         scan_id = $Scan
         event = $Event
@@ -124,7 +134,7 @@ function Invoke-SourceScan {
         Assert-DocMindNoReparsePoint -LiteralPath $root -Boundary $root -Name 'Source root'
         try { [void]@(Get-ChildItem -LiteralPath $root -Force -ErrorAction Stop) } catch { throw 'SOURCE_ROOT_ACCESS_FAILED' }
         $started = New-BaseEvent -Source $sourceKey -Scan $scanId -Event 'started'
-        $started.reason = $Reason
+        $started.reason = if ($Reason -eq 'manual') { 'restart' } else { $Reason }
         $started.root_access_confirmed = $true
         if ($Reason -eq 'scheduled') {
             if ($ScheduleFencingToken -lt 1) { throw 'SIGNED_SCHEDULED_FENCE_INVALID' }
@@ -136,6 +146,7 @@ function Invoke-SourceScan {
         $batch = [Collections.Generic.List[object]]::new()
         Get-DocMindSourceSnapshotEntries -Root $root | ForEach-Object {
             $batch.Add($_)
+            $null = $queue.Enqueue($sourceKey,[string]$_.relative_path,'upsert',$null,[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
             $fileCount++
             if ($batch.Count -ge $BatchSize) {
                 $message = New-BaseEvent -Source $sourceKey -Scan $scanId -Event 'batch'
@@ -158,6 +169,18 @@ function Invoke-SourceScan {
         $completed.file_count = $fileCount
         $completed.batch_count = $batchIndex
         Send-ScanEvent -Body $completed
+        $cursor = $null
+        do {
+            $candidateRequest = [ordered]@{protocol_version=2;worker_id=[string]$config.worker_id;owner_id=$OwnerId;epoch=$Epoch;source_id=$sourceKey;scan_id=$scanId;after_document_id=$cursor;limit=500}
+            $candidatePage = Invoke-SignedJsonPost -RelativeEndpoint $candidateEndpoint -Body $candidateRequest
+            foreach ($candidate in @($candidatePage.candidates)) {
+                if (Test-DocMindConfirmedSourceFileAbsence -Root $root -RelativePath ([string]$candidate.relative_path)) {
+                    # The queue performs the independent second check after 2 seconds.
+                    $null = $queue.Enqueue($sourceKey,[string]$candidate.relative_path,'delete',$null,[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+                }
+            }
+            $cursor = $candidatePage.next_cursor
+        } while (-not [string]::IsNullOrWhiteSpace([string]$cursor))
         Write-Output ("Source reconciliation completed: source_id={0}, scan_id={1}, files={2}, batches={3}." -f $sourceKey, $scanId, $fileCount, $batchIndex)
         return $true
     } catch {
@@ -217,4 +240,5 @@ if ($Reason -eq 'scheduled') {
         if (-not (Invoke-SourceScan -Source $source)) { $failedSources++ }
     }
 }
-if ($failedSources -gt 0) { throw 'SOURCE_RECONCILIATION_FAILED' }
+try { if ($failedSources -gt 0) { throw 'SOURCE_RECONCILIATION_FAILED' } }
+finally { $queue.Dispose() }

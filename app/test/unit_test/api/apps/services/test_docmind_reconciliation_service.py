@@ -20,6 +20,7 @@ from api.db.db_models import (
     DocmindSourceScan,
     DocmindSourceScanBatch,
     DocmindSourceScanEntry,
+    DocmindSourceSyncSession,
     DocmindSourceVersion,
     Document,
     Knowledgebase,
@@ -38,6 +39,7 @@ MODELS = [
     Document,
     DocmindFolder,
     DocmindSource,
+    DocmindSourceSyncSession,
     DocmindSourceDocument,
     DocmindSourceVersion,
     DocmindIngestionJob,
@@ -555,6 +557,93 @@ def test_only_complete_contiguous_scan_can_authorize_missing_deletion(reconcilia
     assert adapter.calls == []
     assert DocmindSourceDocument.get_by_id("source-document-missing").deleted_at is None
     assert DocmindSourceScan.get().lifecycle_state == "FAILED"
+
+
+def test_v2_scan_pages_candidates_without_deleting_and_fences_old_epoch(reconciliation_db):
+    from datetime import UTC
+
+    DocmindSourceSyncSession.create(
+        source_id="home-test1", worker_id="worker-1", owner_id="owner-1",
+        epoch=3, last_sequence=7,
+        lease_expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5),
+    )
+    args = {"source_id": "home-test1", "scan_id": "scan-v2", "worker_id": "worker-1",
+            "owner_id": "owner-1", "epoch": 3}
+    service.begin_scan(**args, protocol_version=2, root_access_confirmed=True)
+    service.record_scan_batch(**args, batch_index=0, documents=[_keep_document()])
+    result = service.complete_scan(**args, complete=True, file_count=1, batch_count=1)
+    assert result["candidate_paging_required"] is True
+    assert DocmindSourceDocument.get_by_id("source-document-missing").deleted_at is None
+    page = service.missing_scan_candidates(**args, after_document_id=None, limit=500)
+    assert page == {"candidates": [{"document_id": "document-missing",
+                                       "relative_path": "reports/missing.pdf"}], "next_cursor": None}
+    DocmindSourceSyncSession.update(epoch=4).where(
+        DocmindSourceSyncSession.source_id == "home-test1"
+    ).execute()
+    with pytest.raises(service.DocmindReconciliationError, match="SESSION_FENCED"):
+        service.missing_scan_candidates(**args, after_document_id=None, limit=500)
+
+
+def test_v2_scan_does_not_overwrite_newer_dirty_observation(reconciliation_db):
+    from datetime import UTC
+
+    DocmindSourceSyncSession.create(
+        source_id="home-test1", worker_id="worker-1", owner_id="owner-1",
+        epoch=1, last_sequence=0,
+        lease_expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5),
+    )
+    args = {"source_id": "home-test1", "scan_id": "scan-dirty", "worker_id": "worker-1",
+            "owner_id": "owner-1", "epoch": 1}
+    service.begin_scan(**args, protocol_version=2, root_access_confirmed=True)
+    DocmindSourceDocument.update(source_dirty=True, observed_ciphertext_sha256="b" * 64,
+                                 observation_generation=9).where(
+        DocmindSourceDocument.id == "source-document-keep"
+    ).execute()
+    service.record_scan_batch(**args, batch_index=0, documents=[_keep_document()])
+    service.complete_scan(**args, complete=True, file_count=1, batch_count=1)
+    mapping = DocmindSourceDocument.get_by_id("source-document-keep")
+    assert mapping.source_dirty and mapping.observed_ciphertext_sha256 == "b" * 64
+    assert mapping.observation_generation == 9
+
+
+def test_new_epoch_abandons_old_running_scan_under_source_lock(reconciliation_db):
+    from datetime import UTC
+
+    DocmindSourceSyncSession.create(
+        source_id="home-test1", worker_id="worker-1", owner_id="old-owner",
+        epoch=1, last_sequence=2,
+        lease_expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5),
+    )
+    service.begin_scan(source_id="home-test1", scan_id="old-scan", worker_id="worker-1",
+                       owner_id="old-owner", epoch=1, protocol_version=2, root_access_confirmed=True)
+    with pytest.raises(service.DocmindReconciliationError, match="SCAN_IN_PROGRESS"):
+        service.begin_scan(source_id="home-test1", scan_id="same-epoch", worker_id="worker-1",
+                           owner_id="old-owner", epoch=1, protocol_version=2, root_access_confirmed=True)
+    DocmindSourceSyncSession.update(owner_id="new-owner", epoch=2).where(
+        DocmindSourceSyncSession.source_id == "home-test1"
+    ).execute()
+    service.begin_scan(source_id="home-test1", scan_id="new-scan", worker_id="worker-1",
+                       owner_id="new-owner", epoch=2, protocol_version=2, root_access_confirmed=True)
+    old = DocmindSourceScan.get(DocmindSourceScan.scan_id == "old-scan")
+    assert (old.lifecycle_state, old.error_code) == ("FAILED", "SESSION_REPLACED")
+    assert DocmindSourceScan.get(DocmindSourceScan.scan_id == "new-scan").lifecycle_state == "RUNNING"
+
+
+def test_legacy_delete_rejected_after_incremental_session(reconciliation_db):
+    from datetime import UTC
+
+    DocmindSourceSyncSession.create(
+        source_id="home-test1", worker_id="worker-1", owner_id="owner-1",
+        epoch=1, last_sequence=0,
+        lease_expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5),
+    )
+    with pytest.raises(service.DocmindReconciliationError, match="PROTOCOL_OUTDATED"):
+        service.confirm_event_deletion(
+            source_id="home-test1", document_id="document-missing",
+            relative_path="reports/missing.pdf", root_access_confirmed=True,
+            absence_confirmed=True, adapter=RecordingRetentionAdapter(),
+        )
+    assert DocmindSourceDocument.get_by_id("source-document-missing").deleted_at is None
 
 
 def test_failed_scan_never_deletes_and_complete_scan_retains_for_thirty_days(reconciliation_db):

@@ -1799,6 +1799,56 @@ class DocmindSource(DataBaseModel):
         indexes = ((('project_id', 'id'), True),)
 
 
+class DocmindSourceSyncSession(DataBaseModel):
+    """One durable fence per source; never prune epochs or sequence watermarks."""
+
+    source_id = CharField(max_length=64, primary_key=True)
+    worker_id = CharField(max_length=128, null=False)
+    owner_id = CharField(max_length=128, null=False)
+    epoch = BigIntegerField(default=1, null=False)
+    last_sequence = BigIntegerField(default=0, null=False)
+    lease_expires_at = DateTimeField(null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_sync_session"
+
+
+class DocmindSourceChangeReceipt(DataBaseModel):
+    """Durable result committed in the same transaction as document mutations."""
+
+    id = CharField(max_length=32, primary_key=True)
+    source_id = CharField(max_length=64, null=False)
+    epoch = BigIntegerField(null=False)
+    sequence = BigIntegerField(null=False)
+    request_id = CharField(max_length=128, null=False)
+    payload_sha256 = CharField(max_length=64, null=False)
+    result_json = LongTextField(null=False)
+    received_at = DateTimeField(null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_change_receipt"
+        indexes = (
+            (("source_id", "epoch", "request_id"), True),
+            (("source_id", "epoch", "sequence"), True),
+        )
+
+
+class DocmindSourceChangeObservation(DataBaseModel):
+    """An actual observation remains distinct from HTTP delivery attempts."""
+
+    id = CharField(max_length=64, primary_key=True)
+    source_id = CharField(max_length=64, null=False)
+    epoch = BigIntegerField(null=False)
+    observation_id = CharField(max_length=128, null=False)
+    payload_sha256 = CharField(max_length=64, null=False)
+    result_json = LongTextField(null=False)
+    received_at = DateTimeField(null=False, index=True)
+
+    class Meta:
+        db_table = "docmind_source_change_observation"
+        indexes = ((("source_id", "epoch", "observation_id"), True),)
+
+
 class DocmindSourceDocument(DataBaseModel):
     """Stable cloud-source identity; never stores a host physical root."""
 
@@ -1816,6 +1866,13 @@ class DocmindSourceDocument(DataBaseModel):
     observed_size = BigIntegerField(null=True)
     observed_mtime_ns = BigIntegerField(null=True)
     stable_observation_count = IntegerField(default=0, null=False)
+    source_dirty = BooleanField(default=False, null=False)
+    observation_epoch = BigIntegerField(default=0, null=False)
+    observation_generation = BigIntegerField(default=0, null=False)
+    last_change_sequence = BigIntegerField(default=0, null=False)
+    last_change_received_at = DateTimeField(null=True, index=True)
+    stable_observed_at = DateTimeField(null=True)
+    latest_target_version_id = CharField(max_length=32, null=True)
     generation = BigIntegerField(default=0, null=False)
     deleted_at = DateTimeField(null=True, index=True)
 
@@ -1824,6 +1881,8 @@ class DocmindSourceDocument(DataBaseModel):
         indexes = (
             (("project_id", "source_id", "relative_path_hash"), True),
             (("project_id", "source_id", "document_id"), True),
+            (("project_id", "source_id", "host_file_identity"), False),
+            (("project_id", "source_id", "id"), False),
         )
 
 
@@ -1859,6 +1918,8 @@ class DocmindIngestionJob(DataBaseModel):
     lifecycle_state = CharField(max_length=32, null=False, index=True)
     attempt = IntegerField(default=0, null=False)
     fencing_token = BigIntegerField(default=0, null=False)
+    observation_epoch = BigIntegerField(default=0, null=False)
+    observation_generation = BigIntegerField(default=0, null=False)
     lease_owner = CharField(max_length=128, null=True, index=True)
     lease_expires_at = DateTimeField(null=True, index=True)
     retry_not_before = DateTimeField(null=True, index=True)
@@ -1939,6 +2000,9 @@ class DocmindSourceScan(DataBaseModel):
     source_id = CharField(max_length=64, null=False, index=True)
     scan_id = CharField(max_length=64, null=False)
     worker_id = CharField(max_length=128, null=False, index=True)
+    protocol_version = IntegerField(default=1, null=False)
+    scan_start_epoch = BigIntegerField(default=0, null=False)
+    scan_start_sequence = BigIntegerField(default=0, null=False)
     schedule_fencing_token = BigIntegerField(null=True)
     trigger = CharField(max_length=32, null=False, index=True)
     lifecycle_state = CharField(max_length=32, null=False, index=True)
@@ -1998,6 +2062,7 @@ class DocmindSourceDeletion(DataBaseModel):
     document_id = CharField(max_length=32, null=False, index=True)
     authority_kind = CharField(max_length=32, null=False, index=True)
     authority_scan_id = CharField(max_length=32, null=True, index=True)
+    deletion_generation = BigIntegerField(default=0, null=False)
     confirmed_at = DateTimeField(null=False, index=True)
     search_excluded_at = DateTimeField(null=True, index=True)
     retained_until = DateTimeField(null=False, index=True)
@@ -3189,6 +3254,18 @@ def migrate_db():
         DateTimeField(null=True, index=True),
     )
     alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_requested", BooleanField(default=False, null=False))
+    alter_db_add_column(migrator, "docmind_source_document", "source_dirty", BooleanField(default=False, null=False))
+    for table in ("docmind_source_document", "docmind_ingestion_job"):
+        for column in ("observation_epoch", "observation_generation"):
+            alter_db_add_column(migrator, table, column, BigIntegerField(default=0, null=False))
+    alter_db_add_column(migrator, "docmind_source_document", "last_change_sequence", BigIntegerField(default=0, null=False))
+    alter_db_add_column(migrator, "docmind_source_document", "last_change_received_at", DateTimeField(null=True, index=True))
+    alter_db_add_column(migrator, "docmind_source_document", "stable_observed_at", DateTimeField(null=True))
+    alter_db_add_column(migrator, "docmind_source_document", "latest_target_version_id", CharField(max_length=32, null=True))
+    alter_db_add_column(migrator, "docmind_source_scan", "protocol_version", IntegerField(default=1, null=False))
+    alter_db_add_column(migrator, "docmind_source_scan", "scan_start_epoch", BigIntegerField(default=0, null=False))
+    alter_db_add_column(migrator, "docmind_source_scan", "scan_start_sequence", BigIntegerField(default=0, null=False))
+    alter_db_add_column(migrator, "docmind_source_deletion", "deletion_generation", BigIntegerField(default=0, null=False))
     alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_consented_by", CharField(max_length=32, null=True))
     alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_consented_at", DateTimeField(null=True))
     alter_db_add_column(migrator, "docmind_ingestion_job", "pdf_ocr_consent_key_hash", CharField(max_length=64, null=True))

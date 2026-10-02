@@ -474,6 +474,18 @@ class ChunkService:
         ok, doc = DocumentService.get_by_id(doc_id)
         if not ok or doc is None:
             return
+        ctx = self._task_context
+        if (
+            getattr(doc, "source_type", None) == "docmind_cloud"
+            and getattr(ctx, "_docmind_ephemeral_workspace", None) is not None
+            and getattr(ctx, "_docmind_defer_activation", False)
+            and ctx.parse_run_id
+            and ctx.chunk_set_id
+        ):
+            # This isolated set is gated by the document status and active-set
+            # pointer until atomic source activation. Preserve intentional hidden
+            # chunks, but do not inherit the old document's deletion gate.
+            return
         stamped = apply_document_availability(chunks, getattr(doc, "status", "1"))
         if stamped:
             logging.info(
