@@ -11,6 +11,7 @@ namespace DocMind
         public string SourceId, RelativePath, PathKey, Kind, OldRelativePath, Fingerprint;
         public long Generation, LastChangedAt, DueAt;
         public int StableCount;
+        public bool InitialRegistration;
     }
 
     public sealed class SyncOutbox
@@ -132,8 +133,14 @@ namespace DocMind
                 Query("INSERT OR IGNORE INTO counter VALUES(1,0)");
                 Query("CREATE TABLE IF NOT EXISTS pending(source TEXT NOT NULL,path_key TEXT NOT NULL,path TEXT NOT NULL,kind TEXT NOT NULL,old_path TEXT,generation INTEGER NOT NULL,changed_at INTEGER NOT NULL,due_at INTEGER NOT NULL,stable_count INTEGER NOT NULL DEFAULT 0,dirty_sent INTEGER NOT NULL DEFAULT 0,state INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(source,path_key))");
                 bool hasFingerprint = false;
-                foreach (object[] column in Query("PRAGMA table_info(pending)")) if ((string)column[1] == "fingerprint") hasFingerprint = true;
+                bool hasInitialRegistration = false;
+                foreach (object[] column in Query("PRAGMA table_info(pending)"))
+                {
+                    if ((string)column[1] == "fingerprint") hasFingerprint = true;
+                    if ((string)column[1] == "initial_registration") hasInitialRegistration = true;
+                }
                 if (!hasFingerprint) Query("ALTER TABLE pending ADD COLUMN fingerprint TEXT");
+                if (!hasInitialRegistration) Query("ALTER TABLE pending ADD COLUMN initial_registration INTEGER NOT NULL DEFAULT 0");
                 Query("CREATE INDEX IF NOT EXISTS pending_due ON pending(source,state,due_at)");
                 Query("CREATE INDEX IF NOT EXISTS pending_dirty ON pending(source,state,dirty_sent)");
                 Query("CREATE TABLE IF NOT EXISTS outbox(source TEXT PRIMARY KEY,epoch INTEGER NOT NULL,sequence INTEGER NOT NULL,request_id TEXT NOT NULL,payload TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,held INTEGER NOT NULL DEFAULT 0)");
@@ -157,7 +164,7 @@ namespace DocMind
         public long Enqueue(string source, string path, string kind, string oldPath, long now)
         {
             if (String.IsNullOrWhiteSpace(source)) throw new ArgumentException("Source required.");
-            if (kind != "upsert" && kind != "delete" && kind != "move") throw new ArgumentException("Invalid change kind.");
+            if (kind != "create" && kind != "upsert" && kind != "delete" && kind != "move") throw new ArgumentException("Invalid change kind.");
             path = NormalizePath(path);
             // PowerShell marshals a null string argument as String.Empty.
             oldPath = String.IsNullOrEmpty(oldPath) ? null : NormalizePath(oldPath);
@@ -170,8 +177,10 @@ namespace DocMind
                     Query("UPDATE counter SET generation=generation+1 WHERE id=1");
                     generation = (long)Query("SELECT generation FROM counter WHERE id=1")[0][0];
                     // Preserve the earliest old path across autosave notifications.
-                    List<object[]> previous = Query("SELECT old_path FROM pending WHERE source=? AND path_key=?", source, key);
+                    List<object[]> previous = Query("SELECT old_path,initial_registration FROM pending WHERE source=? AND path_key=?", source, key);
                     if (oldPath == null && previous.Count != 0) oldPath = (string)previous[0][0];
+                    bool initialRegistration = kind == "create" && previous.Count == 0;
+                    if (previous.Count != 0 && kind != "delete") initialRegistration = (long)previous[0][1] != 0;
                     if (kind == "move" && oldPath != null)
                     {
                         string oldKey = UnicodeCaseFold.Fold(oldPath);
@@ -180,8 +189,9 @@ namespace DocMind
                         if (oldKey != key) Query("DELETE FROM pending WHERE source=? AND path_key=?", source, oldKey);
                     }
                     if (oldPath != null && kind == "upsert") kind = "move";
-                    Query("INSERT OR REPLACE INTO pending(source,path_key,path,kind,old_path,generation,changed_at,due_at) VALUES(?,?,?,?,?,?,?,?)",
-                        source, key, path, kind, oldPath, generation, now, kind == "delete" ? now : checked(now + 120000));
+                    if (kind == "create") kind = "upsert";
+                    Query("INSERT OR REPLACE INTO pending(source,path_key,path,kind,old_path,generation,changed_at,due_at,initial_registration) VALUES(?,?,?,?,?,?,?,?,?)",
+                        source, key, path, kind, oldPath, generation, now, kind == "delete" || initialRegistration ? now : checked(now + 120000), initialRegistration ? 1 : 0);
                 });
                 return generation;
             }
@@ -191,11 +201,11 @@ namespace DocMind
         {
             if (limit < 1 || limit > 250) throw new ArgumentOutOfRangeException("limit");
             string condition = dirty ? "dirty_sent=0" : "due_at<=?";
-            string sql = "SELECT source,path_key,path,kind,old_path,generation,changed_at,due_at,stable_count,fingerprint FROM pending WHERE source=? AND state=0 AND " + condition + " AND NOT EXISTS(SELECT 1 FROM outbox WHERE source=?) ORDER BY due_at,path_key LIMIT ?";
+            string sql = "SELECT source,path_key,path,kind,old_path,generation,changed_at,due_at,stable_count,fingerprint,initial_registration FROM pending WHERE source=? AND state=0 AND " + condition + " AND NOT EXISTS(SELECT 1 FROM outbox WHERE source=?) ORDER BY due_at,path_key LIMIT ?";
             List<object[]> rows = dirty ? Query(sql, source, source, limit) : Query(sql, source, now, source, limit);
             List<SyncEntry> result = new List<SyncEntry>();
             foreach (object[] row in rows)
-                result.Add(new SyncEntry { SourceId = (string)row[0], PathKey = (string)row[1], RelativePath = (string)row[2], Kind = (string)row[3], OldRelativePath = (string)row[4], Generation = (long)row[5], LastChangedAt = (long)row[6], DueAt = (long)row[7], StableCount = (int)(long)row[8], Fingerprint = (string)row[9] });
+                result.Add(new SyncEntry { SourceId = (string)row[0], PathKey = (string)row[1], RelativePath = (string)row[2], Kind = (string)row[3], OldRelativePath = (string)row[4], Generation = (long)row[5], LastChangedAt = (long)row[6], DueAt = (long)row[7], StableCount = (int)(long)row[8], Fingerprint = (string)row[9], InitialRegistration = (long)row[10] != 0 });
             return result.ToArray();
         }
 
@@ -226,7 +236,7 @@ namespace DocMind
             {
                 Query("DELETE FROM outbox_item WHERE source=?", source);
                 Query("DELETE FROM outbox WHERE source=?", source);
-                Query("UPDATE pending SET dirty_sent=0,stable_count=0,fingerprint=NULL,due_at=CASE WHEN changed_at+120000>? THEN changed_at+120000 ELSE ? END WHERE source=?", now, now, source);
+                Query("UPDATE pending SET dirty_sent=0,stable_count=0,fingerprint=NULL,due_at=CASE WHEN kind='delete' OR initial_registration=1 THEN ? WHEN changed_at+120000>? THEN changed_at+120000 ELSE ? END WHERE source=?", now, now, now, source);
             });
         }
 

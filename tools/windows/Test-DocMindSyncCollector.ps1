@@ -26,6 +26,10 @@ try {
     foreach ($i in @(1,2,3)) { [IO.File]::WriteAllText((Join-Path $sourceRoot ('existing-{0}.pdf' -f $i)), 'changed') }
     Wait-Condition { $queue.Count($source) -eq 3 }
     Assert-True ($queue.Due($source, [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(), 250).Length -eq 0) 'Collector bypassed the quiet interval.'
+    [IO.File]::WriteAllText((Join-Path $sourceRoot 'fresh.pdf'), 'synthetic')
+    Wait-Condition { @($queue.Dirty($source,250) | Where-Object { $_.RelativePath -eq 'fresh.pdf' }).Count -eq 1 }
+    $fresh = @($queue.Due($source, [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(), 250) | Where-Object { $_.RelativePath -eq 'fresh.pdf' })
+    Assert-True ($fresh.Count -eq 1 -and $fresh[0].InitialRegistration) 'New file was not selected for immediate hashing.'
     [IO.File]::Move((Join-Path $sourceRoot 'existing-1.pdf'), (Join-Path $sourceRoot 'renamed.pdf'))
     Wait-Condition { @($queue.Dirty($source,250) | Where-Object { $_.RelativePath -eq 'renamed.pdf' -and $_.OldRelativePath -eq 'existing-1.pdf' }).Count -eq 1 }
     [IO.Directory]::CreateDirectory((Join-Path $sourceRoot 'new-folder')) | Out-Null

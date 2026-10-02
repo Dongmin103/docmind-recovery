@@ -82,7 +82,7 @@ namespace DocMind
                         if (args.ChangeType == WatcherChangeTypes.Created) queue.EnqueueScope(source, path, null, "create");
                         return;
                     }
-                    string kind = args.ChangeType == WatcherChangeTypes.Deleted ? "delete" : "upsert";
+                    string kind = args.ChangeType == WatcherChangeTypes.Deleted ? "delete" : args.ChangeType == WatcherChangeTypes.Created ? "create" : "upsert";
                     queue.Enqueue(source, path, kind, null, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                     // Deleted events carry no file/directory discriminator. A
                     // deleted directory is recovered by the scheduled scan;

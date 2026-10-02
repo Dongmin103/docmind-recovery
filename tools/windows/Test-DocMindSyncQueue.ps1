@@ -44,6 +44,20 @@ try {
     Assert-True ($queue.Due('other', 3000, 250).Length -eq 1) 'Absence recheck was lost.'
     $null = $queue.Enqueue('other', 'deleted.pdf', 'upsert', $null, 3001)
     Assert-True ($queue.Due('other', 3001, 250).Length -eq 0) 'Reappearing file kept deletion timing.'
+    $null = $queue.Enqueue('new', 'fresh.pdf', 'create', $null, 4000)
+    $created = $queue.Due('new', 4000, 1)[0]
+    Assert-True ($created.InitialRegistration -and $created.Kind -eq 'upsert') 'Created file was not immediately eligible for its first hash.'
+    $null = $queue.Enqueue('new', 'fresh.pdf', 'upsert', $null, 4001)
+    $created = $queue.Due('new', 4001, 1)[0]
+    Assert-True ($created.InitialRegistration -and $created.StableCount -eq 0) 'Copy-time modifications lost new-file timing.'
+    $queue.Dispose(); $queue = [DocMind.SyncQueue]::new($dbPath)
+    Assert-True ($queue.Due('new', 4001, 1)[0].InitialRegistration) 'New-file timing did not survive restart.'
+    $queue.ResetForNewEpoch('new', 4002)
+    Assert-True ($queue.Due('new', 4002, 1)[0].InitialRegistration) 'New session added the modification delay to a created file.'
+    $null = $queue.Enqueue('existing', 'edited.pdf', 'upsert', $null, 5000)
+    Assert-True ($queue.Due('existing', 124999, 1).Length -eq 0) 'Existing file skipped the 120-second quiet period.'
+    $null = $queue.Enqueue('existing', 'edited.pdf', 'create', $null, 5001)
+    Assert-True ($queue.Due('existing', 125000, 1).Length -eq 0) 'Late create event promoted an existing modification.'
     $null = $queue.Enqueue('unicode', ('Stra' + [char]0x00df + 'e.pdf'), 'upsert', $null, 0)
     $null = $queue.Enqueue('unicode', 'STRASSE.PDF', 'upsert', $null, 1)
     Assert-True ($queue.Count('unicode') -eq 1) 'Queue normalization differs from server Unicode casefold.'
@@ -65,7 +79,7 @@ try {
     $queue.ResetForNewEpoch('unicode', 2000000)
     Assert-True ($null -eq $queue.Outbox('unicode')) 'Stale epoch outbox survived fencing.'
     Assert-True ($queue.Count('unicode') -eq 1) 'Epoch reset dropped unresolved observation.'
-    Write-Output 'PASS: durable queue, 100 autosaves, 120s/10s/2s timing, immutable outbox, generation-safe ACK, restart, reappearance.'
+    Write-Output 'PASS: durable queue, autosaves, created-file timing, 120s/10s/2s timing, immutable outbox, generation-safe ACK and restart.'
 } finally {
     if ($null -ne $queue) { $queue.Dispose() }
     $resolved = [IO.Path]::GetFullPath($testRoot)

@@ -39,7 +39,21 @@ try {
     } while([DateTime]::UtcNow -lt $until)
     if(@($kinds|Where-Object{$_ -eq 'dirty'}).Count -ne 1 -or @($kinds|Where-Object{$_ -eq 'upsert'}).Count -ne 2){throw ('Expected dirty + two stable signed upserts; got '+($kinds -join ','))}
     if($queue.Count('test-source') -ne 0){throw 'Acknowledged source was not removed from durable queue.'}
-    'PASS: synthetic source -> durable queue -> signed dirty -> two stable signed upserts -> generation-safe ACK.'
+    $createdAt=[DateTime]::UtcNow
+    [IO.File]::WriteAllText((Join-Path $source 'created.pdf'),'new synthetic encrypted content')
+    $firstAt=$null;$secondAt=$null;$until=$createdAt.AddSeconds(25)
+    do {
+        $requests=@(Get-Content -LiteralPath $log | ForEach-Object {$_|ConvertFrom-Json})
+        $createdUpserts=@($requests | ForEach-Object {@($_.items | Where-Object {$_.relative_path -eq 'created.pdf' -and $_.kind -eq 'upsert'})})
+        if($createdUpserts.Count -ge 1 -and $null -eq $firstAt){$firstAt=[DateTime]::UtcNow}
+        if($createdUpserts.Count -ge 2){$secondAt=[DateTime]::UtcNow;break}
+        if($watcher.HasExited){throw ('Watcher exited: '+(Get-Content -LiteralPath (Join-Path $testRoot 'watch.err') -Raw))}
+        Start-Sleep -Milliseconds 250
+    } while([DateTime]::UtcNow -lt $until)
+    if($null -eq $firstAt -or ($firstAt-$createdAt).TotalSeconds -ge 10){throw 'Created file waited for the modification debounce before its first hash.'}
+    if($null -eq $secondAt -or $createdUpserts.Count -ne 2){throw 'Created file did not complete two distinct stable observations.'}
+    if($queue.Count('test-source') -ne 0){throw 'New file remained in the durable queue after acknowledgement.'}
+    'PASS: signed existing-file sync and new-file first hash under 10s, second stable observation after 10s.'
 } finally {
     if($null -ne $queue){$queue.Dispose()}
     if($null -ne $watcher -and -not $watcher.HasExited){Stop-Process -Id $watcher.Id -Force;$null=$watcher.WaitForExit(5000)}
