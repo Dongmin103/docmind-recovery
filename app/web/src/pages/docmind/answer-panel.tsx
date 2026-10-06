@@ -71,6 +71,7 @@ export default function AnswerPanel({
   const [selectedEvidence, setSelectedEvidence] = useState<{
     number?: number;
     trigger: HTMLButtonElement;
+    selectionId: number;
   }>();
   const panelRef = useRef<HTMLElement>(null);
   const answerStartRef = useRef<HTMLDivElement>(null);
@@ -185,7 +186,11 @@ export default function AnswerPanel({
   };
   const selectCitation = useCallback(
     (number: number, trigger: HTMLButtonElement) => {
-      setSelectedEvidence({ number, trigger });
+      setSelectedEvidence((current) => ({
+        number,
+        trigger,
+        selectionId: (current?.selectionId ?? 0) + 1,
+      }));
     },
     [],
   );
@@ -321,6 +326,7 @@ export default function AnswerPanel({
           </div>
           <AnswerEvidence
             citation={citation}
+            selectionId={selectedEvidence?.selectionId}
             datasetId={generation.data?.dataset_id}
             onClose={closeEvidence}
             renderInspection={renderInspection}

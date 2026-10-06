@@ -14,11 +14,13 @@ type AnswerCitation = DocMindAnswerResult['citations'][number];
 
 export default function AnswerEvidence({
   citation,
+  selectionId,
   datasetId,
   onClose,
   renderInspection,
 }: {
   citation?: AnswerCitation;
+  selectionId?: number;
   datasetId?: string;
   onClose: () => void;
   renderInspection?: (datasetId: string, documentId: string) => ReactNode;
@@ -41,7 +43,7 @@ export default function AnswerEvidence({
         behavior: 'instant',
       });
     }
-  }, [citation]);
+  }, [citation, selectionId]);
   const closeEvidence = () => {
     onClose();
   };

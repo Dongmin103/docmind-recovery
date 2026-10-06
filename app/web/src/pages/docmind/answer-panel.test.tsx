@@ -462,6 +462,59 @@ it('keeps viewport position for visible evidence and resets the evidence reading
   jest.restoreAllMocks();
 });
 
+it('reveals the same evidence again from the same or another inline reference after the reader returns to the answer', async () => {
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: { ...RichAnswer.data.data, answer: '처음 [1], 다시 [1]' },
+    },
+  });
+  const view = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <div data-docmind-search-scroll>
+        <AnswerPanel request={Request} />
+      </div>
+    </QueryClientProvider>,
+  );
+  const viewport = view.container.querySelector(
+    '[data-docmind-search-scroll]',
+  ) as HTMLElement;
+  const scroll = jest.fn(({ top }) => {
+    viewport.scrollTop = top;
+  });
+  viewport.scrollTo = scroll;
+  jest
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return { top: 0, bottom: 600 } as DOMRect;
+      const y =
+        this.tagName === 'ASIDE' ? 900 : this.dataset.citation ? 700 : 0;
+      return {
+        top: y - viewport.scrollTop,
+        bottom: y - viewport.scrollTop + 24,
+      } as DOMRect;
+    });
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  const [first, second] = await screen.findAllByRole('button', {
+    name: '근거 1 확인',
+  });
+  fireEvent.click(first);
+  scroll.mockClear();
+  viewport.scrollTop = 0;
+  fireEvent.scroll(viewport);
+  fireEvent.click(first);
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 884, behavior: 'instant' });
+  viewport.scrollTop = 0;
+  fireEvent.scroll(viewport);
+  fireEvent.click(second);
+  expect(scroll).toHaveBeenCalledTimes(2);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 884, behavior: 'instant' });
+  fireEvent.click(screen.getByRole('button', { name: '근거 닫기' }));
+  expect(second).toHaveFocus();
+  jest.restoreAllMocks();
+});
+
 it.each([
   ['DOCMIND_LLM_UNAVAILABLE', '연결'],
   ['DOCMIND_LLM_AUTH_FAILED', '인증'],
