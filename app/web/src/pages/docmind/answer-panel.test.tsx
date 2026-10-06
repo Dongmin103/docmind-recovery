@@ -37,7 +37,7 @@ it('does not display a pending response after its request panel is replaced', as
       <AnswerPanel key="old-scope" request={Request} />
     </QueryClientProvider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: '근거로 답변 만들기' }));
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
   await waitFor(() => expect(MockAnswer).toHaveBeenCalledTimes(1));
   view.rerender(
     <QueryClientProvider client={client}>
@@ -68,9 +68,7 @@ it('does not display a pending response after its request panel is replaced', as
     });
   });
   expect(screen.queryByText('오래된 답변 [1]')).not.toBeInTheDocument();
-  expect(
-    screen.getByRole('button', { name: '근거로 답변 만들기' }),
-  ).not.toBeDisabled();
+  expect(screen.getByRole('button', { name: '질문하기' })).not.toBeDisabled();
 });
 
 it('only generates on request and shows cited evidence safely', async () => {
@@ -100,7 +98,7 @@ it('only generates on request and shows cited evidence safely', async () => {
   });
   renderPanel();
   expect(MockAnswer).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '근거로 답변 만들기' }));
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
   expect(await screen.findByText('절차입니다 [1]')).toBeInTheDocument();
   expect(screen.getByText('<script>text</script>')).toBeInTheDocument();
   expect(document.querySelector('script')).toBeNull();
@@ -117,11 +115,9 @@ it.each([
     data: { code: 100, message },
   });
   renderPanel();
-  fireEvent.click(screen.getByRole('button', { name: '근거로 답변 만들기' }));
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(explanation);
   await waitFor(() =>
-    expect(
-      screen.getByRole('button', { name: '근거로 답변 만들기' }),
-    ).not.toBeDisabled(),
+    expect(screen.getByRole('button', { name: '질문하기' })).not.toBeDisabled(),
   );
 });

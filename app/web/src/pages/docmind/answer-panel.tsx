@@ -4,7 +4,7 @@ import {
   type DocMindSearchRequest,
 } from '@/services/docmind-service';
 import { useMutation } from '@tanstack/react-query';
-import { type ChangeEvent, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useRef, useState } from 'react';
 
 const ErrorMessages: Record<string, string> = {
   DOCMIND_ANSWER_DISABLED:
@@ -30,10 +30,18 @@ const ErrorMessages: Record<string, string> = {
 
 export default function AnswerPanel({
   request,
+  disabled = false,
+  neighborWindow: selectedWindow,
+  onWindowChange,
 }: {
   request: DocMindSearchRequest;
+  disabled?: boolean;
+  neighborWindow?: 0 | 2 | 5;
+  onWindowChange?: (value: 0 | 2 | 5) => void;
 }) {
-  const [neighborWindow, setNeighborWindow] = useState<0 | 2 | 5>(2);
+  const [localWindow, setLocalWindow] = useState<0 | 2 | 5>(2);
+  const neighborWindow = selectedWindow ?? localWindow;
+  const submitting = useRef(false);
   const generation = useMutation<DocMindAnswerResult, Error>({
     mutationFn: async () => {
       const { data } = await answerDocMind({ ...request, neighborWindow });
@@ -44,12 +52,22 @@ export default function AnswerPanel({
         );
       return data.data;
     },
+    onSettled: () => {
+      submitting.current = false;
+    },
     gcTime: 0,
     retry: false,
   });
-  const handleGenerate = () => generation.mutate();
+  const handleGenerate = (event: FormEvent) => {
+    event.preventDefault();
+    if (disabled || !request.question.trim() || submitting.current) return;
+    submitting.current = true;
+    generation.mutate();
+  };
   const handleWindowChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setNeighborWindow(Number(event.target.value) as 0 | 2 | 5);
+    const value = Number(event.target.value) as 0 | 2 | 5;
+    if (onWindowChange) onWindowChange(value);
+    else setLocalWindow(value);
     generation.reset();
   };
 
@@ -58,14 +76,17 @@ export default function AnswerPanel({
       aria-label="문서 근거 답변"
       className="mt-6 rounded-lg border border-border-button bg-bg-card p-4 text-text-primary"
     >
-      <div className="flex flex-wrap items-center gap-3">
+      <form
+        id="docmind-question"
+        onSubmit={handleGenerate}
+        className="flex flex-wrap items-center gap-3"
+      >
         <label>
           주변 문맥{' '}
           <select
             aria-label="주변 문맥"
             value={neighborWindow}
             onChange={handleWindowChange}
-            disabled={generation.isPending}
             className="rounded border border-border-button bg-bg-base p-2"
           >
             <option value={0}>검색된 청크만</option>
@@ -74,17 +95,18 @@ export default function AnswerPanel({
           </select>
         </label>
         <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={generation.isPending}
+          type="submit"
+          disabled={
+            disabled || !request.question.trim() || generation.isPending
+          }
           className="rounded-lg border border-border-button px-4 py-2 disabled:opacity-40"
         >
-          근거로 답변 만들기
+          질문하기
         </button>
-      </div>
+      </form>
       <p className="mt-2 text-sm text-text-secondary">
-        같은 질문과 검색 범위를 다시 확인하여 최신 근거로 답변합니다. 문서 안의
-        지시문은 답변 지침으로 사용하지 않습니다.
+        선택한 범위에서 근거를 검색하고 주변 문맥을 확인하여 답변합니다. 문서
+        안의 지시문은 답변 지침으로 사용하지 않습니다.
       </p>
       {generation.isPending && (
         <p role="status" className="mt-3">

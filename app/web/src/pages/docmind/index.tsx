@@ -240,6 +240,10 @@ export default function DocMind() {
   );
   const inspectionOrigin = React.useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<'search' | 'question'>('search');
+  const [answerNeighborWindow, setAnswerNeighborWindow] = useState<0 | 2 | 5>(
+    2,
+  );
   const [selectedChunk, setSelectedChunk] = useState<ITestingChunk>();
   const [visibleCount, setVisibleCount] = useState(RESULTS_PER_PAGE);
   const [scopeMode, setScopeMode] = useState<DocMindSearchScope['mode']>('all');
@@ -445,6 +449,8 @@ export default function DocMind() {
     event.preventDefault();
     if (
       !query.trim() ||
+      searchMode !== 'search' ||
+      retrieval.isPending ||
       explicitScopeEmpty ||
       folderCatalog.isError ||
       folderCatalog.isPending
@@ -456,6 +462,25 @@ export default function DocMind() {
       scope: currentScope,
     });
   };
+  const showSearch = () => setSearchMode('search');
+  const showQuestion = () => setSearchMode('question');
+  const handleModeKey = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next =
+      event.key === 'Home'
+        ? 'search'
+        : event.key === 'End'
+          ? 'question'
+          : searchMode === 'search'
+            ? 'question'
+            : 'search';
+    setSearchMode(next);
+    document.getElementById(`docmind-${next}-tab`)?.focus();
+  };
+  const changeQuery = (event: React.ChangeEvent<HTMLInputElement>) =>
+    setQuery(event.target.value);
+  const clearQuery = () => setQuery('');
   const refreshSearchAfterChunkChange = () => {
     if (retrieval.variables) retrieval.mutate(retrieval.variables);
   };
@@ -566,216 +591,291 @@ export default function DocMind() {
           {workspaceView === 'search' && (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-6xl px-5 py-8">
-                <p className="text-sm text-text-secondary">
-                  전체 · 폴더 · 문서 범위를 직접 선택해 근거 청크를 검색합니다.
-                </p>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
-                  <form
-                    id="docmind-search"
-                    onSubmit={submitSearch}
-                    className="relative"
-                  >
-                    <Input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder="문서에서 찾을 내용을 입력하세요"
-                      aria-label="문서 검색 질문"
-                      className="h-11 pr-12 text-base"
-                    />
-                    {query && (
-                      <button
-                        type="button"
-                        onClick={() => setQuery('')}
-                        className="absolute right-4 top-1/2 -translate-y-1/2"
-                        aria-label="검색어 지우기"
-                      >
-                        <X className="size-5" />
-                      </button>
-                    )}
-                  </form>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setScopeMenuOpen((open) => !open)}
-                      className="flex h-11 min-w-40 items-center justify-between gap-2 rounded-lg border border-border-button bg-bg-card px-4"
-                      aria-expanded={scopeMenuOpen}
-                      aria-haspopup="dialog"
-                    >
-                      <span>
-                        {selectionLabel(
-                          scopeMode,
-                          canonicalFolderIds.length,
-                          canonicalDocumentIds.length,
-                        )}
-                      </span>
-                      <ChevronDown className="size-5" />
-                    </button>
-                    {scopeMenuOpen && (
-                      <div
-                        className="absolute right-0 top-12 z-30 max-h-96 w-80 overflow-y-auto rounded-xl border border-border-button bg-bg-card p-3 shadow-2xl"
-                        role="dialog"
-                        aria-label="검색 범위 선택"
-                      >
-                        <fieldset>
-                          <legend className="mb-2 text-sm font-semibold">
-                            검색 범위
-                          </legend>
-                          {(['all', 'folders', 'documents'] as const).map(
-                            (mode) => (
-                              <label
-                                key={mode}
-                                className="flex items-center gap-2 rounded px-2 py-2"
-                              >
-                                <input
-                                  type="radio"
-                                  name="docmind-scope"
-                                  checked={scopeMode === mode}
-                                  onChange={() => setScopeMode(mode)}
-                                />
-                                {mode === 'all'
-                                  ? '전체 문서'
-                                  : mode === 'folders'
-                                    ? '선택 폴더와 하위 폴더'
-                                    : '선택 문서'}
-                              </label>
-                            ),
-                          )}
-                        </fieldset>
-                        {scopeMode === 'folders' && (
-                          <div className="mt-2 border-t border-border-button pt-2">
-                            {folders.map((folder) => (
-                              <label
-                                key={folder.id}
-                                className="flex items-center gap-2 rounded px-2 py-2"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedFolderIds.includes(
-                                    folder.id,
-                                  )}
-                                  onChange={() =>
-                                    toggle(folder.id, setSelectedFolderIds)
-                                  }
-                                />
-                                <span className="truncate">
-                                  {'\u00a0'.repeat((folder.depth ?? 0) * 2)}
-                                  {folder.name}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                        {scopeMode === 'documents' && (
-                          <div className="mt-2 border-t border-border-button pt-2">
-                            {documentNodes.map((document) => (
-                              <label
-                                key={document.id}
-                                className="flex items-center gap-2 rounded px-2 py-2"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedDocumentIds.includes(
-                                    document.id,
-                                  )}
-                                  onChange={() =>
-                                    toggle(document.id, setSelectedDocumentIds)
-                                  }
-                                />
-                                <span className="truncate">
-                                  {document.relative_path || document.name}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                        {explicitScopeEmpty && (
-                          <p
-                            role="alert"
-                            className="mt-2 text-sm text-state-warning"
-                          >
-                            하나 이상 선택하세요.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                <div
+                  role="tablist"
+                  aria-label="검색 방식"
+                  className="mb-5 flex gap-2"
+                >
                   <button
-                    type="submit"
-                    form="docmind-search"
-                    disabled={
-                      !query.trim() ||
-                      explicitScopeEmpty ||
-                      retrieval.isPending ||
-                      folderCatalog.isError ||
-                      folderCatalog.isPending
-                    }
-                    className="grid size-11 place-items-center rounded-lg bg-accent-primary text-primary-foreground disabled:opacity-40"
-                    aria-label="검색 실행"
+                    type="button"
+                    role="tab"
+                    id="docmind-search-tab"
+                    aria-controls="docmind-search-panel"
+                    aria-selected={searchMode === 'search'}
+                    tabIndex={searchMode === 'search' ? 0 : -1}
+                    onClick={showSearch}
+                    onKeyDown={handleModeKey}
+                    className={`rounded-lg border border-border-button px-4 py-2 ${searchMode === 'search' ? 'bg-bg-card font-semibold text-accent-primary' : 'text-text-secondary'}`}
                   >
-                    <Search className="size-5" />
+                    기존 검색
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="docmind-question-tab"
+                    aria-controls="docmind-question-panel"
+                    aria-selected={searchMode === 'question'}
+                    tabIndex={searchMode === 'question' ? 0 : -1}
+                    onClick={showQuestion}
+                    onKeyDown={handleModeKey}
+                    className={`rounded-lg border border-border-button px-4 py-2 ${searchMode === 'question' ? 'bg-bg-card font-semibold text-accent-primary' : 'text-text-secondary'}`}
+                  >
+                    AI 질문
                   </button>
                 </div>
-                {retrieval.isError && (
-                  <p role="alert" className="mt-4 text-state-error">
-                    {retrieval.error.message}
+                <div
+                  role="tabpanel"
+                  id={`docmind-${searchMode}-panel`}
+                  aria-labelledby={`docmind-${searchMode}-tab`}
+                >
+                  <p className="text-sm text-text-secondary">
+                    {searchMode === 'search'
+                      ? '전체 · 폴더 · 문서 범위를 직접 선택해 근거 청크를 검색합니다.'
+                      : '질문을 입력하면 선택한 범위에서 근거를 찾아 AI가 답변합니다.'}
                   </p>
-                )}
-                {retrieval.isPending && (
-                  <p role="status" className="mt-8 text-text-secondary">
-                    검색 후보를 모으고 재정렬하는 중입니다.
-                  </p>
-                )}
-                {retrieval.data && !retrieval.isPending && !searchResultValid && (
-                  <p role="status" className="mt-8 text-text-secondary">
-                    검색 범위가 변경되었습니다. 다시 검색해 주세요.
-                  </p>
-                )}
-                {retrieval.data && !retrieval.isPending && searchResultValid && (
-                  <section className="mt-6" aria-label="검색 결과">
-                    {searchChunks.length > 0 && retrieval.variables && query.trim() === retrieval.variables.question && (
-                      <AnswerPanel
-                        key={JSON.stringify([retrieval.submittedAt, currentScope, documentNodes])}
-                        request={retrieval.variables}
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                    <form
+                      id="docmind-search"
+                      onSubmit={submitSearch}
+                      className="relative"
+                    >
+                      <Input
+                        value={query}
+                        onChange={changeQuery}
+                        form={
+                          searchMode === 'question'
+                            ? 'docmind-question'
+                            : 'docmind-search'
+                        }
+                        placeholder="문서에서 찾을 내용을 입력하세요"
+                        aria-label="문서 검색 질문"
+                        className="h-11 pr-12 text-base"
                       />
+                      {query && (
+                        <button
+                          type="button"
+                          onClick={clearQuery}
+                          className="absolute right-4 top-1/2 -translate-y-1/2"
+                          aria-label="검색어 지우기"
+                        >
+                          <X className="size-5" />
+                        </button>
+                      )}
+                    </form>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setScopeMenuOpen((open) => !open)}
+                        className="flex h-11 min-w-40 items-center justify-between gap-2 rounded-lg border border-border-button bg-bg-card px-4"
+                        aria-expanded={scopeMenuOpen}
+                        aria-haspopup="dialog"
+                      >
+                        <span>
+                          {selectionLabel(
+                            scopeMode,
+                            canonicalFolderIds.length,
+                            canonicalDocumentIds.length,
+                          )}
+                        </span>
+                        <ChevronDown className="size-5" />
+                      </button>
+                      {scopeMenuOpen && (
+                        <div
+                          className="absolute right-0 top-12 z-30 max-h-96 w-80 overflow-y-auto rounded-xl border border-border-button bg-bg-card p-3 shadow-2xl"
+                          role="dialog"
+                          aria-label="검색 범위 선택"
+                        >
+                          <fieldset>
+                            <legend className="mb-2 text-sm font-semibold">
+                              검색 범위
+                            </legend>
+                            {(['all', 'folders', 'documents'] as const).map(
+                              (mode) => (
+                                <label
+                                  key={mode}
+                                  className="flex items-center gap-2 rounded px-2 py-2"
+                                >
+                                  <input
+                                    type="radio"
+                                    name="docmind-scope"
+                                    checked={scopeMode === mode}
+                                    onChange={() => setScopeMode(mode)}
+                                  />
+                                  {mode === 'all'
+                                    ? '전체 문서'
+                                    : mode === 'folders'
+                                      ? '선택 폴더와 하위 폴더'
+                                      : '선택 문서'}
+                                </label>
+                              ),
+                            )}
+                          </fieldset>
+                          {scopeMode === 'folders' && (
+                            <div className="mt-2 border-t border-border-button pt-2">
+                              {folders.map((folder) => (
+                                <label
+                                  key={folder.id}
+                                  className="flex items-center gap-2 rounded px-2 py-2"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedFolderIds.includes(
+                                      folder.id,
+                                    )}
+                                    onChange={() =>
+                                      toggle(folder.id, setSelectedFolderIds)
+                                    }
+                                  />
+                                  <span className="truncate">
+                                    {'\u00a0'.repeat((folder.depth ?? 0) * 2)}
+                                    {folder.name}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                          {scopeMode === 'documents' && (
+                            <div className="mt-2 border-t border-border-button pt-2">
+                              {documentNodes.map((document) => (
+                                <label
+                                  key={document.id}
+                                  className="flex items-center gap-2 rounded px-2 py-2"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedDocumentIds.includes(
+                                      document.id,
+                                    )}
+                                    onChange={() =>
+                                      toggle(
+                                        document.id,
+                                        setSelectedDocumentIds,
+                                      )
+                                    }
+                                  />
+                                  <span className="truncate">
+                                    {document.relative_path || document.name}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                          {explicitScopeEmpty && (
+                            <p
+                              role="alert"
+                              className="mt-2 text-sm text-state-warning"
+                            >
+                              하나 이상 선택하세요.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {searchMode === 'search' && (
+                      <button
+                        type="submit"
+                        form="docmind-search"
+                        disabled={
+                          !query.trim() ||
+                          explicitScopeEmpty ||
+                          retrieval.isPending ||
+                          folderCatalog.isError ||
+                          folderCatalog.isPending
+                        }
+                        className="grid size-11 place-items-center rounded-lg bg-accent-primary text-primary-foreground disabled:opacity-40"
+                        aria-label="검색 실행"
+                      >
+                        <Search className="size-5" />
+                      </button>
                     )}
-                    <p className="text-sm text-text-secondary">
-                      결과 {searchChunks.length}개 · 후보{' '}
-                      {retrieval.data.candidate_count ?? 0}개
+                  </div>
+                  {searchMode === 'question' && (
+                    <AnswerPanel
+                      key={JSON.stringify([
+                        query,
+                        currentScope,
+                        folderCatalog.data?.project_id,
+                        documentNodes,
+                        folderCatalog.isError,
+                        folderCatalog.isPending,
+                        answerNeighborWindow,
+                      ])}
+                      request={{
+                        question: query.trim(),
+                        projectId: folderCatalog.data?.project_id,
+                        scope: currentScope,
+                      }}
+                      disabled={
+                        explicitScopeEmpty ||
+                        folderCatalog.isError ||
+                        folderCatalog.isPending
+                      }
+                      neighborWindow={answerNeighborWindow}
+                      onWindowChange={setAnswerNeighborWindow}
+                    />
+                  )}
+                  {searchMode === 'search' && retrieval.isError && (
+                    <p role="alert" className="mt-4 text-state-error">
+                      {retrieval.error.message}
                     </p>
-                    {searchChunks.length === 0 ? (
-                      <p className="py-12 text-center text-text-secondary">
-                        선택한 범위에서 관련 문서를 찾지 못했습니다.
+                  )}
+                  {searchMode === 'search' && retrieval.isPending && (
+                    <p role="status" className="mt-8 text-text-secondary">
+                      검색 후보를 모으고 재정렬하는 중입니다.
+                    </p>
+                  )}
+                  {searchMode === 'search' &&
+                    retrieval.data &&
+                    !retrieval.isPending &&
+                    !searchResultValid && (
+                      <p role="status" className="mt-8 text-text-secondary">
+                        검색 범위가 변경되었습니다. 다시 검색해 주세요.
                       </p>
-                    ) : (
-                      <>
-                        {searchChunks
-                          .slice(0, visibleCount)
-                          .map((chunk, index) => (
-                            <RankedResult
-                              key={`${chunk.doc_id}:${chunk.chunk_id ?? index}`}
-                              chunk={chunk}
-                              rank={index + 1}
-                              datasetId={retrieval.data?.dataset_id}
-                              onOpen={() => setSelectedChunk(chunk)}
-                            />
-                          ))}
-                        {searchChunks.length > visibleCount && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setVisibleCount(
-                                (count) => count + RESULTS_PER_PAGE,
-                              )
-                            }
-                            className="mt-5 rounded-lg border border-border-button px-4 py-2"
-                          >
-                            결과 더 보기
-                          </button>
-                        )}
-                      </>
                     )}
-                  </section>
-                )}
+                  {searchMode === 'search' &&
+                    retrieval.data &&
+                    !retrieval.isPending &&
+                    searchResultValid && (
+                      <section className="mt-6" aria-label="검색 결과">
+                        <p className="text-sm text-text-secondary">
+                          결과 {searchChunks.length}개 · 후보{' '}
+                          {retrieval.data.candidate_count ?? 0}개
+                        </p>
+                        {searchChunks.length === 0 ? (
+                          <p className="py-12 text-center text-text-secondary">
+                            선택한 범위에서 관련 문서를 찾지 못했습니다.
+                          </p>
+                        ) : (
+                          <>
+                            {searchChunks
+                              .slice(0, visibleCount)
+                              .map((chunk, index) => (
+                                <RankedResult
+                                  key={`${chunk.doc_id}:${chunk.chunk_id ?? index}`}
+                                  chunk={chunk}
+                                  rank={index + 1}
+                                  datasetId={retrieval.data?.dataset_id}
+                                  onOpen={() => setSelectedChunk(chunk)}
+                                />
+                              ))}
+                            {searchChunks.length > visibleCount && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setVisibleCount(
+                                    (count) => count + RESULTS_PER_PAGE,
+                                  )
+                                }
+                                className="mt-5 rounded-lg border border-border-button px-4 py-2"
+                              >
+                                결과 더 보기
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </section>
+                    )}
+                </div>
               </div>
             </div>
           )}

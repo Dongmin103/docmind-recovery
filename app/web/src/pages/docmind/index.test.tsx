@@ -225,7 +225,9 @@ describe('DocMind search scopes', () => {
   it('shows actual ingestion failure on the document detail view', () => {
     mockCanAdminister = true;
     mockHierarchyDocumentId = 'b'.repeat(32);
-    renderDocMind(`/docmind?view=document&id=${'a'.repeat(32)}&doc_id=${mockHierarchyDocumentId}&source=docmind`);
+    renderDocMind(
+      `/docmind?view=document&id=${'a'.repeat(32)}&doc_id=${mockHierarchyDocumentId}&source=docmind`,
+    );
     expect(screen.getByRole('status')).toHaveTextContent(
       '인덱싱 실패 · 임시 파일 정리 대기 (HOST_WORKER_ERROR)',
     );
@@ -235,8 +237,12 @@ describe('DocMind search scopes', () => {
     mockCanAdminister = true;
     mockHierarchyError = true;
     mockHierarchyDocumentId = 'b'.repeat(32);
-    renderDocMind(`/docmind?view=document&id=${'a'.repeat(32)}&doc_id=${mockHierarchyDocumentId}&source=docmind`);
-    expect(screen.getByRole('status')).toHaveTextContent('문서 상태를 확인하지 못했습니다.');
+    renderDocMind(
+      `/docmind?view=document&id=${'a'.repeat(32)}&doc_id=${mockHierarchyDocumentId}&source=docmind`,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '문서 상태를 확인하지 못했습니다.',
+    );
   });
 
   it('blocks search on a failed scope load and allows scope recovery', () => {
@@ -275,7 +281,13 @@ describe('DocMind search scopes', () => {
     mockSearchResult = {
       dataset_id: 'dataset-1',
       candidate_count: 1,
-      ranked_chunks: [{ doc_id: 'document-1', doc_name: 'protocol.pdf', content_with_weight: 'saved result' }],
+      ranked_chunks: [
+        {
+          doc_id: 'document-1',
+          doc_name: 'protocol.pdf',
+          content_with_weight: 'saved result',
+        },
+      ],
     };
     renderDocMind();
     expect(screen.getByText('결과 1개 · 후보 1개')).toBeInTheDocument();
@@ -284,24 +296,48 @@ describe('DocMind search scopes', () => {
     fireEvent.click(screen.getByLabelText('선택 문서'));
 
     expect(screen.queryByText('saved result')).not.toBeInTheDocument();
-    expect(screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.')).toBeInTheDocument();
+    expect(
+      screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.'),
+    ).toBeInTheDocument();
   });
 
-  it('hides the answer panel when question or scope changes', () => {
-    mockSearchVariables = { question: '시험 질문', projectId: 'project-1', scope: { mode: 'all' } };
-    mockSearchResult = { dataset_id: 'dataset-1', candidate_count: 1, ranked_chunks: [
-      { doc_id: 'document-1', chunk_id: 'chunk-1', content_with_weight: 'synthetic' },
-    ] };
+  it('never attaches answer generation to existing search results', () => {
+    mockSearchVariables = {
+      question: '시험 질문',
+      projectId: 'project-1',
+      scope: { mode: 'all' },
+    };
+    mockSearchResult = {
+      dataset_id: 'dataset-1',
+      candidate_count: 1,
+      ranked_chunks: [
+        {
+          doc_id: 'document-1',
+          chunk_id: 'chunk-1',
+          content_with_weight: 'synthetic',
+        },
+      ],
+    };
     renderDocMind();
     enterQuestion();
-    expect(screen.getByRole('region', { name: '문서 근거 답변' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('문서 검색 질문'), { target: { value: '다른 질문' } });
-    expect(screen.queryByRole('region', { name: '문서 근거 답변' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: '문서 근거 답변' }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('문서 검색 질문'), {
+      target: { value: '다른 질문' },
+    });
+    expect(
+      screen.queryByRole('region', { name: '문서 근거 답변' }),
+    ).not.toBeInTheDocument();
     enterQuestion();
-    expect(screen.getByRole('region', { name: '문서 근거 답변' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: '문서 근거 답변' }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('전체 문서'));
     fireEvent.click(screen.getByLabelText('선택 문서'));
-    expect(screen.queryByRole('region', { name: '문서 근거 답변' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: '문서 근거 답변' }),
+    ).not.toBeInTheDocument();
   });
 
   it('hides a cached result when its document leaves the live catalog', () => {
@@ -312,7 +348,13 @@ describe('DocMind search scopes', () => {
     mockSearchResult = {
       dataset_id: 'dataset-1',
       candidate_count: 1,
-      ranked_chunks: [{ doc_id: 'document-1', doc_name: 'protocol.pdf', content_with_weight: 'saved result' }],
+      ranked_chunks: [
+        {
+          doc_id: 'document-1',
+          doc_name: 'protocol.pdf',
+          content_with_weight: 'saved result',
+        },
+      ],
     };
     const view = renderDocMind();
     expect(screen.getByText('결과 1개 · 후보 1개')).toBeInTheDocument();
@@ -325,6 +367,8 @@ describe('DocMind search scopes', () => {
     );
 
     expect(screen.queryByText('saved result')).not.toBeInTheDocument();
-    expect(screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.')).toBeInTheDocument();
+    expect(
+      screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.'),
+    ).toBeInTheDocument();
   });
 });
