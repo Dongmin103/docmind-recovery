@@ -1,10 +1,18 @@
 import {
   answerDocMind,
+  type DocMindAnswerRequest,
   type DocMindAnswerResult,
   type DocMindSearchRequest,
 } from '@/services/docmind-service';
 import { useMutation } from '@tanstack/react-query';
-import { type ChangeEvent, type FormEvent, useRef, useState } from 'react';
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type MutableRefObject,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 const ErrorMessages: Record<string, string> = {
   DOCMIND_ANSWER_DISABLED:
@@ -33,18 +41,34 @@ export default function AnswerPanel({
   disabled = false,
   neighborWindow: selectedWindow,
   onWindowChange,
+  pending = false,
+  pendingRef,
+  onPendingChange,
+  invalidationKey,
 }: {
   request: DocMindSearchRequest;
   disabled?: boolean;
   neighborWindow?: 0 | 2 | 5;
   onWindowChange?: (value: 0 | 2 | 5) => void;
+  pending?: boolean;
+  pendingRef?: MutableRefObject<boolean>;
+  onPendingChange?: (pending: boolean) => void;
+  invalidationKey?: string;
 }) {
   const [localWindow, setLocalWindow] = useState<0 | 2 | 5>(2);
   const neighborWindow = selectedWindow ?? localWindow;
-  const submitting = useRef(false);
-  const generation = useMutation<DocMindAnswerResult, Error>({
-    mutationFn: async () => {
-      const { data } = await answerDocMind({ ...request, neighborWindow });
+  const localSubmitting = useRef(false);
+  const submitting = pendingRef ?? localSubmitting;
+  const [localPending, setLocalPending] = useState(false);
+  const isPending = pending || localPending;
+  const requestKey = JSON.stringify({ ...request, neighborWindow });
+  const generation = useMutation<
+    DocMindAnswerResult,
+    Error,
+    DocMindAnswerRequest
+  >({
+    mutationFn: async (submittedRequest) => {
+      const { data } = await answerDocMind(submittedRequest);
       if (data.code !== 0)
         throw new Error(
           ErrorMessages[data.message] ||
@@ -54,15 +78,23 @@ export default function AnswerPanel({
     },
     onSettled: () => {
       submitting.current = false;
+      setLocalPending(false);
+      onPendingChange?.(false);
     },
     gcTime: 0,
     retry: false,
   });
+  const resetGeneration = generation.reset;
+  useLayoutEffect(() => {
+    resetGeneration();
+  }, [requestKey, invalidationKey, resetGeneration]);
   const handleGenerate = (event: FormEvent) => {
     event.preventDefault();
     if (disabled || !request.question.trim() || submitting.current) return;
     submitting.current = true;
-    generation.mutate();
+    setLocalPending(true);
+    onPendingChange?.(true);
+    generation.mutate({ ...request, neighborWindow });
   };
   const handleWindowChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const value = Number(event.target.value) as 0 | 2 | 5;
@@ -96,9 +128,7 @@ export default function AnswerPanel({
         </label>
         <button
           type="submit"
-          disabled={
-            disabled || !request.question.trim() || generation.isPending
-          }
+          disabled={disabled || !request.question.trim() || isPending}
           className="rounded-lg border border-border-button px-4 py-2 disabled:opacity-40"
         >
           질문하기
@@ -108,7 +138,7 @@ export default function AnswerPanel({
         선택한 범위에서 근거를 검색하고 주변 문맥을 확인하여 답변합니다. 문서
         안의 지시문은 답변 지침으로 사용하지 않습니다.
       </p>
-      {generation.isPending && (
+      {isPending && (
         <p role="status" className="mt-3">
           주변 문맥을 확인하고 LLM 답변을 생성하는 중입니다.
         </p>
@@ -118,7 +148,7 @@ export default function AnswerPanel({
           {generation.error.message}
         </p>
       )}
-      {generation.data && !generation.isPending && !generation.isError && (
+      {generation.data && !isPending && !generation.isError && (
         <div className="mt-4">
           <p className="whitespace-pre-wrap break-words">
             {generation.data.answer}

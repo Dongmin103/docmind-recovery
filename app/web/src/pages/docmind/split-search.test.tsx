@@ -297,3 +297,71 @@ it('allows an explicit repeat of the same question and clears a completed answer
   expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
   expect(MockAnswer).toHaveBeenCalledTimes(2);
 });
+
+it.each(['tab', 'query', 'scope', 'context'] as const)(
+  'keeps an unresolved request guarded after restoring its %s',
+  async (change) => {
+    let resolve: (value: unknown) => void = () => {};
+    MockAnswer.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    await start();
+    ai();
+    question();
+    submit();
+    await waitFor(() => expect(MockAnswer).toHaveBeenCalledTimes(1));
+    if (change === 'tab') {
+      fireEvent.click(screen.getByRole('tab', { name: '기존 검색' }));
+      ai();
+    }
+    if (change === 'query') {
+      question('다른 질문');
+      question();
+    }
+    if (change === 'scope') {
+      fireEvent.click(screen.getByText('전체 문서'));
+      fireEvent.click(screen.getByLabelText('선택 문서'));
+      fireEvent.click(screen.getByLabelText('전체 문서'));
+    }
+    if (change === 'context') {
+      fireEvent.change(screen.getByLabelText('주변 문맥'), {
+        target: { value: '5' },
+      });
+      fireEvent.change(screen.getByLabelText('주변 문맥'), {
+        target: { value: '2' },
+      });
+    }
+    expect(screen.getByRole('button', { name: '질문하기' })).toBeDisabled();
+    fireEvent.submit(
+      screen.getByRole('button', { name: '질문하기' }).closest('form')!,
+    );
+    expect(MockAnswer).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(Answer));
+    expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: '질문하기' }),
+      ).not.toBeDisabled(),
+    );
+    submit();
+    expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+    expect(MockAnswer).toHaveBeenCalledTimes(2);
+  },
+);
+
+it('retains context selector focus while invalidating the previous answer', async () => {
+  await start();
+  ai();
+  question();
+  submit();
+  expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+  const selector = screen.getByLabelText('주변 문맥');
+  selector.focus();
+  fireEvent.change(selector, { target: { value: '5' } });
+  expect(screen.getByLabelText('주변 문맥')).toBe(selector);
+  expect(selector).toHaveFocus();
+  expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+});

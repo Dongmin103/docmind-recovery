@@ -25,6 +25,7 @@ jest.mock('@tanstack/react-query', () => ({
     error: undefined,
     isError: false,
     isPending: false,
+    reset: jest.fn(),
     mutate:
       options.mutationKey?.[0] === 'docmind-search'
         ? mockSearchMutate

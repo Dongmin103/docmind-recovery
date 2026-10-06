@@ -241,6 +241,8 @@ export default function DocMind() {
   const inspectionOrigin = React.useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'search' | 'question'>('search');
+  const answerPendingRef = React.useRef(false);
+  const [answerPending, setAnswerPending] = useState(false);
   const [answerNeighborWindow, setAnswerNeighborWindow] = useState<0 | 2 | 5>(
     2,
   );
@@ -791,14 +793,10 @@ export default function DocMind() {
                   </div>
                   {searchMode === 'question' && (
                     <AnswerPanel
-                      key={JSON.stringify([
-                        query,
-                        currentScope,
-                        folderCatalog.data?.project_id,
+                      invalidationKey={JSON.stringify([
                         documentNodes,
                         folderCatalog.isError,
                         folderCatalog.isPending,
-                        answerNeighborWindow,
                       ])}
                       request={{
                         question: query.trim(),
@@ -812,6 +810,9 @@ export default function DocMind() {
                       }
                       neighborWindow={answerNeighborWindow}
                       onWindowChange={setAnswerNeighborWindow}
+                      pending={answerPending}
+                      pendingRef={answerPendingRef}
+                      onPendingChange={setAnswerPending}
                     />
                   )}
                   {searchMode === 'search' && retrieval.isError && (

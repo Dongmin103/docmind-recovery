@@ -34,7 +34,7 @@ it('does not display a pending response after its request panel is replaced', as
   const client = new QueryClient();
   const view = render(
     <QueryClientProvider client={client}>
-      <AnswerPanel key="old-scope" request={Request} />
+      <AnswerPanel request={Request} />
     </QueryClientProvider>,
   );
   fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
@@ -42,7 +42,6 @@ it('does not display a pending response after its request panel is replaced', as
   view.rerender(
     <QueryClientProvider client={client}>
       <AnswerPanel
-        key="new-scope"
         request={{
           ...Request,
           scope: { mode: 'documents', documentIds: ['new-document'] },
