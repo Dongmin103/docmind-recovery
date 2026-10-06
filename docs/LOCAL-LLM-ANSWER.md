@@ -219,6 +219,11 @@ One actual selected-manual answer request returned `DOCMIND_LLM_RATE_LIMITED`.
 A later single non-sensitive diagnostic to the same free Novita endpoint with
 the same privacy controls returned HTTP 200 and `usage.cost=0`. That does not
 establish successful company-document generation or explain the original limit.
+The parent then independently verified one actual answer through the public
+browser UI: selected-manual search returned five seeds; expansion and actual
+input each contained 12 chunks; citations `[6]` and `[8]` stayed inside the
+selected manual. The answer appeared successfully without an error. This one
+successful question is not a general answer-quality benchmark.
 The key/credit read-only checks reported zero billed usage; they did not expose
 daily request counts or a reset time. The user explicitly accepted provider
 limits and directed the rollout to continue, with an API replacement deferred
