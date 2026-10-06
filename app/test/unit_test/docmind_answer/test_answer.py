@@ -90,13 +90,15 @@ def test_ollama_request_has_bounded_native_options(service):
 
     def respond(request):
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={"done": True, "done_reason": "stop", "message": {"content": "답변 [1]"}})
+        content = json.dumps({"status": "answered", "answer": "답변 [1]", "citations": [1]})
+        return httpx.Response(200, json={"done": True, "done_reason": "stop", "message": {"content": content}})
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             return await service.generate(service.AnswerConfig("http://local:11434", "test-model", 8192, 1024, "ollama"), [], 1, client=client)
 
-    assert asyncio.run(run()) == "답변 [1]"
+    result = asyncio.run(run())
+    assert (result.status, result.answer, result.references) == ("answered", "답변 [1]", (1,))
     assert seen[0]["stream"] is False
     assert seen[0]["options"] == {"num_ctx": 8192, "num_predict": 1024, "temperature": 0}
 
@@ -104,10 +106,10 @@ def test_ollama_request_has_bounded_native_options(service):
 @pytest.mark.parametrize(
     "body",
     [
-        {"done": True, "message": {"content": "uncited answer"}},
-        {"done": True, "message": {"content": "answer [2]"}},
-        {"done": True, "done_reason": "length", "message": {"content": "answer [1]"}},
-        {"done": False, "message": {"content": "answer [1]"}},
+        {"done": True, "message": {"content": json.dumps({"status": "answered", "answer": "uncited answer", "citations": [1]})}},
+        {"done": True, "message": {"content": json.dumps({"status": "answered", "answer": "answer [2]", "citations": [2]})}},
+        {"done": True, "done_reason": "length", "message": {"content": json.dumps({"status": "answered", "answer": "answer [1]", "citations": [1]})}},
+        {"done": False, "message": {"content": json.dumps({"status": "answered", "answer": "answer [1]", "citations": [1]})}},
         {"error": "secret provider response"},
     ],
 )
@@ -181,11 +183,19 @@ def pipeline(service, monkeypatch):
     stored = {f"doc-{i}": chunk(i) for i in range(12)}
     hit = stored["doc-5"].copy()
     catalog = types.SimpleNamespace(dataset_id="kb", source="sources", document_chunk_set_ids={"doc": "set"}, document_parser_run_ids={"doc": "run"})
-    state = {"version": "v1", "allowed": True, "calls": [], "generation_calls": 0}
+    state = {
+        "version": "v1",
+        "allowed": True,
+        "calls": [],
+        "generation_calls": 0,
+        "no_hits": False,
+        "output": {"status": "answered", "answer": "합성 답변 [1]", "citations": [1]},
+        "on_generate": lambda: None,
+    }
 
     async def search(tenant, question, **kwargs):
         state["calls"].append((tenant, question, kwargs))
-        return {"dataset_id": "kb", "catalog_version_id": "v1", "scope_doc_ids": ["doc"], "chunks": [hit], "trace_id": "trace"}
+        return {"dataset_id": "kb", "catalog_version_id": "v1", "scope_doc_ids": ["doc"], "chunks": [] if state["no_hits"] else [hit], "trace_id": "trace"}
 
     search_service = types.SimpleNamespace(
         search=search,
@@ -198,9 +208,16 @@ def pipeline(service, monkeypatch):
     def query(_tenant, _kb, doc, *, ids=None, orders=None, identity=None):
         return [row.copy() for row in stored.values() if row["doc_id"] == doc and (row["chunk_id"] in ids if ids is not None else row["chunk_order_int"] in orders)]
 
-    async def generate(*_args):
+    original_generate = service.generate
+
+    def respond(_request):
         state["generation_calls"] += 1
-        return "합성 답변 [1]"
+        state["on_generate"]()
+        return httpx.Response(200, json={"done": True, "message": {"content": json.dumps(state["output"], ensure_ascii=False)}})
+
+    async def generate(*args):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await original_generate(*args, client=client)
 
     monkeypatch.setitem(sys.modules, "api.apps.services", types.SimpleNamespace(docmind_api_service=search_service))
     monkeypatch.setattr(service, "_query_chunks", query)
@@ -220,14 +237,20 @@ def test_pipeline_reuses_c_search_and_emits_only_cited_evidence(service, pipelin
     assert result["context"]["used_count"] == 5
     assert len(result["citations"]) == 1
     assert result["citations"][0]["chunk_id"] == "doc-3"
+    assert result["answer_status"] == "answered"
+    assert result["answer"] == "합성 답변 [1]"
+    assert state["generation_calls"] == 1
     assert "scope_doc_ids" not in result
 
 
+@pytest.mark.parametrize("status", ["answered", "insufficient"])
 @pytest.mark.parametrize("mutation", ["version", "permission", "chunk_edit", "chunk_deleted"])
-def test_generation_race_never_returns_stale_evidence(service, pipeline, monkeypatch, mutation):
+def test_generation_race_never_returns_stale_evidence(service, pipeline, status, mutation):
     state, stored, _ = pipeline
+    if status == "insufficient":
+        state["output"] = {"status": status, "answer": "근거 없음", "citations": []}
 
-    async def generate(*_):
+    def mutate():
         if mutation == "version":
             state["version"] = "v2"
         elif mutation == "permission":
@@ -236,11 +259,11 @@ def test_generation_race_never_returns_stale_evidence(service, pipeline, monkeyp
             stored["doc-3"]["content_with_weight"] = "edited"
         else:
             del stored["doc-3"]
-        return "합성 답변 [1]"
 
-    monkeypatch.setattr(service, "generate", generate)
+    state["on_generate"] = mutate
     with pytest.raises(service.AnswerError):
         asyncio.run(service.answer("tenant", "질문", scope={"mode": "all"}))
+    assert state["generation_calls"] == 1
 
 
 def test_changed_seed_is_not_sent_to_model(service, pipeline):
@@ -248,4 +271,55 @@ def test_changed_seed_is_not_sent_to_model(service, pipeline):
     stored["doc-5"]["content_with_weight"] = "changed after search"
     with pytest.raises(service.AnswerError, match="SOURCE_CHANGED"):
         asyncio.run(service.answer("tenant", "질문", scope={"mode": "all"}))
+    assert state["generation_calls"] == 0
+
+
+@pytest.mark.parametrize(
+    "question,evidence,output,expected_answer",
+    [
+        (
+            "달의 지름은?",
+            "합성 절차 담당자는 민수입니다.",
+            {"status": "insufficient", "answer": "무관한 문서입니다.", "citations": []},
+            "선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.",
+        ),
+        (
+            "민수가 절차를 폐지한 이유는?",
+            "합성 절차 담당자는 민수입니다.",
+            {"status": "insufficient", "answer": "폐지했다는 전제가 근거에 없습니다.", "citations": []},
+            "선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.",
+        ),
+        (
+            "담당자와 시행일은?",
+            "합성 절차 담당자는 민수입니다.",
+            {"status": "partial", "answer": "담당자는 민수입니다 [1]. 시행일은 확인할 수 없습니다.", "citations": [1]},
+            "담당자는 민수입니다 [1]. 시행일은 확인할 수 없습니다.",
+        ),
+        ("담당자는?", "합성 절차 담당자는 민수입니다.", {"status": "answered", "answer": "담당자는 민수입니다 [1].", "citations": [1]}, "담당자는 민수입니다 [1]."),
+    ],
+)
+def test_pipeline_assembles_validated_states_for_synthetic_questions(service, pipeline, question, evidence, output, expected_answer):
+    state, stored, hit = pipeline
+    stored["doc-5"]["content_with_weight"] = hit["content_with_weight"] = evidence
+    state["output"] = output
+    result = asyncio.run(service.answer("tenant", question, scope={"mode": "all"}, neighbor_window=0))
+    assert result["answer_status"] == output["status"]
+    assert result["answer"] == expected_answer
+    assert [citation["chunk_id"] for citation in result["citations"]] == ([] if output["status"] == "insufficient" else ["doc-5"])
+    assert state["generation_calls"] == 1
+    assert result["context"] == {"seed_count": 1, "expanded_count": 1, "used_count": 1, "neighbor_window": 0, "budget_pruned": False, "seed_only_count": 0}
+    assert (result["model"], result["trace_id"]) == ("synthetic-model", "trace")
+
+
+def test_empty_search_skips_generation_and_returns_server_owned_insufficient_answer(service, pipeline):
+    state, _, _ = pipeline
+    state["no_hits"] = True
+    result = asyncio.run(service.answer("tenant", "질문", scope={"mode": "all"}))
+    assert result == {
+        "answer": "선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.",
+        "answer_status": "insufficient",
+        "citations": [],
+        "dataset_id": "kb",
+        "context": {"seed_count": 0, "expanded_count": 0, "used_count": 0, "neighbor_window": 2},
+    }
     assert state["generation_calls"] == 0

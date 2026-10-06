@@ -38,6 +38,8 @@ const ErrorMessages: Record<string, string> = {
     '모델의 답변 길이 한도를 초과했습니다. 질문을 좁혀 주세요.',
   DOCMIND_LLM_CITATIONS_INVALID:
     '모델이 올바른 근거 번호를 제시하지 않아 답변을 표시하지 않았습니다.',
+  DOCMIND_LLM_RESPONSE_INVALID:
+    '모델의 응답 형식을 확인할 수 없어 답변을 표시하지 않았습니다.',
 };
 
 export default function AnswerPanel({

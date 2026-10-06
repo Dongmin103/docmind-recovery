@@ -63,6 +63,7 @@ export interface DocMindAnswerRequest extends DocMindSearchRequest {
 
 export interface DocMindAnswerResult {
   answer: string;
+  answer_status?: 'answered' | 'partial' | 'insufficient';
   dataset_id: string;
   model?: string;
   citations: {

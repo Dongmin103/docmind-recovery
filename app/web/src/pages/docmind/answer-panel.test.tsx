@@ -28,6 +28,36 @@ function renderPanel() {
 
 beforeEach(() => jest.clearAllMocks());
 
+it('renders insufficient evidence as a normal answer without citation controls', async () => {
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: {
+        answer_status: 'insufficient',
+        answer:
+          '선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.',
+        dataset_id: 'synthetic-kb',
+        citations: [],
+        context: {
+          seed_count: 1,
+          expanded_count: 5,
+          used_count: 5,
+          neighbor_window: 5,
+        },
+      },
+    },
+  });
+  renderPanel();
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  const answer = await screen.findByLabelText('AI 답변');
+  expect(answer).toHaveTextContent(
+    '선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.',
+  );
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(within(answer).queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+});
+
 it('does not display a pending response after its request panel is replaced', async () => {
   let resolveOld: (value: unknown) => void = () => {};
   MockAnswer.mockImplementationOnce(
@@ -142,6 +172,29 @@ const RichAnswer = {
     },
   },
 };
+
+it('retains citation controls for a partial answer with an unknown field', async () => {
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: {
+        ...RichAnswer.data.data,
+        answer_status: 'partial',
+        answer: '담당자는 민수입니다 [1]. 시행일은 확인할 수 없습니다.',
+      },
+    },
+  });
+  renderPanel();
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '시행일은 확인할 수 없습니다.',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '근거 1 확인' }));
+  expect(
+    screen.getByRole('complementary', { name: 'synthetic.pdf' }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
 
 it('renders real Markdown and only connects mapped numeric references to the actual HTML evidence', async () => {
   MockAnswer.mockResolvedValue(RichAnswer);
@@ -533,6 +586,14 @@ it.each([
   ['DOCMIND_LLM_AUTH_FAILED', '인증'],
   ['DOCMIND_LLM_CREDITS_REQUIRED', '잔액'],
   ['DOCMIND_LLM_RATE_LIMITED', '요청 한도'],
+  [
+    'DOCMIND_LLM_RESPONSE_INVALID',
+    '모델의 응답 형식을 확인할 수 없어 답변을 표시하지 않았습니다.',
+  ],
+  [
+    'DOCMIND_LLM_CITATIONS_INVALID',
+    '모델이 올바른 근거 번호를 제시하지 않아 답변을 표시하지 않았습니다.',
+  ],
 ])('keeps search usable and explains %s', async (message, explanation) => {
   MockAnswer.mockResolvedValue({
     data: { code: 100, message },

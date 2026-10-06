@@ -17,7 +17,11 @@ def external_env(monkeypatch, tmp_path):
     return secret
 
 
-def completion(content="근거 답변 [1]", finish="stop", **extra):
+def generated(status="answered", answer="근거 답변 [1]", citations=None):
+    return json.dumps({"status": status, "answer": answer, "citations": [1] if citations is None else citations}, ensure_ascii=False)
+
+
+def completion(content='{"status":"answered","answer":"근거 답변 [1]","citations":[1]}', finish="stop", **extra):
     return {
         "id": "gen-synthetic",
         "model": "qwen/qwen3.8-27b",
@@ -27,10 +31,10 @@ def completion(content="근거 답변 [1]", finish="stop", **extra):
     }
 
 
-def call(service, config, respond):
+def call(service, config, respond, citation_count=1):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            return await service.generate(config, [{"role": "user", "content": "synthetic evidence"}], 1, client=client)
+            return await service.generate(config, [{"role": "user", "content": "synthetic evidence"}], citation_count, client=client)
 
     return asyncio.run(run())
 
@@ -50,7 +54,8 @@ def test_openrouter_wire_contract_and_secret_not_in_repr(service, external_env, 
         seen.append(request)
         return httpx.Response(200, json=completion())
 
-    assert call(service, config, respond) == "근거 답변 [1]"
+    result = call(service, config, respond)
+    assert (result.status, result.answer, result.references) == ("answered", "근거 답변 [1]", (1,))
     assert len(seen) == 1
     assert str(seen[0].url) == "https://openrouter.ai/api/v1/chat/completions"
     assert seen[0].headers["Authorization"] == "Bearer sk-or-v1-synthetic-test-only"
@@ -115,17 +120,18 @@ def test_local_switch_never_reads_or_sends_external_credentials(service, externa
             "stream": False,
             "options": {"num_ctx": 8192, "num_predict": 1024, "temperature": 0},
         }
-        return httpx.Response(200, json={"done": True, "message": {"content": "local [1]"}})
+        return httpx.Response(200, json={"done": True, "message": {"content": generated(answer="local [1]")}})
 
-    assert call(service, config, respond) == "local [1]"
+    result = call(service, config, respond)
+    assert (result.status, result.answer, result.references) == ("answered", "local [1]", (1,))
 
 
 @pytest.mark.parametrize(
     "body,code",
     [
         (completion(finish="length"), "OUTPUT_TRUNCATED"),
-        (completion(content="uncited"), "CITATIONS_INVALID"),
-        (completion(content="unknown [2]"), "CITATIONS_INVALID"),
+        (completion(content=generated(answer="uncited")), "CITATIONS_INVALID"),
+        (completion(content=generated(answer="unknown [2]", citations=[2])), "CITATIONS_INVALID"),
         (completion(content=None), "RESPONSE_INVALID"),
         (completion(finish="content_filter"), "RESPONSE_INVALID"),
         (completion(finish="tool_calls"), "RESPONSE_INVALID"),
@@ -162,6 +168,104 @@ def test_external_response_size_is_bounded(service, external_env):
         call(service, service.AnswerConfig.from_env(), lambda _: httpx.Response(200, content=b"x" * 1_048_577))
 
 
-def test_external_exact_abstention_is_allowed(service, external_env):
-    result = call(service, service.AnswerConfig.from_env(), lambda _: httpx.Response(200, json=completion(content="선택한 문서 근거만으로는 답변할 수 없습니다.")))
-    assert result == "선택한 문서 근거만으로는 답변할 수 없습니다."
+@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize(
+    "status,answer,citations,expected_answer,expected_refs",
+    [
+        ("answered", "  합성 사실 [1], 확인 [1]  ", [1], "합성 사실 [1], 확인 [1]", (1,)),
+        ("partial", "합성 담당자는 민수입니다 [1]. 시행일은 확인할 수 없습니다.", [1], "합성 담당자는 민수입니다 [1]. 시행일은 확인할 수 없습니다.", (1,)),
+        ("insufficient", "질문의 전제에 근거가 없습니다. 꾸며낸 사실 [999]", [], "선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.", ()),
+        ("insufficient", "", [], "선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다.", ()),
+    ],
+)
+def test_generated_states_use_one_call_and_server_owned_insufficient_answer(service, provider, status, answer, citations, expected_answer, expected_refs):
+    config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
+    seen = []
+
+    def respond(request):
+        seen.append(request)
+        content = generated(status, answer, citations)
+        body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+        return httpx.Response(200, json=body)
+
+    result = call(service, config, respond)
+    assert (result.status, result.answer, result.references) == (status, expected_answer, expected_refs)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize(
+    "content,code",
+    [
+        ("선택한 문서 근거만으로는 답변할 수 없습니다.", "RESPONSE_INVALID"),
+        ("private malformed {", "RESPONSE_INVALID"),
+        ("```json\n" + generated() + "\n```", "RESPONSE_INVALID"),
+        (generated() + " trailing", "RESPONSE_INVALID"),
+        ("[]", "RESPONSE_INVALID"),
+        ("null", "RESPONSE_INVALID"),
+        ('{"status":"answered","answer":"private [1]","citations":[NaN]}', "RESPONSE_INVALID"),
+        ('{"status":"unknown","answer":"private","citations":[]}', "RESPONSE_INVALID"),
+        ('{"status":[],"answer":"private","citations":[]}', "RESPONSE_INVALID"),
+        ('{"status":"answered","citations":[1]}', "RESPONSE_INVALID"),
+        ('{"status":"answered","answer":"private [1]","citations":[1],"extra":true}', "RESPONSE_INVALID"),
+        ('{"status":"answered","answer":null,"citations":[1]}', "RESPONSE_INVALID"),
+        ('{"status":"answered","answer":"private [1]","citations":1}', "RESPONSE_INVALID"),
+        ('{"status":"answered","status":"insufficient","answer":"private","citations":[]}', "RESPONSE_INVALID"),
+        ('{"status":"insufficient","answer":"","answer":"private","citations":[]}', "RESPONSE_INVALID"),
+        (generated(citations=[True]), "RESPONSE_INVALID"),
+        (generated(citations=[1.0]), "RESPONSE_INVALID"),
+        (generated(citations=["1"]), "RESPONSE_INVALID"),
+        (generated(citations=[None]), "RESPONSE_INVALID"),
+        (generated("insufficient", "private", [True]), "RESPONSE_INVALID"),
+        (generated(answer="   "), "RESPONSE_INVALID"),
+        (generated(answer="private"), "CITATIONS_INVALID"),
+        (generated(citations=[]), "CITATIONS_INVALID"),
+        (generated(citations=[1, 1]), "CITATIONS_INVALID"),
+        (generated(answer="private [0]", citations=[0]), "CITATIONS_INVALID"),
+        (generated(answer="private [2]", citations=[1]), "CITATIONS_INVALID"),
+        (generated(answer="private [1] [2]", citations=[1]), "CITATIONS_INVALID"),
+        (generated(answer="private [1]", citations=[2]), "CITATIONS_INVALID"),
+        (generated("partial", "private", [1]), "CITATIONS_INVALID"),
+        (generated("insufficient", "private", [1]), "CITATIONS_INVALID"),
+    ],
+)
+def test_content_schema_and_citation_integrity_fail_closed(service, provider, content, code):
+    config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
+    body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    seen = []
+
+    def respond(request):
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    with pytest.raises(service.AnswerError) as error:
+        call(service, config, respond)
+    assert str(error.value) == f"DOCMIND_LLM_{code}"
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize("citations", [[1], [2]])
+def test_declared_and_inline_citations_must_agree_even_when_all_ids_are_in_range(service, provider, citations):
+    config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
+    content = generated(answer="합성 사실 [1] [2]", citations=citations)
+    body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    with pytest.raises(service.AnswerError, match="CITATIONS_INVALID"):
+        call(service, config, lambda _: httpx.Response(200, json=body), citation_count=2)
+
+
+def test_multiple_declared_references_are_validated_as_a_set(service):
+    config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, "ollama")
+    content = generated(answer="합성 사실 [1] [2] [1]", citations=[2, 1])
+    result = call(service, config, lambda _: httpx.Response(200, json={"done": True, "message": {"content": content}}), citation_count=2)
+    assert (result.status, result.answer, result.references) == ("answered", "합성 사실 [1] [2] [1]", (2, 1))
+
+
+@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+def test_deeply_nested_json_is_a_sanitized_format_error(service, provider):
+    config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
+    content = "[" * 2000 + "0" + "]" * 2000
+    body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    with pytest.raises(service.AnswerError) as error:
+        call(service, config, lambda _: httpx.Response(200, json=body))
+    assert str(error.value) == "DOCMIND_LLM_RESPONSE_INVALID"

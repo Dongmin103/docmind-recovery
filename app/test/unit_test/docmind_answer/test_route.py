@@ -75,7 +75,7 @@ def test_route_passes_authenticated_caller_and_scope(route_app, service, monkeyp
 
     async def answer(*args, **kwargs):
         calls.append((args, kwargs))
-        return {"answer": "synthetic [1]", "citations": []}
+        return {"answer": "synthetic [1]", "answer_status": "partial", "citations": []}
 
     monkeypatch.setattr(service, "answer", answer)
 
@@ -89,6 +89,7 @@ def test_route_passes_authenticated_caller_and_scope(route_app, service, monkeyp
 
     result = asyncio.run(run())
     assert result["code"] == 0
+    assert result["data"] == {"answer": "synthetic [1]", "answer_status": "partial", "citations": []}
     assert calls == [(("member", "question"), {"project_id": "kb", "scope": {"mode": "documents", "document_ids": ["doc"]}, "neighbor_window": 5})]
 
 
@@ -119,3 +120,17 @@ def test_route_sanitizes_unknown_exceptions(route_app, service, monkeypatch):
         return await response.get_json()
 
     assert asyncio.run(run()) == {"code": 500, "message": "DOCMIND_ANSWER_FAILED"}
+
+
+@pytest.mark.parametrize("code", ["DOCMIND_LLM_RESPONSE_INVALID", "DOCMIND_LLM_CITATIONS_INVALID"])
+def test_route_preserves_distinct_format_and_citation_errors(route_app, service, monkeypatch, code):
+    async def fail(*_args, **_kwargs):
+        raise service.AnswerError(code)
+
+    monkeypatch.setattr(service, "answer", fail)
+
+    async def run():
+        response = await route_app.test_client().post("/api/v1/docmind/answer", headers={"X-Test-User": "member"}, json={"question": "q", "scope": {"mode": "all"}})
+        return await response.get_json()
+
+    assert asyncio.run(run()) == {"code": 500, "message": code}
