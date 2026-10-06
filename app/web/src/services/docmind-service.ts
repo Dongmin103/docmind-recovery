@@ -57,6 +57,34 @@ export interface DocMindSearchRequest {
   scope: DocMindSearchScope;
 }
 
+export interface DocMindAnswerRequest extends DocMindSearchRequest {
+  neighborWindow: 0 | 2 | 5;
+}
+
+export interface DocMindAnswerResult {
+  answer: string;
+  dataset_id: string;
+  model?: string;
+  citations: {
+    number: number;
+    chunk_id: string;
+    doc_id: string;
+    document_name: string;
+    document_relative_path?: string;
+    source_version_id?: string;
+    chunk_set_id?: string;
+    content: string;
+  }[];
+  context: {
+    seed_count: number;
+    expanded_count: number;
+    used_count: number;
+    neighbor_window: number;
+    budget_pruned?: boolean;
+    seed_only_count?: number;
+  };
+}
+
 export type DocMindRegistrationState =
   | 'UPLOADING'
   | 'UPLOADED'
@@ -190,7 +218,7 @@ export const getDocMindFolders = () => request.get('/api/v1/docmind/folders');
 export const bootstrapDocMindWorkspace = () =>
   request.post('/api/v1/docmind/bootstrap');
 
-export const searchDocMind = ({
+const searchRequestData = ({
   question,
   projectId,
   scope,
@@ -205,8 +233,16 @@ export const searchDocMind = ({
           : { mode: scope.mode },
   };
   if (projectId) data.project_id = projectId;
-  return request.post('/api/v1/docmind/search', { data });
+  return data;
 };
+
+export const searchDocMind = (input: DocMindSearchRequest) =>
+  request.post('/api/v1/docmind/search', { data: searchRequestData(input) });
+
+export const answerDocMind = (input: DocMindAnswerRequest) =>
+  request.post('/api/v1/docmind/answer', {
+    data: { ...searchRequestData(input), neighbor_window: input.neighborWindow },
+  });
 
 export const registerDocMindDocuments = (folderId: string, files: File[]) => {
   const data = new FormData();

@@ -10,6 +10,7 @@ jest.mock('@/utils/request', () => ({
 
 import request from '@/utils/request';
 import {
+  answerDocMind,
   getDocMindFolders,
   registerDocMindDocuments,
   retryDocMindRegistration,
@@ -21,6 +22,23 @@ const mockPost = request.post as unknown as jest.Mock;
 
 describe('DocMind service contract', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it('requests a bounded answer with server-side scope, not client chunks', () => {
+    answerDocMind({
+      question: '근거?',
+      projectId: 'kb',
+      scope: { mode: 'documents', documentIds: ['doc'] },
+      neighborWindow: 2,
+    });
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/docmind/answer', {
+      data: {
+        question: '근거?',
+        project_id: 'kb',
+        scope: { mode: 'documents', document_ids: ['doc'] },
+        neighbor_window: 2,
+      },
+    });
+  });
 
   it('sends the explicit all scope without selection arrays', () => {
     searchDocMind({ question: 'CAPA', scope: { mode: 'all' } });

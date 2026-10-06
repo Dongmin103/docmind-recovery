@@ -287,6 +287,23 @@ describe('DocMind search scopes', () => {
     expect(screen.getByText('검색 범위가 변경되었습니다. 다시 검색해 주세요.')).toBeInTheDocument();
   });
 
+  it('hides the answer panel when question or scope changes', () => {
+    mockSearchVariables = { question: '시험 질문', projectId: 'project-1', scope: { mode: 'all' } };
+    mockSearchResult = { dataset_id: 'dataset-1', candidate_count: 1, ranked_chunks: [
+      { doc_id: 'document-1', chunk_id: 'chunk-1', content_with_weight: 'synthetic' },
+    ] };
+    renderDocMind();
+    enterQuestion();
+    expect(screen.getByRole('region', { name: '문서 근거 답변' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('문서 검색 질문'), { target: { value: '다른 질문' } });
+    expect(screen.queryByRole('region', { name: '문서 근거 답변' })).not.toBeInTheDocument();
+    enterQuestion();
+    expect(screen.getByRole('region', { name: '문서 근거 답변' })).toBeInTheDocument();
+    fireEvent.click(screen.getByText('전체 문서'));
+    fireEvent.click(screen.getByLabelText('선택 문서'));
+    expect(screen.queryByRole('region', { name: '문서 근거 답변' })).not.toBeInTheDocument();
+  });
+
   it('hides a cached result when its document leaves the live catalog', () => {
     mockSearchVariables = {
       projectId: 'project-1',

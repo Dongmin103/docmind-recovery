@@ -38,6 +38,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useSearchParams } from 'react-router';
 import RegistrationPanel from './registration-panel';
+import AnswerPanel from './answer-panel';
 import { PdfOcrChoice } from './pdf-ocr-choice';
 import SourceTree from './source-tree';
 import {
@@ -731,6 +732,12 @@ export default function DocMind() {
                 )}
                 {retrieval.data && !retrieval.isPending && searchResultValid && (
                   <section className="mt-6" aria-label="검색 결과">
+                    {searchChunks.length > 0 && retrieval.variables && query.trim() === retrieval.variables.question && (
+                      <AnswerPanel
+                        key={JSON.stringify([retrieval.submittedAt, currentScope, documentNodes])}
+                        request={retrieval.variables}
+                      />
+                    )}
                     <p className="text-sm text-text-secondary">
                       결과 {searchChunks.length}개 · 후보{' '}
                       {retrieval.data.candidate_count ?? 0}개
