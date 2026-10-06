@@ -1,0 +1,12 @@
+# Append AFTER windows-dev and generationless-e2e overlays.
+# OpenRouter additionally needs the openrouter-answer overlay for its file secret.
+# This file does not grant external egress. Keep existing Jina search settings.
+services:
+  ragflow-cpu:
+    environment:
+      DOCMIND_ANSWER_ENABLED: "1"
+      DOCMIND_ANSWER_PROVIDER: ${DOCMIND_ANSWER_PROVIDER:-openrouter}
+      DOCMIND_ANSWER_MODEL: ${DOCMIND_ANSWER_MODEL:?Set the exact model for the selected provider}
+      DOCMIND_ANSWER_CONTEXT_TOKENS: ${DOCMIND_ANSWER_CONTEXT_TOKENS:-32768}
+      DOCMIND_ANSWER_OUTPUT_TOKENS: ${DOCMIND_ANSWER_OUTPUT_TOKENS:-1024}
+      DOCMIND_OLLAMA_BASE_URL: ${DOCMIND_OLLAMA_BASE_URL:-http://172.16.5.65:11434}

@@ -1,11 +1,12 @@
-"""Opt-in, stateless local answers over the existing authorized C-search results."""
+"""Opt-in, stateless answers over the existing authorized C-search results."""
 
 import asyncio
 import json
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -21,36 +22,44 @@ class AnswerConfig:
     model: str
     context_tokens: int
     output_tokens: int
+    provider: str
+    api_key: str = field(default="", repr=False)
+    upstream_provider: str = ""
 
     @classmethod
     def from_env(cls):
         if os.getenv("DOCMIND_ANSWER_ENABLED") != "1":
             raise AnswerError("DOCMIND_ANSWER_DISABLED")
-        base_url = os.getenv("DOCMIND_OLLAMA_BASE_URL", "http://172.16.5.65:11434").rstrip("/")
-        model = os.getenv("DOCMIND_OLLAMA_MODEL", "").strip()
-        parsed = urlsplit(base_url)
         try:
-            context = int(os.getenv("DOCMIND_OLLAMA_CONTEXT_TOKENS", "8192"))
-            output = int(os.getenv("DOCMIND_OLLAMA_OUTPUT_TOKENS", "1024"))
-            valid = (
-                parsed.scheme in {"http", "https"}
-                and parsed.hostname
-                and parsed.port
-                and not parsed.username
-                and not parsed.password
-                and not parsed.path
-                and not parsed.query
-                and not parsed.fragment
-                and model
-                and 4096 <= context <= 131072
-                and 256 <= output <= 4096
-                and output + 2048 < context
-            )
-        except ValueError:
-            valid = False
-        if not valid:
-            raise AnswerError("DOCMIND_ANSWER_CONFIG_INVALID")
-        return cls(base_url, model, context, output)
+            provider = os.getenv("DOCMIND_ANSWER_PROVIDER", "openrouter")
+            model = os.getenv("DOCMIND_ANSWER_MODEL", "qwen/qwen3.8-27b" if provider == "openrouter" else "").strip()
+            context = int(os.getenv("DOCMIND_ANSWER_CONTEXT_TOKENS", "32768"))
+            output = int(os.getenv("DOCMIND_ANSWER_OUTPUT_TOKENS", "1024"))
+            if not model or not 4096 <= context <= 131072 or not 256 <= output <= 4096 or output + 2048 >= context:
+                raise ValueError
+            if provider == "openrouter":
+                if os.getenv("DOCMIND_ANSWER_EXTERNAL_ALLOWED") != "1":
+                    raise ValueError
+                # Fixed HTTPS destination: the secret cannot be redirected via a URL setting.
+                base_url = "https://openrouter.ai/api/v1"
+                with Path(os.environ["DOCMIND_OPENROUTER_API_KEY_FILE"]).open("rb") as secret:
+                    key = secret.read(4097).decode("ascii").strip()
+                if not re.fullmatch(r"sk-or-v1-[A-Za-z0-9_-]{1,4000}", key):
+                    raise ValueError
+                upstream = os.getenv("DOCMIND_OPENROUTER_PROVIDER", "").strip()
+                return cls(base_url, model, context, output, provider, key, upstream)
+            if provider != "ollama":
+                raise ValueError
+            base_url = os.getenv("DOCMIND_OLLAMA_BASE_URL", "http://172.16.5.65:11434").rstrip("/")
+            parsed = urlsplit(base_url)
+            if not (
+                parsed.scheme in {"http", "https"} and parsed.hostname and parsed.port and not parsed.username and not parsed.password and not parsed.path and not parsed.query and not parsed.fragment
+            ):
+                raise ValueError
+            # Do not even read the external key in local mode.
+            return cls(base_url, model, context, output, provider)
+        except (ValueError, OSError, KeyError):
+            raise AnswerError("DOCMIND_ANSWER_CONFIG_INVALID") from None
 
 
 def _key(chunk):
@@ -159,17 +168,33 @@ def pack_context(question, seeds, expanded, byte_budget):
 
 
 async def generate(config, messages, citation_count, *, client=None):
+    payload = {"model": config.model, "messages": messages, "stream": False}
+    headers = {}
+    if config.provider == "openrouter":
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers["Authorization"] = f"Bearer {config.api_key}"
+        routing = {"allow_fallbacks": False, "require_parameters": True, "data_collection": "deny", "zdr": True}
+        if config.upstream_provider:
+            routing["only"] = [config.upstream_provider]
+        payload.update(max_tokens=config.output_tokens, temperature=0, reasoning={"enabled": False}, transforms=[], provider=routing)
+    elif config.provider == "ollama":
+        url = f"{config.base_url}/api/chat"
+        payload["options"] = {"num_ctx": config.context_tokens, "num_predict": config.output_tokens, "temperature": 0}
+    else:
+        raise AnswerError("DOCMIND_ANSWER_CONFIG_INVALID")
+
     async def send(active_client):
         async with active_client.stream(
             "POST",
-            f"{config.base_url}/api/chat",
-            json={
-                "model": config.model,
-                "messages": messages,
-                "stream": False,
-                "options": {"num_ctx": config.context_tokens, "num_predict": config.output_tokens, "temperature": 0},
-            },
+            url,
+            json=payload,
+            headers=headers,
+            follow_redirects=False,
         ) as response:
+            if config.provider == "openrouter":
+                code = {401: "DOCMIND_LLM_AUTH_FAILED", 402: "DOCMIND_LLM_CREDITS_REQUIRED", 429: "DOCMIND_LLM_RATE_LIMITED"}.get(response.status_code)
+                if code:
+                    raise AnswerError(code)
             response.raise_for_status()
             body = bytearray()
             async for data in response.aiter_bytes():
@@ -177,11 +202,27 @@ async def generate(config, messages, citation_count, *, client=None):
                 if len(body) > 1_048_576:
                     raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
         result = json.loads(body)
-        content = result.get("message", {}).get("content", "")
-        if not isinstance(content, str) or not content.strip() or result.get("done") is not True or result.get("error"):
+        if not isinstance(result, dict) or result.get("error"):
             raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
-        if result.get("done_reason") == "length":
-            raise AnswerError("DOCMIND_LLM_OUTPUT_TRUNCATED")
+        if config.provider == "openrouter":
+            choices = result.get("choices")
+            if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict) or choices[0].get("error"):
+                raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
+            choice = choices[0]
+            if choice.get("finish_reason") == "length":
+                raise AnswerError("DOCMIND_LLM_OUTPUT_TRUNCATED")
+            message = choice.get("message", {})
+            if choice.get("finish_reason") != "stop" or message.get("tool_calls"):
+                raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
+        else:
+            if result.get("done") is not True:
+                raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
+            if result.get("done_reason") == "length":
+                raise AnswerError("DOCMIND_LLM_OUTPUT_TRUNCATED")
+            message = result.get("message", {})
+        content = message.get("content", "")
+        if not isinstance(content, str) or not content.strip():
+            raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
         content = content.strip()
         references = [int(value) for value in re.findall(r"\[(\d+)\]", content)]
         if content != _ABSTENTION and (not references or any(not 1 <= value <= citation_count for value in references)):
@@ -192,7 +233,7 @@ async def generate(config, messages, citation_count, *, client=None):
         async with asyncio.timeout(90):
             if client is not None:
                 return await send(client)
-            # No proxy, redirects, retries, cloud fallback, prompt logging or tools.
+            # No proxy, redirects, retries, provider fallback, prompt logging or tools.
             async with httpx.AsyncClient(timeout=httpx.Timeout(85, connect=5), trust_env=False, follow_redirects=False) as owned:
                 return await send(owned)
     except (httpx.HTTPError, TimeoutError):

@@ -1,0 +1,14 @@
+# Append after the common answer overlay only for approved external generation.
+# Key contents stay out of environment variables, tracked files and frontend code.
+services:
+  ragflow-cpu:
+    environment:
+      DOCMIND_ANSWER_EXTERNAL_ALLOWED: ${DOCMIND_ANSWER_EXTERNAL_ALLOWED:-0}
+      DOCMIND_OPENROUTER_API_KEY_FILE: /run/secrets/docmind-openrouter-api-key
+      DOCMIND_OPENROUTER_PROVIDER: ${DOCMIND_OPENROUTER_PROVIDER:-}
+    secrets:
+      - source: docmind-openrouter-api-key
+        target: docmind-openrouter-api-key
+secrets:
+  docmind-openrouter-api-key:
+    file: ${DOCMIND_OPENROUTER_KEY_HOST_FILE:?Set the existing key file path accessible to Docker Compose}

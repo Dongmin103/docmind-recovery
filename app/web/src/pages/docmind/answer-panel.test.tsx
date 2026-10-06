@@ -107,13 +107,18 @@ it('only generates on request and shows cited evidence safely', async () => {
   expect(MockAnswer).toHaveBeenCalledWith({ ...Request, neighborWindow: 2 });
 });
 
-it('keeps search usable and explains an unavailable local server', async () => {
+it.each([
+  ['DOCMIND_LLM_UNAVAILABLE', '연결'],
+  ['DOCMIND_LLM_AUTH_FAILED', '인증'],
+  ['DOCMIND_LLM_CREDITS_REQUIRED', '잔액'],
+  ['DOCMIND_LLM_RATE_LIMITED', '요청 한도'],
+])('keeps search usable and explains %s', async (message, explanation) => {
   MockAnswer.mockResolvedValue({
-    data: { code: 100, message: 'DOCMIND_LLM_UNAVAILABLE' },
+    data: { code: 100, message },
   });
   renderPanel();
   fireEvent.click(screen.getByRole('button', { name: '근거로 답변 만들기' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('연결');
+  expect(await screen.findByRole('alert')).toHaveTextContent(explanation);
   await waitFor(() =>
     expect(
       screen.getByRole('button', { name: '근거로 답변 만들기' }),

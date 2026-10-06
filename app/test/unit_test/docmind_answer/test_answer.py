@@ -79,7 +79,8 @@ def test_config_is_opt_in_and_model_is_explicit(service, monkeypatch):
     with pytest.raises(service.AnswerError, match="DISABLED"):
         service.AnswerConfig.from_env()
     monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
-    monkeypatch.delenv("DOCMIND_OLLAMA_MODEL", raising=False)
+    monkeypatch.setenv("DOCMIND_ANSWER_PROVIDER", "ollama")
+    monkeypatch.delenv("DOCMIND_ANSWER_MODEL", raising=False)
     with pytest.raises(service.AnswerError, match="CONFIG"):
         service.AnswerConfig.from_env()
 
@@ -93,7 +94,7 @@ def test_ollama_request_has_bounded_native_options(service):
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            return await service.generate(service.AnswerConfig("http://local:11434", "test-model", 8192, 1024), [], 1, client=client)
+            return await service.generate(service.AnswerConfig("http://local:11434", "test-model", 8192, 1024, "ollama"), [], 1, client=client)
 
     assert asyncio.run(run()) == "답변 [1]"
     assert seen[0]["stream"] is False
@@ -113,7 +114,7 @@ def test_ollama_request_has_bounded_native_options(service):
 def test_invalid_model_responses_are_not_displayed(service, body):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body))) as client:
-            return await service.generate(service.AnswerConfig("http://local:11434", "test", 8192, 1024), [], 1, client=client)
+            return await service.generate(service.AnswerConfig("http://local:11434", "test", 8192, 1024, "ollama"), [], 1, client=client)
 
     with pytest.raises(service.AnswerError):
         asyncio.run(run())
@@ -128,7 +129,7 @@ def test_network_errors_are_sanitized_without_retries(service):
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            return await service.generate(service.AnswerConfig("http://local:11434", "test", 8192, 1024), [], 1, client=client)
+            return await service.generate(service.AnswerConfig("http://local:11434", "test", 8192, 1024, "ollama"), [], 1, client=client)
 
     with pytest.raises(service.AnswerError, match="DOCMIND_LLM_UNAVAILABLE") as error:
         asyncio.run(run())
@@ -205,7 +206,8 @@ def pipeline(service, monkeypatch):
     monkeypatch.setattr(service, "_query_chunks", query)
     monkeypatch.setattr(service, "generate", generate)
     monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
-    monkeypatch.setenv("DOCMIND_OLLAMA_MODEL", "synthetic-model")
+    monkeypatch.setenv("DOCMIND_ANSWER_PROVIDER", "ollama")
+    monkeypatch.setenv("DOCMIND_ANSWER_MODEL", "synthetic-model")
     return state, stored, hit
 
 

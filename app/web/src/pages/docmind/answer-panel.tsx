@@ -8,11 +8,17 @@ import { type ChangeEvent, useState } from 'react';
 
 const ErrorMessages: Record<string, string> = {
   DOCMIND_ANSWER_DISABLED:
-    '로컬 LLM 답변 기능이 아직 활성화되지 않았습니다. 검색은 계속 사용할 수 있습니다.',
+    'LLM 답변 기능이 아직 활성화되지 않았습니다. 검색은 계속 사용할 수 있습니다.',
   DOCMIND_ANSWER_CONFIG_INVALID:
-    '관리자가 로컬 LLM 모델 설정을 확인해야 합니다.',
+    '관리자가 LLM 모델과 연결 설정을 확인해야 합니다.',
   DOCMIND_LLM_UNAVAILABLE:
-    '로컬 LLM 서버에 연결할 수 없습니다. 검색 근거는 계속 확인할 수 있습니다.',
+    'LLM 서비스에 연결할 수 없습니다. 검색 근거는 계속 확인할 수 있습니다.',
+  DOCMIND_LLM_AUTH_FAILED:
+    '외부 LLM 인증에 실패했습니다. 관리자가 API 키를 확인해야 합니다.',
+  DOCMIND_LLM_CREDITS_REQUIRED:
+    '외부 LLM의 사용 가능 잔액 또는 키의 지출 한도가 부족합니다. 관리자에게 확인해 주세요.',
+  DOCMIND_LLM_RATE_LIMITED:
+    '외부 LLM 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.',
   DOCMIND_SOURCE_CHANGED: '문서가 변경되었습니다. 다시 검색해 주세요.',
   DOCMIND_CONTEXT_TOO_LARGE:
     '상위 근거가 모델 입력 한도를 넘었습니다. 질문이나 검색 범위를 좁혀 주세요.',
@@ -82,7 +88,7 @@ export default function AnswerPanel({
       </p>
       {generation.isPending && (
         <p role="status" className="mt-3">
-          주변 문맥을 확인하고 로컬 LLM 답변을 생성하는 중입니다.
+          주변 문맥을 확인하고 LLM 답변을 생성하는 중입니다.
         </p>
       )}
       {generation.isError && (
