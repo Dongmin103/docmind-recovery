@@ -11,6 +11,10 @@ import { answerDocMind } from '@/services/docmind-service';
 import AnswerPanel from './answer-panel';
 
 jest.mock('@/services/docmind-service', () => ({ answerDocMind: jest.fn() }));
+jest.mock('@/services/knowledge-service', () => ({
+  __esModule: true,
+  default: { getChunk: jest.fn(() => new Promise(() => {})) },
+}));
 const Request = { question: '절차는?', scope: { mode: 'all' as const } };
 const MockAnswer = answerDocMind as jest.Mock;
 

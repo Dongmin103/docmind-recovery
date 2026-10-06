@@ -21,6 +21,10 @@ jest.mock('@/services/docmind-service', () => ({
   getDocMindHierarchy: jest.fn(),
   getDocMindRegistrations: jest.fn(),
 }));
+jest.mock('@/services/knowledge-service', () => ({
+  __esModule: true,
+  default: { getChunk: jest.fn(() => new Promise(() => {})) },
+}));
 jest.mock('@/components/icon-font', () => ({ FileIcon: () => null }));
 jest.mock('@/components/highlight-markdown', () => ({
   __esModule: true,

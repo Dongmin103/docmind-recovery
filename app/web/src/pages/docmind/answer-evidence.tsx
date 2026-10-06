@@ -8,7 +8,7 @@ import {
   useLayoutEffect,
   useRef,
 } from 'react';
-import AnswerMarkdown from './answer-markdown';
+import AnswerEvidenceContent from './answer-evidence-content';
 
 type AnswerCitation = DocMindAnswerResult['citations'][number];
 
@@ -84,7 +84,7 @@ export default function AnswerEvidence({
         </button>
       </div>
       <div className="min-w-0 p-5">
-        {citation && <AnswerMarkdown content={citation.content} />}
+        <AnswerEvidenceContent citation={citation} datasetId={datasetId} />
       </div>
       {citation && path && (
         <div className="shrink-0 border-t border-border-button p-5">
