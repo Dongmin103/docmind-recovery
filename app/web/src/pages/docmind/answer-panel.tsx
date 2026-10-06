@@ -6,7 +6,6 @@ import {
 } from '@/services/docmind-service';
 import { useMutation } from '@tanstack/react-query';
 import {
-  type ChangeEvent,
   type FormEvent,
   type MutableRefObject,
   useLayoutEffect,
@@ -39,8 +38,6 @@ const ErrorMessages: Record<string, string> = {
 export default function AnswerPanel({
   request,
   disabled = false,
-  neighborWindow: selectedWindow,
-  onWindowChange,
   pending = false,
   pendingRef,
   onPendingChange,
@@ -48,20 +45,16 @@ export default function AnswerPanel({
 }: {
   request: DocMindSearchRequest;
   disabled?: boolean;
-  neighborWindow?: 0 | 2 | 5;
-  onWindowChange?: (value: 0 | 2 | 5) => void;
   pending?: boolean;
   pendingRef?: MutableRefObject<boolean>;
   onPendingChange?: (pending: boolean) => void;
   invalidationKey?: string;
 }) {
-  const [localWindow, setLocalWindow] = useState<0 | 2 | 5>(2);
-  const neighborWindow = selectedWindow ?? localWindow;
   const localSubmitting = useRef(false);
   const submitting = pendingRef ?? localSubmitting;
   const [localPending, setLocalPending] = useState(false);
   const isPending = pending || localPending;
-  const requestKey = JSON.stringify({ ...request, neighborWindow });
+  const requestKey = JSON.stringify(request);
   const generation = useMutation<
     DocMindAnswerResult,
     Error,
@@ -94,13 +87,7 @@ export default function AnswerPanel({
     submitting.current = true;
     setLocalPending(true);
     onPendingChange?.(true);
-    generation.mutate({ ...request, neighborWindow });
-  };
-  const handleWindowChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const value = Number(event.target.value) as 0 | 2 | 5;
-    if (onWindowChange) onWindowChange(value);
-    else setLocalWindow(value);
-    generation.reset();
+    generation.mutate({ ...request, neighborWindow: 5 });
   };
 
   return (
@@ -113,19 +100,6 @@ export default function AnswerPanel({
         onSubmit={handleGenerate}
         className="flex flex-wrap items-center gap-3"
       >
-        <label>
-          주변 문맥{' '}
-          <select
-            aria-label="주변 문맥"
-            value={neighborWindow}
-            onChange={handleWindowChange}
-            className="rounded border border-border-button bg-bg-base p-2"
-          >
-            <option value={0}>검색된 청크만</option>
-            <option value={2}>앞뒤 2개 (기본)</option>
-            <option value={5}>앞뒤 5개 (비교용)</option>
-          </select>
-        </label>
         <button
           type="submit"
           disabled={disabled || !request.question.trim() || isPending}
@@ -135,8 +109,8 @@ export default function AnswerPanel({
         </button>
       </form>
       <p className="mt-2 text-sm text-text-secondary">
-        선택한 범위에서 근거를 검색하고 주변 문맥을 확인하여 답변합니다. 문서
-        안의 지시문은 답변 지침으로 사용하지 않습니다.
+        선택한 범위에서 근거를 검색하고 앞뒤 5개씩 주변 문맥을 확인하여
+        답변합니다. 문서 안의 지시문은 답변 지침으로 사용하지 않습니다.
       </p>
       {isPending && (
         <p role="status" className="mt-3">

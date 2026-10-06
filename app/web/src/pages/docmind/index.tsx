@@ -243,9 +243,6 @@ export default function DocMind() {
   const [searchMode, setSearchMode] = useState<'search' | 'question'>('search');
   const answerPendingRef = React.useRef(false);
   const [answerPending, setAnswerPending] = useState(false);
-  const [answerNeighborWindow, setAnswerNeighborWindow] = useState<0 | 2 | 5>(
-    2,
-  );
   const [selectedChunk, setSelectedChunk] = useState<ITestingChunk>();
   const [visibleCount, setVisibleCount] = useState(RESULTS_PER_PAGE);
   const [scopeMode, setScopeMode] = useState<DocMindSearchScope['mode']>('all');
@@ -808,8 +805,6 @@ export default function DocMind() {
                         folderCatalog.isError ||
                         folderCatalog.isPending
                       }
-                      neighborWindow={answerNeighborWindow}
-                      onWindowChange={setAnswerNeighborWindow}
                       pending={answerPending}
                       pendingRef={answerPendingRef}
                       onPendingChange={setAnswerPending}

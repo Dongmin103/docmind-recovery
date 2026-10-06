@@ -165,13 +165,9 @@ it('exposes both tabs before submitting and keeps existing search free of genera
   expect(screen.queryByText('근거로 답변 만들기')).not.toBeInTheDocument();
 });
 
-it.each([
-  ['all', 2],
-  ['folders', 0],
-  ['documents', 5],
-] as const)(
-  'submits AI directly once with %s scope and context %s',
-  async (mode, context) => {
+it.each(['all', 'folders', 'documents'] as const)(
+  'submits AI directly once with %s scope and five surrounding neighbors',
+  async (mode) => {
     await start();
     ai();
     question();
@@ -189,9 +185,7 @@ it.each([
         ),
       );
     }
-    fireEvent.change(screen.getByLabelText('주변 문맥'), {
-      target: { value: String(context) },
-    });
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     submit();
     expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
     expect(MockAnswer).toHaveBeenCalledTimes(1);
@@ -204,7 +198,7 @@ it.each([
           : mode === 'folders'
             ? { mode, folderIds: ['folder-1'] }
             : { mode, documentIds: ['document-1'] },
-      neighborWindow: context,
+      neighborWindow: 5,
     });
     expect(MockSearch).not.toHaveBeenCalled();
     expect(
@@ -245,7 +239,7 @@ it('blocks duplicate pending submissions and retries a provider error only expli
   expect(MockAnswer).toHaveBeenCalledTimes(2);
 });
 
-it.each(['query', 'scope', 'tab', 'reset', 'context'] as const)(
+it.each(['query', 'scope', 'tab', 'reset'] as const)(
   'discards pending and completed answers after %s changes without resubmitting',
   async (change) => {
     let resolve: (value: unknown) => void = () => {};
@@ -267,10 +261,6 @@ it.each(['query', 'scope', 'tab', 'reset', 'context'] as const)(
       fireEvent.click(screen.getByText('전체 문서'));
       fireEvent.click(screen.getByLabelText('선택 문서'));
     }
-    if (change === 'context')
-      fireEvent.change(screen.getByLabelText('주변 문맥'), {
-        target: { value: '5' },
-      });
     if (change === 'tab') {
       fireEvent.click(screen.getByRole('tab', { name: '기존 검색' }));
       ai();
@@ -298,7 +288,7 @@ it('allows an explicit repeat of the same question and clears a completed answer
   expect(MockAnswer).toHaveBeenCalledTimes(2);
 });
 
-it.each(['tab', 'query', 'scope', 'context'] as const)(
+it.each(['tab', 'query', 'scope'] as const)(
   'keeps an unresolved request guarded after restoring its %s',
   async (change) => {
     let resolve: (value: unknown) => void = () => {};
@@ -326,14 +316,6 @@ it.each(['tab', 'query', 'scope', 'context'] as const)(
       fireEvent.click(screen.getByLabelText('선택 문서'));
       fireEvent.click(screen.getByLabelText('전체 문서'));
     }
-    if (change === 'context') {
-      fireEvent.change(screen.getByLabelText('주변 문맥'), {
-        target: { value: '5' },
-      });
-      fireEvent.change(screen.getByLabelText('주변 문맥'), {
-        target: { value: '2' },
-      });
-    }
     expect(screen.getByRole('button', { name: '질문하기' })).toBeDisabled();
     fireEvent.submit(
       screen.getByRole('button', { name: '질문하기' }).closest('form')!,
@@ -349,19 +331,32 @@ it.each(['tab', 'query', 'scope', 'context'] as const)(
     submit();
     expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
     expect(MockAnswer).toHaveBeenCalledTimes(2);
+    expect(MockAnswer).toHaveBeenNthCalledWith(1, {
+      question: '시험 질문',
+      projectId: 'project-1',
+      scope: { mode: 'all' },
+      neighborWindow: 5,
+    });
+    expect(MockAnswer).toHaveBeenNthCalledWith(2, {
+      question: '시험 질문',
+      projectId: 'project-1',
+      scope: { mode: 'all' },
+      neighborWindow: 5,
+    });
   },
 );
 
-it('retains context selector focus while invalidating the previous answer', async () => {
+it('retains query input focus while invalidating the previous answer', async () => {
   await start();
   ai();
   question();
   submit();
   expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
-  const selector = screen.getByLabelText('주변 문맥');
-  selector.focus();
-  fireEvent.change(selector, { target: { value: '5' } });
-  expect(screen.getByLabelText('주변 문맥')).toBe(selector);
-  expect(selector).toHaveFocus();
+  const input = screen.getByLabelText('문서 검색 질문');
+  input.focus();
+  question('다른 질문');
+  expect(screen.getByLabelText('문서 검색 질문')).toBe(input);
+  expect(input).toHaveFocus();
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
 });

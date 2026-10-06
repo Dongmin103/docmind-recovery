@@ -101,7 +101,9 @@ it('only generates on request and shows cited evidence safely', async () => {
   expect(await screen.findByText('절차입니다 [1]')).toBeInTheDocument();
   expect(screen.getByText('<script>text</script>')).toBeInTheDocument();
   expect(document.querySelector('script')).toBeNull();
-  expect(MockAnswer).toHaveBeenCalledWith({ ...Request, neighborWindow: 2 });
+  expect(MockAnswer).toHaveBeenCalledWith({ ...Request, neighborWindow: 5 });
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  expect(screen.getByText(/입력 한도에 맞춰 주변 청크 일부 제외/)).toBeInTheDocument();
 });
 
 it.each([
