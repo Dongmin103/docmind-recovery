@@ -284,7 +284,7 @@ async def generate(config, messages, citation_count, *, client=None):
                 return await send(owned)
     except (httpx.HTTPError, TimeoutError):
         raise AnswerError("DOCMIND_LLM_UNAVAILABLE") from None
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, RecursionError):
         raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID") from None
 
 

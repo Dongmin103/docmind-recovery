@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 
 import httpx
 import pytest
@@ -264,8 +265,19 @@ def test_multiple_declared_references_are_validated_as_a_set(service):
 @pytest.mark.parametrize("provider", ["ollama", "openrouter"])
 def test_deeply_nested_json_is_a_sanitized_format_error(service, provider):
     config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
-    content = "[" * 2000 + "0" + "]" * 2000
+    recursion_limit = sys.getrecursionlimit()
+    depth = max(20_000, recursion_limit * 2)
+    content = "[" * depth + "0" + "]" * depth
     body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    assert len(json.dumps(body).encode()) < 1_048_576
+    seen = []
+
+    def respond(request):
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
     with pytest.raises(service.AnswerError) as error:
-        call(service, config, lambda _: httpx.Response(200, json=body))
+        call(service, config, respond)
     assert str(error.value) == "DOCMIND_LLM_RESPONSE_INVALID"
+    assert len(seen) == 1
+    assert sys.getrecursionlimit() == recursion_limit
