@@ -4,10 +4,11 @@
 
 Keep DocMind C-search: BGE-M3, BM25/dense lanes, C128, Jina v3.5, prefix 2400,
 final five seeds. Add a stateless, opt-in answer endpoint and a separate answer
-button. No conversation persistence, source mutation, indexing changes or live
-deployment in this change.
+button. No conversation persistence, source mutation or indexing changes.
+The separately authorized live rollout is recorded below.
 
-The current development provider is OpenRouter, model `qwen/qwen3.8-27b`.
+The rollout uses OpenRouter, model `inclusionai/ling-3.0-flash-sante:free`, pinned
+to the `novita` endpoint. The exact model is supplied through server configuration.
 Later, change server configuration to Ollama at `http://172.16.5.65:11434`;
 search, context expansion, prompting, citations and the frontend contract stay
 the same. There is no automatic fallback between external and local providers.
@@ -73,7 +74,7 @@ as escaped text, and discards the panel on question/scope/search/catalog changes
 OpenRouter HTTP 401, 402 and 429 produce separate sanitized authentication,
 credit/limit and rate-limit messages; upstream response bodies are never exposed.
 
-## Opt-in configuration (not applied to the running stack)
+## Opt-in configuration
 
 Append `app/docker/docker-compose-windows-dev-answer.yml` after the existing
 Windows development and generationless E2E overlay files, with the usual secure
@@ -90,10 +91,11 @@ For OpenRouter, also append `docker-compose-windows-dev-openrouter-answer.yml`:
 
 ```dotenv
 DOCMIND_ANSWER_PROVIDER=openrouter
-DOCMIND_ANSWER_MODEL=qwen/qwen3.8-27b
+DOCMIND_ANSWER_MODEL=inclusionai/ling-3.0-flash-sante:free
 DOCMIND_ANSWER_CONTEXT_TOKENS=32768
 DOCMIND_ANSWER_OUTPUT_TOKENS=1024
 DOCMIND_ANSWER_EXTERNAL_ALLOWED=1
+DOCMIND_OPENROUTER_PROVIDER=novita
 DOCMIND_OPENROUTER_KEY_HOST_FILE=/absolute/compose-host/path/to/existing-key.txt
 ```
 
@@ -170,10 +172,11 @@ input size; default stays ±2 until measured. No live model benchmark is claimed
 - Live read-only OpenRouter authentication and model-endpoint metadata queries
   returned HTTP 200. The account credit query reported zero purchased credits and
   zero usage; the key spending cap is not an account balance. No paid inference,
-  company document transmission, key mutation or credit purchase was performed.
+  company document transmission, key mutation or credit purchase was performed
+  in that initial verification. See the later rollout record below.
 - Independent read-only code review found no actionable introduced defects in
-  the external/local provider implementation. A synthetic live answer comparison
-  remains pending account funding and the test-spending approval.
+  the external/local provider implementation. Those original checks did not
+  include live generation; the later rollout used the approved free model.
 - Full frontend type check: 236 existing diagnostic lines, byte-for-byte identical
   between base checkout and changed checkout; no added diagnostics. It is not a
   clean full type check. Existing route lint findings (ASYNC240 at line 137 and
@@ -187,3 +190,44 @@ Operational limits: this first opt-in version does not add a request admission
 queue/rate limiter. Validate concurrent load and cancellation before shared rollout.
 An `asyncio.to_thread` timeout ends the request, not an already-running storage
 read; existing datastore timeouts still govern that worker.
+
+## Authorized rollout — 2026-10-06
+
+The answer UI/API is deployed to the existing app service and existing public
+frontend at <https://temporary-speedy-tuba-bfs78eb.vercel.app/docmind>. The app
+image is `docmind-ragflow:answer-ui-20261006-r1`, built from feature source
+`6d7f5cd` on the pinned deployed image. Runtime comparison covered 726 code/config
+files: only the answer service and DocMind route changed outside the compiled
+frontend. Existing ingestion, parser, preview and file-sync patches, ports,
+environment and mounts are preserved, with the approved answer settings and
+read-only server secret mount added. Other service containers remain unchanged.
+
+The public frontend is served separately by the existing Vercel project. Its
+API/V1 rewrites point to a restored temporary Quick Tunnel to the existing
+loopback web origin. No permanent service, new user-facing address, firewall,
+port or access-policy changes were made. The temporary tunnel and host must
+remain running; the public API becomes unavailable if that process stops.
+
+Fresh rollout checks passed: 65 answer backend/route tests, 23 C-search tests,
+23 frontend tests, production frontend build, targeted lint, retired-runtime
+check and deployed public auth/catalog/selected-document search. Public HTML,
+main entry and answer-control JavaScript hashes match the build. Full TypeScript
+has 207 diagnostic entries / 296 output lines in both the lockfile baseline and
+release; these diagnostics are identical, not a clean full check.
+
+One actual selected-manual answer request returned `DOCMIND_LLM_RATE_LIMITED`.
+A later single non-sensitive diagnostic to the same free Novita endpoint with
+the same privacy controls returned HTTP 200 and `usage.cost=0`. That does not
+establish successful company-document generation or explain the original limit.
+The key/credit read-only checks reported zero billed usage; they did not expose
+daily request counts or a reset time. The user explicitly accepted provider
+limits and directed the rollout to continue, with an API replacement deferred
+until supplied later. The UI retains its rate-limit error message; no paid
+fallback, model/provider/key change, redaction, or answer-quality change was made.
+
+The first cutover was rolled back under the original verification rule before
+that latest direction arrived, then the verified answer image was deployed
+again. Both app and frontend rollback artifacts are retained in the ignored
+main-checkout directory `.local/answer-ui-release-20261006`. Its old frontend
+rollback package uses the working restored origin, rather than the expired
+tunnel hostname. The task report records exact commands and deployment IDs.
