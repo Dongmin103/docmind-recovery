@@ -1,0 +1,11 @@
+# Append AFTER windows-dev and generationless-e2e overlays. No credentials or
+# provider defaults change. The existing E2E flag still owns Jina key fallback;
+# DOCMIND_ANSWER_ENABLED independently opts in to native local Ollama answers.
+services:
+  ragflow-cpu:
+    environment:
+      DOCMIND_ANSWER_ENABLED: "1"
+      DOCMIND_OLLAMA_BASE_URL: ${DOCMIND_OLLAMA_BASE_URL:-http://172.16.5.65:11434}
+      DOCMIND_OLLAMA_MODEL: ${DOCMIND_OLLAMA_MODEL:?Set the exact installed Ollama model name}
+      DOCMIND_OLLAMA_CONTEXT_TOKENS: ${DOCMIND_OLLAMA_CONTEXT_TOKENS:-8192}
+      DOCMIND_OLLAMA_OUTPUT_TOKENS: ${DOCMIND_OLLAMA_OUTPUT_TOKENS:-1024}

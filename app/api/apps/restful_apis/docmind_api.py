@@ -10,6 +10,7 @@ from quart import Response, request
 
 from api.apps import current_user, login_required, login_user
 from api.apps.services import (
+    docmind_answer_service,
     docmind_api_service,
     docmind_bootstrap_service,
     docmind_catalog_admin_service,
@@ -733,6 +734,35 @@ async def search(tenant_id: str):
     except Exception as error:
         logger.exception("DocMind search failed")
         return get_error_data_result(message=str(error))
+
+
+@manager.route("/docmind/answer", methods=["POST"])  # noqa: F821
+@login_required
+@add_tenant_id_to_kwargs
+async def answer(tenant_id: str):
+    req = await request.get_json(silent=True)
+    if not isinstance(req, dict) or set(req) - {"question", "project_id", "scope", "neighbor_window"}:
+        return get_error_argument_result("invalid answer request")
+    try:
+        question = req.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise ValueError("question is required")
+        project_id = req.get("project_id")
+        if "project_id" in req and (not isinstance(project_id, str) or not project_id.strip()):
+            raise ValueError("project_id must be a non-empty string")
+        result = await docmind_answer_service.answer(
+            tenant_id, question.strip(), project_id=project_id.strip() if project_id else None,
+            scope=_parse_search_scope(req.get("scope")), neighbor_window=req.get("neighbor_window", 2),
+        )
+        return get_result(data=result)
+    except (docmind_answer_service.AnswerError, docmind_api_service.DocmindCatalogNotInitializedError) as error:
+        return get_error_data_result(message=str(error))
+    except ValueError as error:
+        return get_error_argument_result(str(error))
+    except Exception:  # noqa: BLE001 -- sanitize all failures at the public boundary
+        # Do not expose exception bodies that may contain source text/provider data.
+        logger.warning("DocMind answer failed")
+        return get_error_data_result(message="DOCMIND_ANSWER_FAILED")
 
 
 @manager.route("/docmind/admin/registrations", methods=["POST"])  # noqa: F821
