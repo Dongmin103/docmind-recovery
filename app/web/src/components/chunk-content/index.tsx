@@ -64,7 +64,7 @@ export default function ChunkContent({
   content: string;
   html?: boolean;
 }) {
-  const isHtml = html || /<\/?[a-z][^>]*>/i.test(content);
+  const isHtml = html || /<table(?:\s[^>]*)?>/i.test(content);
   return (
     <div className="chunk-content min-w-0 max-w-full overflow-x-auto text-base leading-7 text-text-primary">
       {isHtml ? (

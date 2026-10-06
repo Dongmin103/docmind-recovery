@@ -201,7 +201,16 @@ it('sanitizes answer and evidence without allowing automatic remote requests or 
       ).toBeNull(),
     );
   expect(view.container.querySelector('a[href^="javascript:"]')).toBeNull();
-  expect(screen.getAllByText('unsafe link')).toHaveLength(2);
+  expect(screen.getAllByText('unsafe link')).toHaveLength(1);
+  const source = screen
+    .getByRole('complementary')
+    .querySelector('.chunk-content');
+  expect(source?.textContent).toBe(unsafe);
+  expect(
+    source?.querySelector(
+      'script, iframe, style, img, a, [onclick], [onerror], [style], .injected',
+    ),
+  ).toBeNull();
 });
 
 it.each(['close', 'escape'])(

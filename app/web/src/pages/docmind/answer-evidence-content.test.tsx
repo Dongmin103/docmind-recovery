@@ -156,6 +156,62 @@ it('renders legacy HTML table fallback safely without duplicate plaintext', asyn
   expect(MockGetChunk).not.toHaveBeenCalled();
 });
 
+it.each(['text', 'pending', 'error', 'mismatch'])(
+  'preserves literal angle-bracket placeholders in the %s citation fallback',
+  async (state) => {
+    const citation = {
+      ...Citation,
+      content: 'server <hostname> uses <port>\n<tabletop> &amp; <tagged_value>',
+    };
+    if (state === 'pending') {
+      MockGetChunk.mockImplementationOnce(() => new Promise(() => {}));
+    } else if (state === 'error') {
+      MockGetChunk.mockRejectedValueOnce(new Error('synthetic failure'));
+    } else {
+      MockGetChunk.mockResolvedValueOnce(
+        response({
+          ...Chunk,
+          content_with_weight: citation.content,
+          chunk_set_id:
+            state === 'mismatch' ? 'changed-set' : Citation.chunk_set_id,
+          display_html: undefined,
+          provenance: [],
+        }),
+      );
+    }
+    const view = renderEvidence(citation, 'dataset-synthetic');
+    if (state !== 'pending') {
+      await waitFor(() =>
+        expect(screen.queryByRole('status')).not.toBeInTheDocument(),
+      );
+    }
+    expect(view.container.querySelector('.chunk-content')?.textContent).toBe(
+      citation.content,
+    );
+    expect(
+      view.container.querySelector('hostname, port, tabletop, tagged_value'),
+    ).toBeNull();
+    if (state === 'error')
+      expect(screen.getByText(/표시 정보를 불러올 수 없/)).toBeInTheDocument();
+    if (state === 'mismatch')
+      expect(screen.getByText(/변경되었거나 확인할 수 없/)).toBeInTheDocument();
+  },
+);
+
+it('renders explicit display HTML without requiring a table', async () => {
+  MockGetChunk.mockResolvedValueOnce(
+    response({
+      ...Chunk,
+      display_html: '<h3>합성 구조 제목</h3><p>표 없이 표시</p>',
+    }),
+  );
+  renderEvidence(Citation, 'dataset-synthetic');
+  expect(
+    await screen.findByRole('heading', { name: '합성 구조 제목' }),
+  ).toBeInTheDocument();
+  expect(screen.getByText('표 없이 표시')).toBeInTheDocument();
+});
+
 it('does not load evidence until citation and dataset are both present', async () => {
   const view = renderEvidence(undefined, 'dataset-synthetic');
   expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
