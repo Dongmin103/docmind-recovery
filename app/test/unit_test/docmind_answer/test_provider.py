@@ -74,6 +74,43 @@ def test_openrouter_wire_contract_and_secret_not_in_repr(service, external_env, 
     assert "sk-or" not in seen[0].content.decode()
 
 
+@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+def test_prompt_requires_inline_citations_and_sends_a_valid_synthetic_json_example(service, provider):
+    config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
+    chunks = [
+        {"doc_id": "synthetic-doc", "chunk_id": "a", "content_with_weight": "합성 작업의 담당자는 민수입니다."},
+        {"doc_id": "synthetic-doc", "chunk_id": "b", "content_with_weight": "합성 작업의 점검 주기는 7일입니다."},
+    ]
+    _, messages = service.pack_context("담당자와 점검 주기는?", chunks, chunks, 4000)
+    seen = []
+
+    def respond(request):
+        seen.append(json.loads(request.content))
+        content = generated(answer="담당자는 민수입니다 [1]. 점검 주기는 7일입니다 [2].", citations=[1, 2])
+        body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+        return httpx.Response(200, json=body)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await service.generate(config, messages, 2, client=client)
+
+    result = asyncio.run(run())
+    assert (result.status, result.references) == ("answered", (1, 2))
+    assert len(seen) == 1
+    prompt = seen[0]["messages"][0]["content"]
+    assert "citations 배열만 채우는 것으로는 충분하지 않습니다." in prompt
+    assert "answer 문자열 안의 [N] 번호 집합과 citations 배열의 번호 집합은 정확히 같아야 합니다." in prompt
+    _, marker, example_json = prompt.partition("합성 출력 형식 예시(실제 질문의 근거가 아님): ")
+    assert marker
+    example = json.loads(example_json)
+    assert set(example) == {"status", "answer", "citations"}
+    assert example["status"] == "answered"
+    assert example["citations"] == [1, 2]
+    assert "[1]" in example["answer"] and "[2]" in example["answer"]
+    evidence = json.loads(seen[0]["messages"][1]["content"])["evidence"]
+    assert [row["evidence_id"] for row in evidence] == [1, 2]
+
+
 @pytest.mark.parametrize("secret", ["", "bad key\nheader", "sk-or-" + "x" * 9000])
 def test_invalid_secret_fails_closed_without_exposing_it(service, external_env, secret):
     external_env.write_text(secret, encoding="utf-8")

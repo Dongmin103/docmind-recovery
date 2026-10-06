@@ -135,7 +135,10 @@ _SYSTEM = (
     "status는 answered, partial, insufficient 중 하나이며 answer는 문자열, citations는 인용한 evidence_id의 중복 없는 정수 배열입니다. "
     "answered는 근거로 질문에 답할 수 있을 때 사용하세요. partial은 일부만 답할 수 있을 때 사용하고 확인할 수 없는 부분이나 상충하는 근거를 명시하세요. "
     "answered와 partial의 각 사실 문장 끝에 해당 evidence_id를 [1] 형식으로 인용하고, 사용한 번호를 citations에 빠짐없이 넣으세요. 존재하지 않는 번호는 금지합니다. "
-    "insufficient는 질문의 전제나 답을 뒷받침할 근거를 찾지 못했을 때 사용하고 answer는 빈 문자열, citations는 빈 배열로 반환하세요."
+    "answer 문자열 본문에 각 사실을 뒷받침하는 [N] 인용을 반드시 넣으세요. citations 배열만 채우는 것으로는 충분하지 않습니다. "
+    "answer 문자열 안의 [N] 번호 집합과 citations 배열의 번호 집합은 정확히 같아야 합니다. "
+    "insufficient는 질문의 전제나 답을 뒷받침할 근거를 찾지 못했을 때 사용하고 answer는 빈 문자열, citations는 빈 배열로 반환하세요. "
+    '합성 출력 형식 예시(실제 질문의 근거가 아님): {"status":"answered","answer":"합성 작업의 담당자는 민수입니다 [1]. 점검 주기는 7일입니다 [2].","citations":[1,2]}'
 )
 _INSUFFICIENT_NOTICE = "선택한 문서에서 질문의 전제나 답을 뒷받침할 근거를 찾지 못했습니다."
 
