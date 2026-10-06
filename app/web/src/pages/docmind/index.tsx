@@ -612,7 +612,7 @@ export default function DocMind() {
             </ErrorBoundary>
           )}
           {workspaceView === 'search' && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div data-docmind-search-scroll role="region" aria-label="검색 작업 영역" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary">
               <div className="mx-auto w-full max-w-6xl px-5 py-8">
                 <div
                   role="tablist"

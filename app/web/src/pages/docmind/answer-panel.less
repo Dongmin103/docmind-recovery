@@ -1,3 +1,20 @@
+.docmind-answer-panel {
+  container: docmind-answer / inline-size;
+}
+
+.docmind-answer-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+
+@container docmind-answer (min-width: 56rem) {
+  .docmind-answer-flow-with-evidence {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  }
+}
+
 .docmind-answer-markdown {
   overflow-wrap: anywhere;
   p {

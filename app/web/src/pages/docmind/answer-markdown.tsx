@@ -129,7 +129,6 @@ function AnswerMarkdown({
                 data-citation={node.properties.dataCitation}
                 onClick={selectCitation}
                 aria-label={`근거 ${node.properties.dataCitation} 확인`}
-                aria-haspopup="dialog"
                 className="mx-0.5 rounded bg-accent-primary/10 px-1.5 text-sm font-medium text-accent-primary hover:bg-accent-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
               >
                 {children}

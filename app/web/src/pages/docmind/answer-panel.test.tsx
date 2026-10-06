@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { answerDocMind } from '@/services/docmind-service';
 import AnswerPanel from './answer-panel';
@@ -153,8 +154,8 @@ it('renders real Markdown and only connects mapped numeric references to the act
   expect(screen.getByText(/다음 단계/)).toHaveTextContent('[9], [01], [[1]]');
   expect(screen.getByText('코드 [1]').tagName).toBe('CODE');
   fireEvent.click(screen.getByRole('button', { name: '근거 1 확인' }));
-  const dialog = screen.getByRole('dialog', { name: 'synthetic.pdf' });
-  expect(dialog).toHaveTextContent('fixtures/synthetic.pdf');
+  const evidence = screen.getByRole('complementary', { name: 'synthetic.pdf' });
+  expect(evidence).toHaveTextContent('fixtures/synthetic.pdf');
   expect(
     screen.getByRole('heading', { name: '합성 근거' }),
   ).toBeInTheDocument();
@@ -200,7 +201,7 @@ it('sanitizes answer and evidence without allowing automatic remote requests or 
 });
 
 it.each(['close', 'escape'])(
-  'restores citation focus after %s and keeps keyboard focus inside evidence',
+  'restores citation focus without scrolling after evidence %s',
   async (action) => {
     MockAnswer.mockResolvedValue(RichAnswer);
     renderPanel();
@@ -211,13 +212,139 @@ it.each(['close', 'escape'])(
     reference.focus();
     fireEvent.click(reference);
     const close = screen.getByRole('button', { name: '근거 닫기' });
-    await waitFor(() => expect(close).toHaveFocus());
+    expect(reference).toHaveFocus();
+    const focus = jest.spyOn(reference, 'focus');
     if (action === 'close') fireEvent.click(close);
     else fireEvent.keyDown(close, { key: 'Escape' });
     await waitFor(() =>
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument(),
     );
     await waitFor(() => expect(reference).toHaveFocus());
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  },
+);
+
+it('keeps answer citations and composer interactive while switching inline evidence', async () => {
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: {
+        ...RichAnswer.data.data,
+        answer: '첫 근거 [1], 두 번째 근거 [2]',
+        citations: [
+          ...RichAnswer.data.data.citations,
+          {
+            ...RichAnswer.data.data.citations[0],
+            number: 2,
+            document_name: 'second.pdf',
+            content: '두 번째 합성 근거',
+          },
+        ],
+      },
+    },
+  });
+  const view = renderPanel();
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  const reference = await screen.findByRole('button', { name: '근거 1 확인' });
+  fireEvent.click(reference);
+  const evidence = screen.getByRole('complementary', { name: 'synthetic.pdf' });
+  expect(view.container).toContainElement(evidence);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('AI 답변')).not.toHaveAttribute('aria-hidden');
+  expect(screen.getByRole('button', { name: '질문하기' })).not.toBeDisabled();
+  expect(reference).not.toHaveAttribute('aria-haspopup', 'dialog');
+  fireEvent.click(screen.getByRole('button', { name: '근거 2 확인' }));
+  expect(
+    screen.getByRole('complementary', { name: 'second.pdf' }),
+  ).toHaveTextContent('두 번째 합성 근거');
+  fireEvent.keyDown(screen.getByRole('button', { name: '질문하기' }), {
+    key: 'Escape',
+  });
+  expect(screen.getByRole('complementary')).toBeInTheDocument();
+  fireEvent.click(
+    within(screen.getByRole('complementary')).getByRole('button', {
+      name: '근거 닫기',
+    }),
+  );
+  expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+});
+
+it('collapses chunk metadata and detailed instructions while keeping fixed context and warnings visible', async () => {
+  MockAnswer.mockResolvedValue(RichAnswer);
+  renderPanel();
+  const instructions = screen.getByText('답변 생성 안내').closest('details');
+  expect(instructions).not.toHaveAttribute('open');
+  expect(screen.getByText('선택한 범위 · 앞뒤 5개 청크')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  await screen.findByLabelText('AI 답변');
+  expect(
+    screen.getByText('검색 문맥 상세').closest('details'),
+  ).not.toHaveAttribute('open');
+  expect(screen.getByText(/생성된 답변은 틀릴 수/)).toBeVisible();
+});
+
+it.each(['none', 'wheel', 'scroll', 'selection'])(
+  'reveals the answer start on submit and respects reader movement %s before response',
+  async (movement) => {
+    let resolveAnswer: (value: unknown) => void = () => {};
+    MockAnswer.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAnswer = resolve;
+        }),
+    );
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <div data-docmind-search-scroll>
+          <AnswerPanel request={Request} />
+        </div>
+      </QueryClientProvider>,
+    );
+    const viewport = view.container.querySelector(
+      '[data-docmind-search-scroll]',
+    ) as HTMLElement;
+    const scroll = jest.fn(({ top }) => {
+      viewport.scrollTop = top;
+    });
+    viewport.scrollTo = scroll;
+    jest
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        return {
+          top: this.getAttribute('aria-label') === '답변 흐름' ? 180 : 0,
+        } as DOMRect;
+      });
+    fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+    await screen.findByRole('status');
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenLastCalledWith({ top: 164, behavior: 'instant' });
+    if (movement === 'wheel') fireEvent.wheel(viewport);
+    if (movement === 'scroll') {
+      viewport.scrollTop = 20;
+      fireEvent.scroll(viewport);
+    }
+    let selection: jest.SpyInstance | undefined;
+    if (movement === 'selection') {
+      selection = jest
+        .spyOn(window, 'getSelection')
+        .mockReturnValue({ isCollapsed: false } as Selection);
+      fireEvent(document, new Event('selectionchange'));
+    }
+    await act(async () => {
+      resolveAnswer(RichAnswer);
+    });
+    await screen.findByLabelText('AI 답변');
+    expect(scroll).toHaveBeenCalledTimes(movement === 'none' ? 2 : 1);
+    expect(screen.getByLabelText('내 질문')).toHaveTextContent('절차는?');
+    expect(
+      screen
+        .getByLabelText('답변 흐름')
+        .compareDocumentPosition(
+          screen.getByRole('form', { name: 'AI 질문 작성' }),
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    selection?.mockRestore();
+    jest.restoreAllMocks();
   },
 );
 

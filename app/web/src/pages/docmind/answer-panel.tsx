@@ -72,6 +72,10 @@ export default function AnswerPanel({
     number?: number;
     trigger: HTMLButtonElement;
   }>();
+  const panelRef = useRef<HTMLElement>(null);
+  const answerStartRef = useRef<HTMLDivElement>(null);
+  const followAnswer = useRef(false);
+  const revealedTop = useRef(0);
   const generation = useMutation<
     DocMindAnswerResult,
     Error,
@@ -96,8 +100,76 @@ export default function AnswerPanel({
   });
   const resetGeneration = generation.reset;
   useLayoutEffect(() => {
+    followAnswer.current = false;
     resetGeneration();
   }, [requestKey, invalidationKey, resetGeneration]);
+  useLayoutEffect(() => {
+    const viewport = panelRef.current?.closest<HTMLElement>(
+      '[data-docmind-search-scroll]',
+    );
+    if (!viewport) return;
+    const stopFollowing = () => {
+      followAnswer.current = false;
+    };
+    const handleScroll = () => {
+      if (Math.abs(viewport.scrollTop - revealedTop.current) > 2)
+        stopFollowing();
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (
+        [
+          'ArrowUp',
+          'ArrowDown',
+          'PageUp',
+          'PageDown',
+          'Home',
+          'End',
+          ' ',
+        ].includes(event.key)
+      )
+        stopFollowing();
+    };
+    const handleSelection = () => {
+      if (window.getSelection()?.isCollapsed === false) stopFollowing();
+    };
+    viewport.addEventListener('wheel', stopFollowing, { passive: true });
+    viewport.addEventListener('touchstart', stopFollowing, { passive: true });
+    viewport.addEventListener('pointerdown', stopFollowing);
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    viewport.addEventListener('keydown', handleKey);
+    document.addEventListener('selectionchange', handleSelection);
+    return () => {
+      viewport.removeEventListener('wheel', stopFollowing);
+      viewport.removeEventListener('touchstart', stopFollowing);
+      viewport.removeEventListener('pointerdown', stopFollowing);
+      viewport.removeEventListener('scroll', handleScroll);
+      viewport.removeEventListener('keydown', handleKey);
+      document.removeEventListener('selectionchange', handleSelection);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (
+      !submittedQuestion ||
+      !followAnswer.current ||
+      window.getSelection()?.isCollapsed === false
+    )
+      return;
+    const viewport = panelRef.current?.closest<HTMLElement>(
+      '[data-docmind-search-scroll]',
+    );
+    const start = answerStartRef.current;
+    if (!viewport || !start) return;
+    const top = Math.max(
+      0,
+      viewport.scrollTop +
+        start.getBoundingClientRect().top -
+        viewport.getBoundingClientRect().top -
+        16,
+    );
+    viewport.scrollTo({ top, behavior: 'instant' });
+    // Read back the clamped position when the pending turn is shorter than the viewport.
+    revealedTop.current = viewport.scrollTop;
+  }, [submittedQuestion, isPending, generation.data, generation.isError]);
   const handleGenerate = (event: FormEvent) => {
     event.preventDefault();
     if (disabled || !request.question.trim() || submitting.current) return;
@@ -105,6 +177,7 @@ export default function AnswerPanel({
     submitting.current = true;
     setLocalPending(true);
     onPendingChange?.(true);
+    followAnswer.current = true;
     setSelectedEvidence(undefined);
     setSubmitted({ key: displayKey, question: request.question });
     generation.mutate({ ...request, neighborWindow: 5 });
@@ -124,13 +197,20 @@ export default function AnswerPanel({
     setSelectedEvidence((current) =>
       current ? { ...current, number: undefined } : undefined,
     );
+  const citation =
+    !isPending && !generation.isError
+      ? generation.data?.citations.find(
+          (item) => item.number === selectedEvidence?.number,
+        )
+      : undefined;
 
   return (
     <section
+      ref={panelRef}
       aria-label="문서 근거 답변"
-      className="relative mt-5 flex min-h-[24rem] min-w-0 flex-col text-text-primary"
+      className="docmind-answer-panel mt-5 min-w-0 text-text-primary"
     >
-      <div className="min-w-0 flex-1 space-y-5 pb-8">
+      <div className="min-w-0 space-y-5 pb-5">
         {submittedQuestion && (
           <div
             aria-label="내 질문"
@@ -145,65 +225,88 @@ export default function AnswerPanel({
             있습니다.
           </p>
         )}
-        {isPending && (
-          <p role="status" className="mt-3">
-            주변 문맥을 확인하고 LLM 답변을 생성하는 중입니다.
-          </p>
-        )}
-        {generation.isError && (
-          <p role="alert" className="mt-3 text-state-error">
-            {generation.error.message}
-          </p>
-        )}
-        {generation.data && !isPending && !generation.isError && (
-          <article
-            aria-label="AI 답변"
-            className="min-w-0 rounded-2xl border border-border-button bg-bg-card p-5 sm:p-6"
-          >
-            <p className="mb-4 text-sm font-semibold text-text-secondary">
-              DocMind
-            </p>
-            <AnswerMarkdown
-              content={generation.data.answer}
-              citationNumbers={generation.data.citations.map(
-                (citation) => citation.number,
-              )}
-              onCitation={selectCitation}
-            />
-            <p className="mt-3 text-sm text-text-secondary">
-              검색 근거 {generation.data.context.seed_count}개 · 문맥 확장{' '}
-              {generation.data.context.expanded_count}개 · 실제 입력{' '}
-              {generation.data.context.used_count}개
-              {generation.data.context.budget_pruned &&
-                ' · 입력 한도에 맞춰 주변 청크 일부 제외'}
-              {Boolean(generation.data.context.seed_only_count) &&
-                ' · 순서/버전 정보가 없는 근거는 확장하지 않음'}
-            </p>
-            <p className="mt-2 text-sm text-text-secondary">
-              생성된 답변은 틀릴 수 있습니다. 인용 근거를 확인하세요.
-            </p>
-            {generation.data.citations.map((citation) => (
-              <button
-                type="button"
-                key={citation.number}
-                data-citation={citation.number}
-                onClick={selectSource}
-                aria-haspopup="dialog"
-                className="mr-2 mt-3 max-w-full rounded-lg border border-border-button px-3 py-2 text-left text-sm text-text-secondary hover:text-accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
+        <div
+          ref={answerStartRef}
+          aria-label="답변 흐름"
+          className={`docmind-answer-flow${citation ? ' docmind-answer-flow-with-evidence' : ''}`}
+        >
+          <div className="min-w-0">
+            {isPending && (
+              <p role="status" className="mt-3">
+                주변 문맥을 확인하고 LLM 답변을 생성하는 중입니다.
+              </p>
+            )}
+            {generation.isError && (
+              <p role="alert" className="mt-3 text-state-error">
+                {generation.error.message}
+              </p>
+            )}
+            {generation.data && !isPending && !generation.isError && (
+              <article
+                aria-label="AI 답변"
+                className="min-w-0 rounded-2xl border border-border-button bg-bg-component p-5 sm:p-6"
               >
-                <span className="break-words">
-                  [{citation.number}] {citation.document_name}
-                </span>
-              </button>
-            ))}
-          </article>
-        )}
+                <p className="mb-4 text-sm font-semibold text-text-secondary">
+                  DocMind
+                </p>
+                <AnswerMarkdown
+                  content={generation.data.answer}
+                  citationNumbers={generation.data.citations.map(
+                    (citation) => citation.number,
+                  )}
+                  onCitation={selectCitation}
+                />
+                <details className="mt-4 text-xs text-text-secondary">
+                  <summary className="cursor-pointer">검색 문맥 상세</summary>
+                  <p className="mt-2">
+                    검색 근거 {generation.data.context.seed_count}개 · 문맥 확장{' '}
+                    {generation.data.context.expanded_count}개 · 실제 입력{' '}
+                    {generation.data.context.used_count}개
+                  </p>
+                </details>
+                {generation.data.context.budget_pruned && (
+                  <p className="mt-2 text-xs text-text-secondary">
+                    입력 한도에 맞춰 주변 청크 일부 제외
+                  </p>
+                )}
+                {Boolean(generation.data.context.seed_only_count) && (
+                  <p className="mt-2 text-xs text-text-secondary">
+                    순서/버전 정보가 없는 근거는 확장하지 않음
+                  </p>
+                )}
+                <p className="mt-2 text-sm text-text-secondary">
+                  생성된 답변은 틀릴 수 있습니다. 인용 근거를 확인하세요.
+                </p>
+                {generation.data.citations.map((citation) => (
+                  <button
+                    type="button"
+                    key={citation.number}
+                    data-citation={citation.number}
+                    onClick={selectSource}
+                    className="mr-2 mt-3 max-w-full rounded-lg border border-border-button px-3 py-2 text-left text-sm text-text-secondary hover:text-accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
+                  >
+                    <span className="break-words">
+                      [{citation.number}] {citation.document_name}
+                    </span>
+                  </button>
+                ))}
+              </article>
+            )}
+          </div>
+          <AnswerEvidence
+            citation={citation}
+            datasetId={generation.data?.dataset_id}
+            onClose={closeEvidence}
+            trigger={selectedEvidence?.trigger ?? null}
+            renderInspection={renderInspection}
+          />
+        </div>
       </div>
       <form
         id="docmind-question"
         onSubmit={handleGenerate}
         aria-label="AI 질문 작성"
-        className="sticky bottom-0 min-w-0 rounded-xl border border-border-button bg-bg-card p-3 shadow-sm"
+        className="min-w-0 rounded-xl border border-border-button bg-bg-component p-3 shadow-sm"
       >
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           {composer}
@@ -216,23 +319,16 @@ export default function AnswerPanel({
           </button>
         </div>
         <p className="mt-2 text-xs leading-5 text-text-secondary">
-          선택한 범위와 앞뒤 5개 청크를 확인하여 답변합니다. 문서 안의 지시문은
-          답변 지침으로 사용하지 않습니다.
+          선택한 범위 · 앞뒤 5개 청크
         </p>
+        <details className="mt-1 text-xs leading-5 text-text-secondary">
+          <summary className="cursor-pointer">답변 생성 안내</summary>
+          <p>
+            선택한 범위와 앞뒤 5개 청크를 확인하여 답변합니다. 문서 안의
+            지시문은 답변 지침으로 사용하지 않습니다.
+          </p>
+        </details>
       </form>
-      <AnswerEvidence
-        citation={
-          !isPending && !generation.isError
-            ? generation.data?.citations.find(
-                (citation) => citation.number === selectedEvidence?.number,
-              )
-            : undefined
-        }
-        datasetId={generation.data?.dataset_id}
-        onClose={closeEvidence}
-        trigger={selectedEvidence?.trigger ?? null}
-        renderInspection={renderInspection}
-      />
     </section>
   );
 }

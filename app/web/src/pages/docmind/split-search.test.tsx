@@ -88,6 +88,11 @@ async function start() {
   await waitFor(() =>
     expect(screen.getByLabelText('문서 검색 질문')).toBeInTheDocument(),
   );
+  // jsdom has no element scrolling API; keep browser scrolling at its DOM boundary.
+  const viewport = screen.getByRole('region', { name: '검색 작업 영역' });
+  viewport.scrollTo = (options?: ScrollToOptions | number) => {
+    if (typeof options === 'object') viewport.scrollTop = options.top ?? 0;
+  };
   return view;
 }
 function question(value = '시험 질문') {
