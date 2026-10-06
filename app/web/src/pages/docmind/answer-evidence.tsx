@@ -1,7 +1,13 @@
 import type { DocMindAnswerResult } from '@/services/docmind-service';
 import { buildDocMindDocumentPath } from '@/utils/docmind-workspace';
 import { X } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useId } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useId,
+  useLayoutEffect,
+  useRef,
+} from 'react';
 import AnswerMarkdown from './answer-markdown';
 
 type AnswerCitation = DocMindAnswerResult['citations'][number];
@@ -10,19 +16,34 @@ export default function AnswerEvidence({
   citation,
   datasetId,
   onClose,
-  trigger,
   renderInspection,
 }: {
   citation?: AnswerCitation;
   datasetId?: string;
   onClose: () => void;
-  trigger: HTMLButtonElement | null;
   renderInspection?: (datasetId: string, documentId: string) => ReactNode;
 }) {
   const headingId = useId();
+  const evidenceRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const evidence = evidenceRef.current;
+    if (!citation || !evidence) return;
+    evidence.scrollTop = 0;
+    const viewport = evidence.closest<HTMLElement>(
+      '[data-docmind-search-scroll]',
+    );
+    if (!viewport) return;
+    const bounds = evidence.getBoundingClientRect();
+    const visible = viewport.getBoundingClientRect();
+    if (bounds.top < visible.top + 16 || bounds.top > visible.bottom - 128) {
+      viewport.scrollTo({
+        top: Math.max(0, viewport.scrollTop + bounds.top - visible.top - 16),
+        behavior: 'instant',
+      });
+    }
+  }, [citation]);
   const closeEvidence = () => {
     onClose();
-    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape') return;
@@ -34,6 +55,7 @@ export default function AnswerEvidence({
   if (!citation) return null;
   return (
     <aside
+      ref={evidenceRef}
       aria-labelledby={headingId}
       onKeyDown={handleKeyDown}
       className="docmind-answer-evidence min-w-0 rounded-2xl border border-border-button bg-bg-component text-text-primary"

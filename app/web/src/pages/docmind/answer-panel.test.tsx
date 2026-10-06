@@ -348,6 +348,120 @@ it.each(['none', 'wheel', 'scroll', 'selection'])(
   },
 );
 
+it('reveals offscreen evidence on explicit open and switch, then returns to the deep citation after close reflow', async () => {
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: {
+        ...RichAnswer.data.data,
+        answer: '첫 근거 [1], 깊은 근거 [2]',
+        citations: [
+          ...RichAnswer.data.data.citations,
+          {
+            ...RichAnswer.data.data.citations[0],
+            number: 2,
+            document_name: 'second.pdf',
+          },
+        ],
+      },
+    },
+  });
+  const view = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <div data-docmind-search-scroll>
+        <AnswerPanel request={Request} />
+      </div>
+    </QueryClientProvider>,
+  );
+  const viewport = view.container.querySelector(
+    '[data-docmind-search-scroll]',
+  ) as HTMLElement;
+  const scroll = jest.fn(({ top }) => {
+    viewport.scrollTop = top;
+  });
+  viewport.scrollTo = scroll;
+  let evidenceY = 900;
+  jest
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return { top: 0, bottom: 600 } as DOMRect;
+      const y =
+        this.tagName === 'ASIDE' ? evidenceY : this.dataset.citation ? 700 : 0;
+      return {
+        top: y - viewport.scrollTop,
+        bottom: y - viewport.scrollTop + 24,
+      } as DOMRect;
+    });
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  const first = await screen.findByRole('button', { name: '근거 1 확인' });
+  scroll.mockClear();
+  fireEvent.click(first);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 884, behavior: 'instant' });
+  const second = screen.getByRole('button', { name: '근거 2 확인' });
+  evidenceY = 1500;
+  fireEvent.click(second);
+  expect(scroll).toHaveBeenLastCalledWith({ top: 1484, behavior: 'instant' });
+  fireEvent.click(screen.getByRole('button', { name: '근거 닫기' }));
+  expect(scroll).toHaveBeenLastCalledWith({ top: 684, behavior: 'instant' });
+  expect(second).toHaveFocus();
+  jest.restoreAllMocks();
+});
+
+it('keeps viewport position for visible evidence and resets the evidence reading position when switching', async () => {
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: {
+        ...RichAnswer.data.data,
+        answer: '[1], [2]',
+        citations: [
+          ...RichAnswer.data.data.citations,
+          {
+            ...RichAnswer.data.data.citations[0],
+            number: 2,
+            document_name: 'second.pdf',
+          },
+        ],
+      },
+    },
+  });
+  const view = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <div data-docmind-search-scroll>
+        <AnswerPanel request={Request} />
+      </div>
+    </QueryClientProvider>,
+  );
+  const viewport = view.container.querySelector(
+    '[data-docmind-search-scroll]',
+  ) as HTMLElement;
+  const scroll = jest.fn(({ top }) => {
+    viewport.scrollTop = top;
+  });
+  viewport.scrollTo = scroll;
+  jest
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      return this === viewport
+        ? ({ top: 0, bottom: 600 } as DOMRect)
+        : ({ top: 100, bottom: 124 } as DOMRect);
+    });
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  const first = await screen.findByRole('button', { name: '근거 1 확인' });
+  scroll.mockClear();
+  fireEvent.click(first);
+  const evidence = screen.getByRole('complementary');
+  evidence.scrollTop = 300;
+  const second = screen.getByRole('button', { name: '근거 2 확인' });
+  fireEvent.click(second);
+  expect(evidence.scrollTop).toBe(0);
+  expect(scroll).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '근거 닫기' }));
+  expect(scroll).not.toHaveBeenCalled();
+  expect(second).toHaveFocus();
+  jest.restoreAllMocks();
+});
+
 it.each([
   ['DOCMIND_LLM_UNAVAILABLE', '연결'],
   ['DOCMIND_LLM_AUTH_FAILED', '인증'],

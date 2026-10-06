@@ -76,6 +76,7 @@ export default function AnswerPanel({
   const answerStartRef = useRef<HTMLDivElement>(null);
   const followAnswer = useRef(false);
   const revealedTop = useRef(0);
+  const restoreCitation = useRef<HTMLButtonElement | null>(null);
   const generation = useMutation<
     DocMindAnswerResult,
     Error,
@@ -193,10 +194,35 @@ export default function AnswerPanel({
       Number(event.currentTarget.dataset.citation),
       event.currentTarget,
     );
-  const closeEvidence = () =>
+  const closeEvidence = () => {
+    restoreCitation.current = selectedEvidence?.trigger ?? null;
     setSelectedEvidence((current) =>
       current ? { ...current, number: undefined } : undefined,
     );
+  };
+  useLayoutEffect(() => {
+    const trigger = restoreCitation.current;
+    if (!trigger?.isConnected) return;
+    restoreCitation.current = null;
+    trigger.focus({ preventScroll: true });
+    const viewport = panelRef.current?.closest<HTMLElement>(
+      '[data-docmind-search-scroll]',
+    );
+    if (!viewport) return;
+    const bounds = trigger.getBoundingClientRect();
+    const visible = viewport.getBoundingClientRect();
+    const delta =
+      bounds.top < visible.top + 16
+        ? bounds.top - visible.top - 16
+        : bounds.bottom > visible.bottom - 16
+          ? bounds.bottom - visible.bottom + 16
+          : 0;
+    if (delta)
+      viewport.scrollTo({
+        top: Math.max(0, viewport.scrollTop + delta),
+        behavior: 'instant',
+      });
+  }, [selectedEvidence]);
   const citation =
     !isPending && !generation.isError
       ? generation.data?.citations.find(
@@ -297,7 +323,6 @@ export default function AnswerPanel({
             citation={citation}
             datasetId={generation.data?.dataset_id}
             onClose={closeEvidence}
-            trigger={selectedEvidence?.trigger ?? null}
             renderInspection={renderInspection}
           />
         </div>
