@@ -98,13 +98,128 @@ it('only generates on request and shows cited evidence safely', async () => {
   renderPanel();
   expect(MockAnswer).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
-  expect(await screen.findByText('절차입니다 [1]')).toBeInTheDocument();
-  expect(screen.getByText('<script>text</script>')).toBeInTheDocument();
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '절차입니다 [1]',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '근거 1 확인' }));
   expect(document.querySelector('script')).toBeNull();
   expect(MockAnswer).toHaveBeenCalledWith({ ...Request, neighborWindow: 5 });
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  expect(screen.getByText(/입력 한도에 맞춰 주변 청크 일부 제외/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/입력 한도에 맞춰 주변 청크 일부 제외/),
+  ).toBeInTheDocument();
 });
+
+const RichAnswer = {
+  data: {
+    code: 0,
+    data: {
+      answer:
+        '## 합성 절차\n\n- 첫 단계 [1]\n- 다음 단계 [9], [01], [[1]]\n\n`코드 [1]`\n\n| 항목 | 값 |\n| --- | --- |\n| 상태 | 준비 |',
+      dataset_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      citations: [
+        {
+          number: 1,
+          chunk_id: 'chunk-test',
+          doc_id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          document_name: 'synthetic.pdf',
+          document_relative_path: 'fixtures/synthetic.pdf',
+          content:
+            '<h3>합성 근거</h3><table><tr><th>항목</th><th>내용</th></tr><tr><td>순서</td><td>첫 단계</td></tr></table>',
+        },
+      ],
+      context: {
+        seed_count: 1,
+        expanded_count: 5,
+        used_count: 5,
+        neighbor_window: 5,
+      },
+    },
+  },
+};
+
+it('renders real Markdown and only connects mapped numeric references to the actual HTML evidence', async () => {
+  MockAnswer.mockResolvedValue(RichAnswer);
+  renderPanel();
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  expect(
+    await screen.findByRole('heading', { name: '합성 절차' }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('list')).toHaveTextContent('첫 단계 [1]');
+  expect(screen.getByRole('table')).toHaveTextContent('상태준비');
+  expect(screen.getAllByRole('button', { name: '근거 1 확인' })).toHaveLength(
+    1,
+  );
+  expect(screen.getByText(/다음 단계/)).toHaveTextContent('[9], [01], [[1]]');
+  expect(screen.getByText('코드 [1]').tagName).toBe('CODE');
+  fireEvent.click(screen.getByRole('button', { name: '근거 1 확인' }));
+  const dialog = screen.getByRole('dialog', { name: 'synthetic.pdf' });
+  expect(dialog).toHaveTextContent('fixtures/synthetic.pdf');
+  expect(
+    screen.getByRole('heading', { name: '합성 근거' }),
+  ).toBeInTheDocument();
+  expect(document.querySelectorAll('table')).toHaveLength(2);
+  expect(
+    screen.getByRole('link', { name: '원문 · 청크 확인' }),
+  ).toHaveAttribute(
+    'href',
+    '/docmind?view=document&id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&doc_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&source=docmind&return=search',
+  );
+});
+
+it('sanitizes answer and evidence without allowing automatic remote requests or injected presentation', async () => {
+  const unsafe =
+    '<script>window.bad=1</script><iframe src="https://invalid.example/frame"></iframe><style>body{display:none}</style><img src="https://invalid.example/image" onerror="bad()"><a href="javascript:bad()">unsafe link</a><p onclick="bad()" style="position:fixed" class="injected">Safe text</p>';
+  MockAnswer.mockResolvedValue({
+    data: {
+      code: 0,
+      data: {
+        ...RichAnswer.data.data,
+        answer: unsafe + '\n\n[1]',
+        citations: [{ ...RichAnswer.data.data.citations[0], content: unsafe }],
+      },
+    },
+  });
+  const view = renderPanel();
+  fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    'Safe text',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '근거 1 확인' }));
+  document
+    .querySelectorAll('.docmind-answer-markdown')
+    .forEach((body) =>
+      expect(
+        body.querySelector(
+          'script, iframe, style, img, [onclick], [onerror], [style], .injected, a[href^="javascript:"]',
+        ),
+      ).toBeNull(),
+    );
+  expect(view.container.querySelector('a[href^="javascript:"]')).toBeNull();
+  expect(screen.getAllByText('unsafe link')).toHaveLength(2);
+});
+
+it.each(['close', 'escape'])(
+  'restores citation focus after %s and keeps keyboard focus inside evidence',
+  async (action) => {
+    MockAnswer.mockResolvedValue(RichAnswer);
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+    const reference = await screen.findByRole('button', {
+      name: '근거 1 확인',
+    });
+    reference.focus();
+    fireEvent.click(reference);
+    const close = screen.getByRole('button', { name: '근거 닫기' });
+    await waitFor(() => expect(close).toHaveFocus());
+    if (action === 'close') fireEvent.click(close);
+    else fireEvent.keyDown(close, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(reference).toHaveFocus());
+  },
+);
 
 it.each([
   ['DOCMIND_LLM_UNAVAILABLE', '연결'],

@@ -102,6 +102,23 @@ function submit() {
   fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
 }
 
+it('places the controlled AI input in the composer below its single question and answer', async () => {
+  await start();
+  ai();
+  const input = screen.getByLabelText('문서 검색 질문');
+  expect(input.closest('form')).toHaveAccessibleName('AI 질문 작성');
+  question();
+  submit();
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '합성 답변 [1]',
+  );
+  expect(screen.getByLabelText('내 질문')).toHaveTextContent('시험 질문');
+  expect(
+    screen.getByLabelText('AI 답변').compareDocumentPosition(input) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   (getDocMindFolders as jest.Mock).mockResolvedValue({
@@ -187,7 +204,9 @@ it.each(['all', 'folders', 'documents'] as const)(
     }
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     submit();
-    expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+    expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+      '합성 답변 [1]',
+    );
     expect(MockAnswer).toHaveBeenCalledTimes(1);
     expect(MockAnswer).toHaveBeenCalledWith({
       question: '시험 질문',
@@ -204,7 +223,7 @@ it.each(['all', 'folders', 'documents'] as const)(
     expect(
       screen.getByText(/검색 근거 1개 · 문맥 확장 5개 · 실제 입력 5개/),
     ).toBeInTheDocument();
-    expect(screen.getByText('<script>evidence</script>')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '근거 1 확인' }));
     expect(document.querySelector('script')).toBeNull();
   },
 );
@@ -235,7 +254,9 @@ it('blocks duplicate pending submissions and retries a provider error only expli
   expect(await screen.findByRole('alert')).toHaveTextContent('요청 한도');
   expect(MockAnswer).toHaveBeenCalledTimes(1);
   submit();
-  expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '합성 답변 [1]',
+  );
   expect(MockAnswer).toHaveBeenCalledTimes(2);
 });
 
@@ -266,7 +287,7 @@ it.each(['query', 'scope', 'tab', 'reset'] as const)(
       ai();
     }
     await act(async () => resolve(Answer));
-    expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('AI 답변')).not.toBeInTheDocument();
     expect(MockAnswer).toHaveBeenCalledTimes(1);
     expect(MockSearch).not.toHaveBeenCalled();
   },
@@ -277,14 +298,18 @@ it('allows an explicit repeat of the same question and clears a completed answer
   ai();
   question();
   submit();
-  expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '합성 답변 [1]',
+  );
   submit();
   await waitFor(() => expect(MockAnswer).toHaveBeenCalledTimes(2));
-  expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '합성 답변 [1]',
+  );
   question('다른 질문');
-  expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('AI 답변')).not.toBeInTheDocument();
   question();
-  expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('AI 답변')).not.toBeInTheDocument();
   expect(MockAnswer).toHaveBeenCalledTimes(2);
 });
 
@@ -322,14 +347,16 @@ it.each(['tab', 'query', 'scope'] as const)(
     );
     expect(MockAnswer).toHaveBeenCalledTimes(1);
     await act(async () => resolve(Answer));
-    expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('AI 답변')).not.toBeInTheDocument();
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: '질문하기' }),
       ).not.toBeDisabled(),
     );
     submit();
-    expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+    expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+      '합성 답변 [1]',
+    );
     expect(MockAnswer).toHaveBeenCalledTimes(2);
     expect(MockAnswer).toHaveBeenNthCalledWith(1, {
       question: '시험 질문',
@@ -351,12 +378,14 @@ it('retains query input focus while invalidating the previous answer', async () 
   ai();
   question();
   submit();
-  expect(await screen.findByText('합성 답변 [1]')).toBeInTheDocument();
+  expect(await screen.findByLabelText('AI 답변')).toHaveTextContent(
+    '합성 답변 [1]',
+  );
   const input = screen.getByLabelText('문서 검색 질문');
   input.focus();
   question('다른 질문');
   expect(screen.getByLabelText('문서 검색 질문')).toBe(input);
   expect(input).toHaveFocus();
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  expect(screen.queryByText('합성 답변 [1]')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('AI 답변')).not.toBeInTheDocument();
 });

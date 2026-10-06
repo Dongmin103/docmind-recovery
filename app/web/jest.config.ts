@@ -7,6 +7,10 @@ const config: Config = {
     // see jest-esbuild-transformer.cjs
     '^.+\\.(ts|tsx|js|jsx)$': '<rootDir>/jest-esbuild-transformer.cjs',
   },
+  // Exercise the real ESM Markdown pipeline in both npm and pnpm installs.
+  transformIgnorePatterns: [
+    'node_modules/(?!.*(?:react-markdown|remark-|rehype-|unified|bail|devlop|is-plain-obj|trough|vfile|unist-|hast-|hastscript|mdast-|micromark|estree-util-|decode-named-character-reference|character-entities|property-information|space-separated-tokens|comma-separated-tokens|trim-lines|html-|ccount|zwitch|web-namespaces|parse5|entities|escape-string-regexp|markdown-table|longest-streak))',
+  ],
   moduleNameMapper: {
     // Drags the app shell (routes/react-router) into jsdom; see __mocks__
     '^@/components/layout-recognize-form-field$':

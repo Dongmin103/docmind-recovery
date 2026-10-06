@@ -362,6 +362,9 @@ export default function DocMind() {
   const refreshFolders = () => {
     void folderCatalog.refetch();
   };
+  const renderAnswerInspection = (datasetId: string, documentId: string) => (
+    <InspectionLink datasetId={datasetId} documentId={documentId} />
+  );
   const documentNodes = useMemo(
     () => folderCatalog.data?.documents ?? [],
     [folderCatalog.data?.documents],
@@ -480,6 +483,27 @@ export default function DocMind() {
   const changeQuery = (event: React.ChangeEvent<HTMLInputElement>) =>
     setQuery(event.target.value);
   const clearQuery = () => setQuery('');
+  const questionInput = (
+    <div className="relative min-w-0 flex-1">
+      <Input
+        value={query}
+        onChange={changeQuery}
+        placeholder="문서에 대해 질문하세요"
+        aria-label="문서 검색 질문"
+        className="h-11 pr-10 text-base"
+      />
+      {query && (
+        <button
+          type="button"
+          onClick={clearQuery}
+          className="absolute right-3 top-1/2 -translate-y-1/2"
+          aria-label="검색어 지우기"
+        >
+          <X className="size-5" />
+        </button>
+      )}
+    </div>
+  );
   const refreshSearchAfterChunkChange = () => {
     if (retrieval.variables) retrieval.mutate(retrieval.variables);
   };
@@ -632,7 +656,12 @@ export default function DocMind() {
                       ? '전체 · 폴더 · 문서 범위를 직접 선택해 근거 청크를 검색합니다.'
                       : '질문을 입력하면 선택한 범위에서 근거를 찾아 AI가 답변합니다.'}
                   </p>
-                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                  <div
+                    className={searchMode === 'search'
+                      ? 'mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]'
+                      : 'mt-3 flex justify-end'}
+                  >
+                    {searchMode === 'search' && (
                     <form
                       id="docmind-search"
                       onSubmit={submitSearch}
@@ -641,11 +670,7 @@ export default function DocMind() {
                       <Input
                         value={query}
                         onChange={changeQuery}
-                        form={
-                          searchMode === 'question'
-                            ? 'docmind-question'
-                            : 'docmind-search'
-                        }
+                        form="docmind-search"
                         placeholder="문서에서 찾을 내용을 입력하세요"
                         aria-label="문서 검색 질문"
                         className="h-11 pr-12 text-base"
@@ -661,6 +686,7 @@ export default function DocMind() {
                         </button>
                       )}
                     </form>
+                    )}
                     <div className="relative">
                       <button
                         type="button"
@@ -680,7 +706,7 @@ export default function DocMind() {
                       </button>
                       {scopeMenuOpen && (
                         <div
-                          className="absolute right-0 top-12 z-30 max-h-96 w-80 overflow-y-auto rounded-xl border border-border-button bg-bg-card p-3 shadow-2xl"
+                          className="absolute right-0 top-12 z-30 max-h-96 w-80 max-w-[calc(100vw-2.5rem)] overflow-y-auto rounded-xl border border-border-button bg-bg-card p-3 shadow-2xl"
                           role="dialog"
                           aria-label="검색 범위 선택"
                         >
@@ -808,6 +834,8 @@ export default function DocMind() {
                       pending={answerPending}
                       pendingRef={answerPendingRef}
                       onPendingChange={setAnswerPending}
+                      composer={questionInput}
+                      renderInspection={renderAnswerInspection}
                     />
                   )}
                   {searchMode === 'search' && retrieval.isError && (
