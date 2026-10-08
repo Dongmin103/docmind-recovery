@@ -16,6 +16,7 @@ enum ViewMode {
 }
 
 interface DocumentViewSwitchProps {
+  readOnly?: boolean;
   documentInfo?: {
     size: number;
     name: string;
@@ -34,6 +35,7 @@ interface DocumentViewSwitchProps {
 }
 
 export default function DocumentViewSwitch({
+  readOnly = false,
   documentInfo,
   fileType,
   highlights,
@@ -48,6 +50,7 @@ export default function DocumentViewSwitch({
 }: DocumentViewSwitchProps) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.Preview);
+  const showPreview = readOnly || viewMode === ViewMode.Preview;
 
   const handleNodeClick = useCallback(
     (node: ClickableNode) => {
@@ -96,34 +99,34 @@ export default function DocumentViewSwitch({
         name={documentInfo?.name ?? ''}
         create_date={documentInfo?.create_date ?? ''}
       >
-        <Segmented
-          options={options}
-          value={viewMode}
-          onChange={handleViewModeChange}
-        />
+        {!readOnly && (
+          <Segmented
+            options={options}
+            value={viewMode}
+            onChange={handleViewModeChange}
+          />
+        )}
       </DocumentHeader>
 
       <div className="flex-1 h-0 min-h-0 overflow-hidden p-5 pt-2.5 [&>section]:h-full [&>section]:min-h-0">
         {temporaryOriginal && documentId ? (
           <>
-            <div hidden={viewMode !== ViewMode.Preview} className="h-full min-h-0">
-            <TemporaryOriginalPreview
-              key={`${documentId}:${sourceVersionId ?? ''}`}
-              documentId={documentId}
-              sourceFormat={fileType}
-              sourceVersionId={sourceVersionId}
-              chunkSetId={chunkSetId}
-              onChunkSetChanged={onChunkSetChanged}
-              className="h-full min-h-0 overflow-auto [&_img]:max-w-full [&_img]:h-auto"
-              highlights={highlights}
-              setWidthAndHeight={setWidthAndHeight}
-            />
+            <div hidden={!showPreview} className="h-full min-h-0">
+              <TemporaryOriginalPreview
+                key={`${documentId}:${sourceVersionId ?? ''}`}
+                documentId={documentId}
+                sourceFormat={fileType}
+                sourceVersionId={sourceVersionId}
+                chunkSetId={chunkSetId}
+                onChunkSetChanged={onChunkSetChanged}
+                className="h-full min-h-0 overflow-auto [&_img]:max-w-full [&_img]:h-auto"
+                highlights={highlights}
+                setWidthAndHeight={setWidthAndHeight}
+              />
             </div>
-            {viewMode === ViewMode.Representations && (
-              <Representation onNodeClick={handleNodeClick} />
-            )}
+            {!showPreview && <Representation onNodeClick={handleNodeClick} />}
           </>
-        ) : viewMode === ViewMode.Preview ? (
+        ) : showPreview ? (
           <DocumentPreview
             className="h-full min-h-0 overflow-auto [&_img]:max-w-full [&_img]:h-auto"
             fileType={fileType}

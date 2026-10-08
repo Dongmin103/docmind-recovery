@@ -313,11 +313,14 @@ function Chunk({ embedded = false, readOnly = false, onBack }: ChunkProps) {
               <ResizablePanel defaultSize={narrowLayout ? 70 : 40} minSize={30}>
                 <article className="@container h-full min-w-0 flex flex-col">
                   <DocumentViewSwitch
+                    readOnly={readOnly}
                     documentInfo={documentInfo}
                     sourceVersionId={documentInfo?.source_version_id}
                     chunkSetId={documentInfo?.chunk_set_id}
                     documentId={documentInfo?.id}
-                    temporaryOriginal={readOnly && inspectionSource === InspectionSource.DocMind}
+                    temporaryOriginal={
+                      readOnly && inspectionSource === InspectionSource.DocMind
+                    }
                     onChunkSetChanged={retryInspection}
                     fileType={fileType}
                     highlights={highlights}

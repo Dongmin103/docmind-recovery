@@ -243,6 +243,9 @@ describe('embedded read-only chunk viewer', () => {
     expect(screen.queryByRole('button', { name: 'edit chunk' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'delete chunks' })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Artifact' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Artifact node' })).toBeNull();
+    expect(screen.getByTestId('source-preview')).toBeVisible();
   });
 
   it('shows a recoverable inspection error instead of an empty document', () => {
@@ -270,18 +273,18 @@ describe('embedded read-only chunk viewer', () => {
   });
 });
 
-test('breakpoint changes preserve Artifact mode and its selected chunk filter', async () => {
-  const view = render(<Chunk embedded readOnly />);
+test('editable viewer preserves Artifact mode and its selected chunk filter across breakpoints', async () => {
+  const view = render(<Chunk embedded />);
   fireEvent.click(screen.getByRole('button', { name: 'Artifact' }));
   fireEvent.click(screen.getByRole('button', { name: 'Artifact node' }));
   expect(mockFilteredChunkIds).toEqual(['chunk-1']);
   mockLayoutSize = { width: 564, height: 700 };
-  await act(async () => view.rerender(<Chunk embedded readOnly />));
+  await act(async () => view.rerender(<Chunk embedded />));
   expect(screen.getByRole('button', { name: 'Artifact node' })).toBeVisible();
   expect(mockFilteredChunkIds).toEqual(['chunk-1']);
   expect(mockSetLayout).toHaveBeenLastCalledWith([70, 30]);
   mockLayoutSize = { width: 1100, height: 700 };
-  await act(async () => view.rerender(<Chunk embedded readOnly />));
+  await act(async () => view.rerender(<Chunk embedded />));
   expect(screen.getByRole('button', { name: 'Artifact node' })).toBeVisible();
   expect(mockFilteredChunkIds).toEqual(['chunk-1']);
   expect(mockSetLayout).toHaveBeenLastCalledWith([40, 60]);

@@ -64,26 +64,30 @@ export default function ChunkResultBar({
     changeChunkTextMode(value as ChunkTextMode);
   };
   return (
-    <div className={cn('flex justify-end gap-4', className)}>
-      <Segmented
-        className="gap-0 me-auto"
-        buttonSize="xs"
-        itemClassName="px-2"
-        options={textSelectOptions}
-        value={textSelectValue}
-        onChange={changeTextSelectValue}
-      />
+    <div className={cn('flex gap-4', !readOnly && 'justify-end', className)}>
+      {!readOnly && (
+        <>
+          <Segmented
+            className="gap-0 me-auto"
+            buttonSize="xs"
+            itemClassName="px-2"
+            options={textSelectOptions}
+            value={textSelectValue}
+            onChange={changeTextSelectValue}
+          />
 
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="icon">
-            <LucideFilter />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="p-0 w-[200px]">
-          {filterContent}
-        </PopoverContent>
-      </Popover>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon">
+                <LucideFilter />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0 w-[200px]">
+              {filterContent}
+            </PopoverContent>
+          </Popover>
+        </>
+      )}
 
       <SearchInput
         className="w-28"
