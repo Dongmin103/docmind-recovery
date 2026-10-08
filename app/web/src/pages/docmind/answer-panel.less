@@ -15,6 +15,9 @@
   &:has([data-state='idle']) {
     min-height: 0;
   }
+  &:has(.docmind-answer-flow-with-evidence) {
+    max-width: none;
+  }
 }
 .docmind-answer-panel {
   container: docmind-answer / inline-size;
@@ -257,12 +260,18 @@
 }
 @container docmind-answer (min-width: 56rem) {
   .docmind-answer-flow-with-evidence {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-columns: clamp(22rem, 34cqw, 28rem) minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+  .docmind-answer-body:has(.docmind-answer-flow-with-evidence)
+    + .docmind-question-dock {
+    width: clamp(22rem, 34cqw, 28rem);
   }
   .docmind-answer-evidence {
     position: sticky;
     top: 1rem;
-    max-height: calc(100dvh - 16rem);
+    max-height: calc(100dvh - 6rem);
+    padding-left: 1rem;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
