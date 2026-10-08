@@ -1,9 +1,5 @@
-import TemporaryOriginalPreview from '@/components/document-preview/temporary-original-preview';
-import HighLightMarkdown from '@/components/highlight-markdown';
 import { FileIcon } from '@/components/icon-font';
 import { Input } from '@/components/originui/input';
-import { Modal } from '@/components/ui/modal/modal';
-import { useGetChunkHighlights } from '@/hooks/use-document-request';
 import type { ITestingChunk } from '@/interfaces/database/dataset';
 import type {
   DocMindFolderCatalog,
@@ -48,6 +44,9 @@ import {
 import { useFolderSelection } from './use-folder-selection';
 import { ChunkInspection } from './workspace-views';
 import WorkspaceShell from './workspace-shell';
+import SearchPreview from './search-preview';
+import ScopeFolderPicker from './scope-folder-picker';
+import SearchResultContent from './search-result-content';
 import './index.less';
 
 const RESULTS_PER_PAGE = 10;
@@ -116,102 +115,34 @@ function InspectionLink({
   );
 }
 
-function DocumentModal({
-  chunk,
-  datasetId,
-  onClose,
-  onChunkSetChanged,
-}: {
-  chunk?: ITestingChunk;
-  datasetId?: string;
-  onClose: () => void;
-  onChunkSetChanged: () => void;
-}) {
-  const { highlights, setWidthAndHeight } = useGetChunkHighlights(
-    (chunk ?? {}) as any,
-  );
-  const name = chunk?.docnm_kwd || chunk?.doc_name || '';
-  return (
-    <Modal
-      title={name}
-      open={Boolean(chunk)}
-      onCancel={onClose}
-      showfooter={false}
-    >
-      {chunk && (
-        <div>
-          <div className="mb-3 flex justify-end">
-            <InspectionLink datasetId={datasetId} documentId={chunk.doc_id} />
-          </div>
-          <TemporaryOriginalPreview
-            key={`${chunk.doc_id}:${chunk.source_version_id ?? ''}`}
-            documentId={chunk.doc_id}
-            sourceFormat={name.split('.').pop()?.toLowerCase()}
-            sourceVersionId={chunk.source_version_id}
-            chunkSetId={chunk.chunk_set_id}
-            onChunkSetChanged={onChunkSetChanged}
-            className="docmind-document-preview !h-[calc(100dvh-300px)] overflow-auto border-none p-0"
-            highlights={highlights}
-            setWidthAndHeight={setWidthAndHeight}
-          />
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function RankedResult({
-  chunk,
-  rank,
-  datasetId,
-  onOpen,
-}: {
+function RankedResult({ chunk, rank, datasetId, selected, onOpen }: {
   chunk: ITestingChunk;
   rank: number;
   datasetId?: string;
-  onOpen: () => void;
+  selected: boolean;
+  onOpen: (chunk: ITestingChunk, origin: HTMLButtonElement) => void;
 }) {
   const name = chunk.docnm_kwd || chunk.doc_name;
   const location = getSourceLocations(chunk);
-  const relativePath = chunk.document_relative_path
-    ?.trim()
-    .replace(/\\/g, '/')
-    .split('/')
-    .filter(Boolean)
-    .join(' > ');
+  const relativePath = chunk.document_relative_path?.trim().replace(/\\/g, '/');
+  const open = (event: React.MouseEvent<HTMLButtonElement>) => onOpen(chunk, event.currentTarget);
   return (
-    <article className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-5 border-b border-border-button py-6 max-sm:grid-cols-[2.5rem_minmax(0,1fr)]">
-      <div className="pt-2 text-3xl font-medium text-text-secondary">
-        {rank}
-      </div>
-      <div className="min-w-0">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="block w-full min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
-          aria-label={`${name} ${location} 원문 열기`}
-        >
-          <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <FileIcon name={name} />
-            <span className="truncate">{name}</span>
-            <span aria-hidden="true">·</span>
-            <span>{location}</span>
-          </div>
-          {relativePath && (
-            <span className="mt-1 block truncate text-xs text-text-secondary">
-              {relativePath}
-            </span>
-          )}
-          <span className="mt-2 block text-xl font-semibold text-accent-primary hover:underline">
-            {name}
-          </span>
-          <div className="docmind-snippet mt-2 overflow-hidden text-base leading-7 text-text-primary">
-            <HighLightMarkdown>{chunk.content_with_weight}</HighLightMarkdown>
-          </div>
-        </button>
-        <div className="mt-3">
-          <InspectionLink datasetId={datasetId} documentId={chunk.doc_id} />
-        </div>
+    <article className="docmind-result" data-selected={selected || undefined}>
+      <button type="button" onClick={open} className="docmind-result-open"
+        aria-label={`${name} ${location} 원문 열기`}
+        aria-expanded={selected} aria-controls={selected ? 'docmind-original-panel' : undefined}>
+        <span className="docmind-result-title"><FileIcon name={name} /><span>{name}</span></span>
+        <span className="docmind-result-meta">
+          <span className="docmind-result-rank">{rank}</span>
+          {relativePath && <span>{relativePath}</span>}
+          {location !== '문서 위치' && <span>{location}</span>}
+        </span>
+      </button>
+      <SearchResultContent content={chunk.content_with_weight} />
+      <div className="docmind-result-actions">
+        <button type="button" onClick={open}>원문 보기</button>
+        <InspectionLink datasetId={datasetId} documentId={chunk.doc_id} compact />
+        {selected && <span className="docmind-result-selected">원문 확인 중</span>}
       </div>
     </article>
   );
@@ -244,12 +175,15 @@ export default function DocMind() {
   const answerPendingRef = React.useRef(false);
   const [answerPending, setAnswerPending] = useState(false);
   const [selectedChunk, setSelectedChunk] = useState<ITestingChunk>();
+  const [refreshingPreview, setRefreshingPreview] = useState(false);
+  const previewOrigin = React.useRef<HTMLButtonElement | null>(null);
   const [visibleCount, setVisibleCount] = useState(RESULTS_PER_PAGE);
   const [scopeMode, setScopeMode] = useState<DocMindSearchScope['mode']>('all');
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
   const scopeTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const scopeDialogRef = React.useRef<HTMLDivElement>(null);
   const toggleScopeMenu = () => setScopeMenuOpen((open) => !open);
   const closeScopeMenu = () => {
     setScopeMenuOpen(false);
@@ -306,6 +240,7 @@ export default function DocMind() {
       return data.data as DocMindSearchResult;
     },
     onMutate: () => setVisibleCount(RESULTS_PER_PAGE),
+    onSuccess: () => setRefreshingPreview(false),
   });
   const registrationQuery = useQuery<DocMindRegistrationList, Error>({
     queryKey: DocMindKeys.registrations(),
@@ -410,17 +345,46 @@ export default function DocMind() {
   const availableDocumentIds = new Set(
     documentNodes.map((document) => document.id),
   );
-  const searchResultValid = Boolean(
-    retrieval.data &&
+  const searchContextValid = Boolean(
       retrieval.variables &&
       !explicitScopeEmpty &&
       !folderCatalog.isError &&
       !folderCatalog.isPending &&
       retrieval.variables.projectId === folderCatalog.data?.project_id &&
-      JSON.stringify(retrieval.variables.scope) === JSON.stringify(currentScope) &&
-      returnedChunks.every((chunk) => availableDocumentIds.has(chunk.doc_id)),
+      JSON.stringify(retrieval.variables.scope) === JSON.stringify(currentScope),
   );
+  const searchResultValid = Boolean(retrieval.data && searchContextValid &&
+    returnedChunks.every((chunk) => availableDocumentIds.has(chunk.doc_id)));
+
   const searchChunks = searchResultValid ? returnedChunks : [];
+  const currentSelectedChunk = selectedChunk && searchChunks.find((chunk) =>
+    chunk.doc_id === selectedChunk.doc_id &&
+    chunk.source_version_id === selectedChunk.source_version_id &&
+    chunk.chunk_id === selectedChunk.chunk_id) || selectedChunk && searchChunks.find((chunk) =>
+    chunk.doc_id === selectedChunk.doc_id && chunk.source_version_id === selectedChunk.source_version_id);
+  const previewChunk = workspaceView === 'search' && searchMode === 'search' &&
+    searchContextValid && selectedChunk && availableDocumentIds.has(selectedChunk.doc_id)
+      ? (retrieval.isPending || retrieval.isError) && refreshingPreview ? selectedChunk : currentSelectedChunk
+      : undefined;
+  useEffect(() => {
+    // The catalog can invalidate the selection after an asynchronous refresh.
+    // Clear it so restoring an earlier scope cannot revive a released preview.
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (selectedChunk && !previewChunk) setSelectedChunk(undefined);
+  }, [selectedChunk, previewChunk]);
+  const openPreview = (chunk: ITestingChunk, origin: HTMLButtonElement) => {
+    previewOrigin.current = origin;
+    setSelectedChunk(chunk);
+  };
+  const closePreview = () => {
+    setSelectedChunk(undefined);
+    const origin = previewOrigin.current;
+    window.requestAnimationFrame(() => {
+      if (origin?.isConnected) origin.focus({ preventScroll: true });
+      else document.querySelector<HTMLInputElement>('.docmind-search-input')?.focus();
+    });
+  };
+  const showMoreResults = () => setVisibleCount((count) => count + RESULTS_PER_PAGE);
   const folderNames = useMemo(
     () => new Map(folders.map((folder) => [folder.id, folder.name])),
     [folders],
@@ -471,6 +435,8 @@ export default function DocMind() {
       folderCatalog.isPending
     )
       return;
+    setSelectedChunk(undefined);
+    setRefreshingPreview(false);
     retrieval.mutate({
       question: query.trim(),
       projectId: folderCatalog.data?.project_id,
@@ -493,10 +459,32 @@ export default function DocMind() {
     setSearchMode(next);
     document.getElementById(`docmind-${next}-tab`)?.focus();
   };
-  const changeQuery = (event: React.ChangeEvent<HTMLInputElement>) =>
+  const changeQuery = (event: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(event.target.value);
-  const clearQuery = () => setQuery('');
+    setSelectedChunk(undefined);
+  };
+  const clearQuery = () => {
+    setQuery('');
+    setSelectedChunk(undefined);
+  };
   const searchStart = searchMode === 'search' && retrieval.isIdle;
+  React.useLayoutEffect(() => {
+    if (!scopeMenuOpen) return;
+    const fitScopeDialog = () => {
+      const dialog = scopeDialogRef.current;
+      if (!dialog) return;
+      const available = Math.max(0, window.innerHeight - dialog.getBoundingClientRect().top - 16);
+      const height = `min(32rem, ${available}px)`;
+      if (dialog.style.maxHeight !== height) dialog.style.maxHeight = height;
+    };
+    fitScopeDialog();
+    window.addEventListener('resize', fitScopeDialog);
+    window.addEventListener('scroll', fitScopeDialog, true);
+    return () => {
+      window.removeEventListener('resize', fitScopeDialog);
+      window.removeEventListener('scroll', fitScopeDialog, true);
+    };
+  }, [scopeMenuOpen, searchStart, searchMode]);
   const questionInput = (
     <div className="relative min-w-0 flex-1">
       <Input
@@ -519,7 +507,10 @@ export default function DocMind() {
     </div>
   );
   const refreshSearchAfterChunkChange = () => {
-    if (retrieval.variables) retrieval.mutate(retrieval.variables);
+    if (retrieval.variables) {
+      setRefreshingPreview(true);
+      retrieval.mutate(retrieval.variables);
+    }
   };
   const toggle = (
     id: string,
@@ -528,6 +519,9 @@ export default function DocMind() {
     setter((current) =>
       current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
     );
+  const toggleScopeFolder = (id: string) => toggle(id, setSelectedFolderIds);
+  const changeScopeMode = (event: React.ChangeEvent<HTMLInputElement>) =>
+    setScopeMode(event.target.value as DocMindSearchScope['mode']);
   const submitRegistration = (event: FormEvent) => {
     event.preventDefault();
     if (!registrationFolderId || !registrationFiles.length) return;
@@ -546,7 +540,7 @@ export default function DocMind() {
         canAdminister={canAdminister}
         sharedWorkspace={folderCatalog.data?.workspace_mode === 'shared'}
       >
-        <main className="flex h-full min-h-0 flex-col">
+        <main className={`docmind-main flex h-full min-h-0 flex-col${previewChunk ? ' docmind-has-preview' : ''}`}>
           {folderCatalog.isError && (
             <div role="alert" className="p-5 text-state-error">
               <p>
@@ -606,7 +600,7 @@ export default function DocMind() {
           )}
           {workspaceView === 'search' && (
             <div data-docmind-search-scroll role="region" aria-label="검색 작업 영역" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary">
-              <div className={`docmind-search-layout mx-auto w-full max-w-6xl px-5 py-8${searchStart ? ' docmind-search-start' : ''}`}>
+              <div className={`docmind-search-layout mx-auto w-full max-w-6xl px-5 py-8${searchStart ? ' docmind-search-start' : searchMode === 'search' ? ' docmind-search-results' : ''}`}>
                 {searchStart && (
                   <header className="docmind-search-intro">
                     <h1>필요한 문서를 찾아보세요</h1>
@@ -650,7 +644,7 @@ export default function DocMind() {
                   id={`docmind-${searchMode}-panel`}
                   aria-labelledby={`docmind-${searchMode}-tab`}
                 >
-                  <p className="text-sm text-text-secondary" hidden={searchStart}>
+                  <p className="text-sm text-text-secondary" hidden={searchMode === 'search'}>
                     {searchMode === 'search'
                       ? '전체 · 폴더 · 문서 범위를 직접 선택해 근거 청크를 검색합니다.'
                       : '질문을 입력하면 선택한 범위에서 근거를 찾아 AI가 답변합니다.'}
@@ -707,63 +701,46 @@ export default function DocMind() {
                       </button>
                       {scopeMenuOpen && (
                         <div
+                          ref={scopeDialogRef}
                           id="docmind-scope-dialog"
-                          className="docmind-scope-dialog absolute right-0 top-12 z-30 max-h-96 w-80 max-w-[calc(100vw-2.5rem)] overflow-y-auto rounded-xl border border-border-button bg-bg-component p-3 shadow-2xl"
+                          className="docmind-scope-dialog absolute right-0 top-12 z-30 overflow-y-auto border border-border-button bg-bg-component"
                           role="dialog"
                           aria-label="검색 범위 선택"
                         >
                           <button type="button" onClick={closeScopeMenu} aria-label="검색 범위 닫기" className="docmind-scope-close">
                             <X className="size-4" aria-hidden="true" />
                           </button>
-                          <fieldset>
-                            <legend className="mb-2 text-sm font-semibold">
+                          <fieldset className="docmind-scope-modes">
+                            <legend className="mb-3 text-sm font-semibold">
                               검색 범위
                             </legend>
                             {(['all', 'folders', 'documents'] as const).map(
                               (mode) => (
                                 <label
                                   key={mode}
-                                  className="flex items-center gap-2 rounded px-2 py-2"
+                                  className="docmind-scope-mode"
                                 >
                                   <input
                                     type="radio"
                                     name="docmind-scope"
                                     checked={scopeMode === mode}
-                                    onChange={() => setScopeMode(mode)}
+                                    value={mode}
+                                    aria-label={mode === 'all' ? '전체 문서' : mode === 'folders' ? '선택 폴더와 하위 폴더' : '선택 문서'}
+                                    onChange={changeScopeMode}
                                   />
                                   {mode === 'all'
-                                    ? '전체 문서'
+                                    ? '전체'
                                     : mode === 'folders'
-                                      ? '선택 폴더와 하위 폴더'
-                                      : '선택 문서'}
+                                      ? '폴더'
+                                      : '문서'}
                                 </label>
                               ),
                             )}
                           </fieldset>
                           {scopeMode === 'folders' && (
-                            <div className="mt-2 border-t border-border-button pt-2">
-                              {folders.map((folder) => (
-                                <label
-                                  key={folder.id}
-                                  className="flex items-center gap-2 rounded px-2 py-2"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedFolderIds.includes(
-                                      folder.id,
-                                    )}
-                                    onChange={() =>
-                                      toggle(folder.id, setSelectedFolderIds)
-                                    }
-                                  />
-                                  <span className="truncate">
-                                    {'\u00a0'.repeat((folder.depth ?? 0) * 2)}
-                                    {folder.name}
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
+                            <ScopeFolderPicker folders={folders} selectedIds={canonicalFolderIds} onToggle={toggleScopeFolder} />
                           )}
+                          {scopeMode === 'all' && <p className="docmind-scope-hint">검색 가능한 모든 문서에서 찾습니다.</p>}
                           {scopeMode === 'documents' && (
                             <div className="mt-2 border-t border-border-button pt-2">
                               {documentNodes.map((document) => (
@@ -848,20 +825,24 @@ export default function DocMind() {
                     />
                   )}
                   {searchMode === 'search' && retrieval.isError && (
-                    <p role="alert" className="mt-4 text-state-error">
-                      {retrieval.error.message}
-                    </p>
+                    <div role="alert" className="docmind-search-state docmind-search-error">
+                      <h2>검색을 완료하지 못했습니다</h2>
+                      <p>{retrieval.error.message}</p>
+                      <p>연결 상태를 확인한 뒤 다시 검색해 주세요.</p>
+                    </div>
                   )}
                   {searchMode === 'search' && retrieval.isPending && (
-                    <p role="status" className="mt-8 text-text-secondary">
-                      검색 후보를 모으고 재정렬하는 중입니다.
-                    </p>
+                    <div role="status" className="docmind-search-state" aria-live="polite">
+                      <span className="docmind-search-pulse" aria-hidden="true" />
+                      <h2>문서에서 관련 내용을 찾고 있습니다</h2>
+                      <p>선택한 검색 범위를 확인하고 있습니다.</p>
+                    </div>
                   )}
                   {searchMode === 'search' &&
                     retrieval.data &&
                     !retrieval.isPending &&
                     !searchResultValid && (
-                      <p role="status" className="mt-8 text-text-secondary">
+                      <p role="status" className="docmind-search-state">
                         검색 범위가 변경되었습니다. 다시 검색해 주세요.
                       </p>
                     )}
@@ -869,15 +850,18 @@ export default function DocMind() {
                     retrieval.data &&
                     !retrieval.isPending &&
                     searchResultValid && (
-                      <section className="mt-6" aria-label="검색 결과">
-                        <p className="text-sm text-text-secondary">
-                          결과 {searchChunks.length}개 · 후보{' '}
-                          {retrieval.data.candidate_count ?? 0}개
+                      <section className="docmind-results" aria-label="검색 결과">
+                        <p className="docmind-results-count" role="status">
+                          결과 {searchChunks.length}개
+                          {typeof retrieval.data.candidate_count === 'number' && (
+                            <span> · 검색 후보 {retrieval.data.candidate_count}개</span>
+                          )}
                         </p>
                         {searchChunks.length === 0 ? (
-                          <p className="py-12 text-center text-text-secondary">
-                            선택한 범위에서 관련 문서를 찾지 못했습니다.
-                          </p>
+                          <div className="docmind-search-state">
+                            <h2>선택한 범위에서 관련 문서를 찾지 못했습니다.</h2>
+                            <p>다른 검색어를 입력하거나 검색 범위를 넓혀보세요.</p>
+                          </div>
                         ) : (
                           <>
                             {searchChunks
@@ -888,17 +872,14 @@ export default function DocMind() {
                                   chunk={chunk}
                                   rank={index + 1}
                                   datasetId={retrieval.data?.dataset_id}
-                                  onOpen={() => setSelectedChunk(chunk)}
+                                  selected={previewChunk === chunk}
+                                  onOpen={openPreview}
                                 />
                               ))}
                             {searchChunks.length > visibleCount && (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setVisibleCount(
-                                    (count) => count + RESULTS_PER_PAGE,
-                                  )
-                                }
+                                onClick={showMoreResults}
                                 className="mt-5 rounded-lg border border-border-button px-4 py-2"
                               >
                                 결과 더 보기
@@ -1034,14 +1015,11 @@ export default function DocMind() {
             </div>
           )}
         </main>
-        <DocumentModal
-          chunk={
-            selectedChunk && availableDocumentIds.has(selectedChunk.doc_id)
-              ? selectedChunk
-              : undefined
-          }
-          datasetId={retrieval.data?.dataset_id}
-          onClose={() => setSelectedChunk(undefined)}
+        <SearchPreview
+          chunk={previewChunk}
+          evidenceState={refreshingPreview ? retrieval.isError ? 'error' : 'pending' : 'ready'}
+          inspection={<InspectionLink datasetId={retrieval.data?.dataset_id} documentId={previewChunk?.doc_id} compact />}
+          onClose={closePreview}
           onChunkSetChanged={refreshSearchAfterChunkChange}
         />
       </WorkspaceShell>

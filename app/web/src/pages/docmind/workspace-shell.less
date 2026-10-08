@@ -1,3 +1,5 @@
+@import './workspace-theme.less';
+
 .docmind-shell {
   display: flex;
   height: 100dvh;
@@ -8,6 +10,7 @@
 }
 
 .docmind-shell-header {
+  background: var(--docmind-shell-background);
   display: flex;
   height: 52px;
   min-height: 52px;
@@ -71,7 +74,7 @@
   flex: 0 0 208px;
   overflow-y: auto;
   border-right: 1px solid var(--border-button);
-  background: var(--bg-base);
+  background: var(--docmind-shell-background);
 }
 
 .docmind-shell-sidebar[hidden] {
@@ -110,8 +113,8 @@
   }
 
   &[aria-current='page'] {
-    background: rgb(var(--accent-primary) / 9%);
-    color: rgb(var(--accent-primary));
+    background: var(--bg-card);
+    color: rgb(var(--text-primary));
     font-weight: 500;
   }
 }

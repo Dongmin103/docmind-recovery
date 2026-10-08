@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import {
@@ -32,7 +33,12 @@ jest.mock('@/components/highlight-markdown', () => ({
 }));
 jest.mock('@/components/document-preview/temporary-original-preview', () => ({
   __esModule: true,
-  default: () => null,
+  default: ({ documentId, sourceVersionId, chunkSetId, onChunkSetChanged }: any) => (
+    <div data-testid="original-preview" data-document={documentId}
+      data-version={sourceVersionId} data-chunk-set={chunkSetId}>
+      <button onClick={onChunkSetChanged}>근거 새로고침</button>
+    </div>
+  ),
 }));
 jest.mock('@/components/originui/input', () => ({
   Input: (props: any) => <input {...props} />,
@@ -74,6 +80,14 @@ const Answer = {
 };
 const MockAnswer = answerDocMind as jest.Mock;
 const MockSearch = searchDocMind as jest.Mock;
+
+beforeAll(() => {
+  // jsdom has no native dialog implementation; browser verification exercises
+  // the real top-layer promotion and focus containment.
+  HTMLDialogElement.prototype.show = function () { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+});
 
 async function start() {
   const view = render(
@@ -161,12 +175,110 @@ beforeEach(() => {
           {
             doc_id: 'document-1',
             doc_name: 'protocol.pdf',
+            source_version_id: 'version-1',
+            chunk_set_id: 'set-1',
             content_with_weight: '검색 근거',
           },
         ],
       },
     },
   });
+});
+
+async function selectSearchResult() {
+  await start();
+  question();
+  fireEvent.click(screen.getByLabelText('검색 실행'));
+  const result = await screen.findByRole('button', { name: /protocol.pdf.*원문 열기/ });
+  result.focus();
+  fireEvent.click(result);
+  return result;
+}
+
+it('opens the selected result with its exact original identity and restores focus on Escape', async () => {
+  const result = await selectSearchResult();
+  const preview = await screen.findByRole('dialog', { name: '근거 · 원문' });
+  expect(result).toHaveAttribute('aria-expanded', 'true');
+  expect(within(preview).getByTestId('original-preview')).toHaveAttribute('data-version', 'version-1');
+  expect(within(preview).getByTestId('original-preview')).toHaveAttribute('data-chunk-set', 'set-1');
+  expect(within(preview).getByTestId('original-preview')).toHaveAttribute('data-document', 'document-1');
+  fireEvent.keyDown(preview, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '근거 · 원문' })).not.toBeInTheDocument());
+  await waitFor(() => expect(result).toHaveFocus());
+  expect(result).toHaveAttribute('aria-expanded', 'false');
+});
+
+it('releases the selected preview when search scope changes', async () => {
+  await selectSearchResult();
+  expect(await screen.findByTestId('original-preview')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '전체 문서' }));
+  fireEvent.click(screen.getByLabelText('선택 문서', { exact: true }));
+  await waitFor(() => expect(screen.queryByTestId('original-preview')).not.toBeInTheDocument());
+});
+
+it('releases the selected preview when switching to AI questions', async () => {
+  await selectSearchResult();
+  expect(await screen.findByTestId('original-preview')).toBeInTheDocument();
+  ai();
+  await waitFor(() => expect(screen.queryByTestId('original-preview')).not.toBeInTheDocument());
+});
+
+it('releases the preview on query edits and does not revive it when the query is restored', async () => {
+  await selectSearchResult();
+  expect(await screen.findByTestId('original-preview')).toBeInTheDocument();
+  question('수정한 질문');
+  expect(screen.queryByTestId('original-preview')).not.toBeInTheDocument();
+  question();
+  expect(screen.queryByTestId('original-preview')).not.toBeInTheDocument();
+});
+
+it('releases the preview before a repeated search completes', async () => {
+  await selectSearchResult();
+  expect(await screen.findByTestId('original-preview')).toBeInTheDocument();
+  MockSearch.mockImplementationOnce(() => new Promise(() => {}));
+  fireEvent.click(screen.getByLabelText('검색 실행'));
+  await waitFor(() => expect(screen.getByLabelText('검색 실행')).toBeDisabled());
+  expect(screen.queryByTestId('original-preview')).not.toBeInTheDocument();
+  expect(screen.getByText('문서에서 관련 내용을 찾고 있습니다')).toBeInTheDocument();
+});
+
+it('keeps the original mounted through an automatic chunk refresh and reconciles its evidence', async () => {
+  await selectSearchResult();
+  const original = await screen.findByTestId('original-preview');
+  let finish!: (value: unknown) => void;
+  MockSearch.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: '근거 새로고침' }));
+  await waitFor(() => expect(screen.getByLabelText('검색 실행')).toBeDisabled());
+  expect(screen.getByTestId('original-preview')).toBe(original);
+  await act(async () => finish({ data: { code: 0, data: {
+    dataset_id: 'dataset-1', total: 1, candidate_count: 1,
+    ranked_chunks: [{ doc_id: 'document-1', doc_name: 'protocol.pdf',
+      source_version_id: 'version-1', chunk_set_id: 'set-2', content_with_weight: '새 근거' }],
+  } } }));
+  await waitFor(() => expect(original).toHaveAttribute('data-chunk-set', 'set-2'));
+  expect(screen.getByTestId('original-preview')).toBe(original);
+});
+
+it('keeps a valid original open if its background evidence refresh fails', async () => {
+  await selectSearchResult();
+  const original = await screen.findByTestId('original-preview');
+  MockSearch.mockRejectedValueOnce(new Error('refresh failed'));
+  fireEvent.click(screen.getByRole('button', { name: '근거 새로고침' }));
+  await screen.findByText('refresh failed');
+  expect(screen.getByTestId('original-preview')).toBe(original);
+  expect(screen.getByText('검색된 내용을 갱신하지 못했습니다. 원문은 계속 확인할 수 있습니다.')).toBeInTheDocument();
+});
+
+it('does not invent a candidate count when the response omits it', async () => {
+  MockSearch.mockResolvedValueOnce({ data: { code: 0, data: {
+    dataset_id: 'dataset-1', chunks: [], ranked_chunks: [], total: 0,
+  } } });
+  await start();
+  question();
+  fireEvent.click(screen.getByLabelText('검색 실행'));
+  const results = await screen.findByRole('region', { name: '검색 결과' });
+  expect(results).not.toHaveTextContent('후보');
+  expect(results).toHaveTextContent('선택한 범위에서 관련 문서를 찾지 못했습니다.');
 });
 
 it('exposes both tabs before submitting and keeps existing search free of generation', async () => {

@@ -1,0 +1,51 @@
+.docmind-folder-picker {
+  min-width: 0;
+  width: 100%;
+  color: rgb(var(--text-primary));
+}
+.docmind-folder-summary { font-size: 12px; font-weight: 600; }
+.docmind-folder-hint { margin: 4px 0 12px; color: rgb(var(--text-secondary)); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.docmind-folder-filter {
+  width: 100%; min-width: 0; height: 40px; padding: 0 12px;
+  border: 1px solid var(--border-button); border-radius: 6px;
+  background: var(--bg-base); color: rgb(var(--text-primary)); font-size: 13px;
+  &::placeholder { color: rgb(var(--text-secondary)); }
+}
+.docmind-folder-list { min-width: 0; margin: 8px 0 0; padding: 0; list-style: none; }
+.docmind-folder-row {
+  position: relative; display: flex; min-width: 0; min-height: 44px;
+  margin-inline-start: calc(var(--folder-depth) * 12px);
+  border-radius: 6px;
+  &[data-nested]::before {
+    content: ''; position: absolute; left: -7px; top: 0; width: 7px; height: 23px;
+    border-left: 1px solid var(--border-button); border-bottom: 1px solid var(--border-button);
+  }
+  &:hover { background: var(--bg-card); }
+  &[data-selected] { background: rgb(var(--accent-primary) / 0.09); }
+  &[data-included] .docmind-folder-icon { color: rgb(var(--accent-primary)); }
+}
+.docmind-folder-expand,
+.docmind-folder-expand-space { flex: 0 0 32px; width: 32px; }
+.docmind-folder-expand {
+  display: grid; min-height: 44px; place-items: center; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: rgb(var(--text-secondary)); cursor: pointer;
+  svg { width: 16px; height: 16px; }
+  &:disabled { cursor: default; }
+}
+.docmind-folder-label {
+  display: grid; flex: 1; min-width: 0; grid-template-columns: 16px 16px minmax(0, 1fr);
+  align-items: center; gap: 8px; padding: 8px 8px 8px 0; cursor: pointer;
+  input { width: 16px; height: 16px; margin: 0; accent-color: rgb(var(--accent-primary)); }
+}
+.docmind-folder-icon { width: 16px; height: 16px; color: rgb(var(--text-secondary)); }
+.docmind-folder-name-block { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.docmind-folder-name { overflow: hidden; font-size: 13px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.docmind-folder-inclusion { color: rgb(var(--accent-primary)); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.docmind-folder-count { grid-column: 3; color: rgb(var(--text-secondary)); font-size: 12px; line-height: 16px; }
+.docmind-folder-empty { padding: 20px 8px; color: rgb(var(--text-secondary)); font-size: 13px; text-align: center; }
+.docmind-folder-filter:focus-visible,
+.docmind-folder-expand:focus-visible,
+.docmind-folder-label input:focus-visible { outline: 2px solid rgb(var(--accent-primary)); outline-offset: 2px; }
+@media (max-width: 767px) {
+  .docmind-folder-expand, .docmind-folder-expand-space { flex-basis: 44px; width: 44px; }
+}
