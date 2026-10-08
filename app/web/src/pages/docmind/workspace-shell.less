@@ -1,0 +1,185 @@
+.docmind-shell {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--bg-base);
+  color: rgb(var(--text-primary));
+}
+
+.docmind-shell-header {
+  display: flex;
+  height: 52px;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-button);
+}
+
+.docmind-shell-brand-group,
+.docmind-shell-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.docmind-shell-brand {
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.docmind-shell-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgb(var(--accent-primary) / 28%);
+  border-radius: 7px;
+  background: rgb(var(--accent-primary) / 12%);
+  color: rgb(var(--accent-primary));
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.docmind-shell-name {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.docmind-shell-workspace-label {
+  overflow: hidden;
+  color: rgb(var(--text-secondary));
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docmind-shell-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.docmind-shell-sidebar {
+  width: 208px;
+  flex: 0 0 208px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-button);
+  background: var(--bg-base);
+}
+
+.docmind-shell-sidebar[hidden] {
+  display: none;
+}
+
+.docmind-shell-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 8px;
+}
+
+.docmind-shell-nav-link {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: rgb(var(--text-secondary));
+  font-size: 13px;
+  line-height: 20px;
+  text-decoration: none;
+  transition: background-color 120ms ease, color 120ms ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+  }
+
+  &:hover {
+    background: var(--bg-component);
+    color: rgb(var(--text-primary));
+  }
+
+  &[aria-current='page'] {
+    background: rgb(var(--accent-primary) / 9%);
+    color: rgb(var(--accent-primary));
+    font-weight: 500;
+  }
+}
+
+.docmind-shell-content {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.docmind-shell-menu-toggle {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 1px solid var(--border-button);
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(var(--text-secondary));
+  cursor: pointer;
+
+  svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  &:hover {
+    background: var(--bg-component);
+    color: rgb(var(--text-primary));
+  }
+}
+
+.docmind-shell-brand:focus-visible,
+.docmind-shell-nav-link:focus-visible,
+.docmind-shell-menu-toggle:focus-visible {
+  outline: 2px solid rgb(var(--accent-primary));
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  .docmind-shell-header {
+    gap: 8px;
+    padding: 0 16px;
+  }
+
+  .docmind-shell-body {
+    flex-direction: column;
+  }
+
+  .docmind-shell-sidebar {
+    width: auto;
+    flex: 0 0 auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-button);
+  }
+
+  .docmind-shell-nav {
+    padding: 8px 16px 12px;
+  }
+
+  .docmind-shell-nav-link {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .docmind-shell-nav-link {
+    transition: none;
+  }
+}

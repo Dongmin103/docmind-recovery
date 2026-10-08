@@ -46,7 +46,6 @@ jest.mock('@/hooks/use-document-request', () => ({
 }));
 jest.mock('./workspace-views', () => ({
   ChunkInspection: () => <p>청크 화면</p>,
-  WorkspaceSettings: () => <p>설정 화면</p>,
 }));
 
 const Answer = {
@@ -172,7 +171,7 @@ beforeEach(() => {
 
 it('exposes both tabs before submitting and keeps existing search free of generation', async () => {
   await start();
-  expect(screen.getByRole('tab', { name: '기존 검색' })).toHaveAttribute(
+  expect(screen.getByRole('tab', { name: '문서 검색' })).toHaveAttribute(
     'aria-selected',
     'true',
   );
@@ -292,7 +291,7 @@ it.each(['query', 'scope', 'tab', 'reset'] as const)(
       fireEvent.click(screen.getByLabelText('선택 문서'));
     }
     if (change === 'tab') {
-      fireEvent.click(screen.getByRole('tab', { name: '기존 검색' }));
+      fireEvent.click(screen.getByRole('tab', { name: '문서 검색' }));
       ai();
     }
     await act(async () => resolve(Answer));
@@ -338,7 +337,7 @@ it.each(['tab', 'query', 'scope'] as const)(
     submit();
     await waitFor(() => expect(MockAnswer).toHaveBeenCalledTimes(1));
     if (change === 'tab') {
-      fireEvent.click(screen.getByRole('tab', { name: '기존 검색' }));
+      fireEvent.click(screen.getByRole('tab', { name: '문서 검색' }));
       ai();
     }
     if (change === 'query') {
@@ -397,4 +396,21 @@ it('retains query input focus while invalidating the previous answer', async () 
   expect(input).toHaveFocus();
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   expect(screen.queryByLabelText('AI 답변')).not.toBeInTheDocument();
+});
+
+it('returns focus to the scope control with Escape without discarding the selection', async () => {
+  await start();
+  const trigger = screen.getByRole('button', { name: '전체 문서' });
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByLabelText('선택 폴더와 하위 폴더'));
+  fireEvent.click(screen.getByLabelText('품질'));
+  fireEvent.keyDown(screen.getByLabelText('품질'), { key: 'Escape' });
+  expect(screen.queryByRole('dialog', { name: '검색 범위 선택' })).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+  expect(trigger).toHaveTextContent('폴더 1개');
+  question();
+  fireEvent.click(screen.getByLabelText('검색 실행'));
+  await waitFor(() => expect(MockSearch).toHaveBeenCalledWith(expect.objectContaining({
+    scope: { mode: 'folders', folderIds: ['folder-1'] },
+  })));
 });

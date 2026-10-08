@@ -277,6 +277,7 @@ const routeConfigOptions = [
       },
       {
         path: Routes.UserSetting,
+        loader: () => redirect(Routes.DocMind),
         Component: () => import('@/pages/user-setting'),
         layout: false,
         children: [

@@ -37,3 +37,127 @@
     outline-offset: 1px;
   }
 }
+
+// Phase one: reuse the existing theme tokens; keep answer/result layouts intact.
+.docmind-search-layout {
+  --docmind-search-width: 48rem;
+  --docmind-control-radius: 0.75rem;
+  --docmind-focus: rgb(var(--accent-primary));
+
+  :is(button, input):focus-visible {
+    outline: 2px solid var(--docmind-focus);
+    outline-offset: 3px;
+  }
+
+  input[type='radio'], input[type='checkbox'] {
+    accent-color: var(--docmind-focus);
+  }
+
+  .docmind-search-tabs {
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+
+    button {
+      min-height: 2.5rem;
+      border-color: transparent;
+      border-radius: 0.5rem;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      background: transparent;
+    }
+
+    button[aria-selected='true'] {
+      background: var(--bg-card);
+    }
+
+    button:hover { background: var(--bg-card); }
+  }
+
+  .docmind-search-form { min-width: 0; }
+  .docmind-scope { min-width: 0; }
+  .docmind-scope-dialog { overscroll-behavior: contain; }
+  .docmind-scope-close {
+    position: absolute;
+    right: 0.5rem;
+    top: 0.5rem;
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.375rem;
+    color: rgb(var(--text-secondary));
+    &:hover { background: var(--bg-card); }
+  }
+  .docmind-search-submit { font-size: 0.875rem; font-weight: 600; }
+}
+
+.docmind-search-start {
+  max-width: calc(var(--docmind-search-width) + 3rem);
+  padding: clamp(4rem, 16vh, 10rem) 1.5rem 3rem;
+
+  .docmind-search-intro {
+    margin-bottom: 2rem;
+    h1 {
+      margin: 0 0 0.75rem;
+      font-size: clamp(1.5rem, 2.4vw, 2rem);
+      font-weight: 600;
+      letter-spacing: -0.04em;
+      line-height: 1.4;
+      word-break: keep-all;
+    }
+    p {
+      color: rgb(var(--text-secondary));
+      font-size: 0.9375rem;
+      line-height: 1.7;
+      word-break: keep-all;
+    }
+  }
+
+  .docmind-search-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'input input' 'scope submit';
+    gap: 0.75rem;
+    margin-top: 0;
+    padding: 1rem;
+    border: 1px solid var(--border-button);
+    border-radius: 1rem;
+    background: var(--bg-component);
+    box-shadow: 0 8px 32px rgb(var(--bg-canvas) / 0.08);
+    &:focus-within { border-color: rgb(var(--accent-primary) / 0.6); }
+  }
+
+  .docmind-search-form { grid-area: input; }
+  .docmind-search-input {
+    height: 3.5rem;
+    border: 0;
+    background: transparent;
+    padding-left: 0.5rem;
+    font-size: 1rem;
+    box-shadow: none;
+    &::placeholder { color: rgb(var(--text-secondary)); }
+  }
+  .docmind-scope { grid-area: scope; justify-self: start; }
+  .docmind-scope-trigger {
+    min-width: 0;
+    height: 2.75rem;
+    padding: 0 0.75rem;
+    gap: 0.75rem;
+    border-color: transparent;
+    background: var(--bg-card);
+    color: rgb(var(--text-secondary));
+    font-size: 0.875rem;
+    svg { width: 1rem; height: 1rem; }
+  }
+  .docmind-scope-dialog { left: 0; right: auto; }
+  .docmind-search-submit { grid-area: submit; min-width: 5.5rem; }
+}
+
+@media (max-width: 767px) {
+  .docmind-search-start {
+    padding: clamp(3rem, 10vh, 6rem) 1rem 2rem;
+    .docmind-search-intro { margin-bottom: 1.5rem; }
+    .docmind-search-controls { padding: 0.75rem; gap: 0.75rem; }
+    .docmind-search-input { padding-left: 0.25rem; font-size: 0.9375rem; }
+    .docmind-scope-dialog { max-width: calc(100vw - 3.5rem); }
+  }
+}

@@ -42,3 +42,7 @@ describe('DocMind workspace navigation', () => {
     expect(parseDocMindReturnView('document')).toBe('search');
   });
 });
+
+it('treats the retired settings URL as search', () => {
+  expect(parseDocMindView('settings')).toBe('search');
+});

@@ -118,7 +118,6 @@ jest.mock('lucide-react', () => ({
 }));
 jest.mock('./workspace-views', () => ({
   ChunkInspection: () => null,
-  WorkspaceSettings: () => null,
 }));
 
 import DocMind from './index';

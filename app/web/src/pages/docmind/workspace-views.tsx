@@ -5,4 +5,3 @@ export const ChunkInspection = lazy(
   () =>
     import('@/pages/chunk/parsed-result/add-knowledge/components/knowledge-chunk'),
 );
-export const WorkspaceSettings = lazy(() => import('./workspace-settings'));

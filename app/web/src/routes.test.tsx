@@ -36,3 +36,12 @@ it('stores an OAuth callback token before redirecting to DocMind', async () => {
   expect(result.headers.get('Location')).toBe('/docmind?view=library');
   setAuthorization.mockRestore();
 });
+
+it('redirects direct user settings URLs before rendering model or account controls', async () => {
+  const layout = routers.routes.find((route) => route.children?.some((child) => child.path === '/user-setting'));
+  const route = layout?.children?.find((child) => child.path === '/user-setting');
+  expect(typeof route?.loader).toBe('function');
+  if (typeof route?.loader !== 'function') return;
+  const response = await route.loader({ request: { url: 'http://localhost/user-setting/model' } as Request, params: {}, context: {} } as Parameters<typeof route.loader>[0]) as Response;
+  expect(response.headers.get('Location')).toBe('/docmind');
+});

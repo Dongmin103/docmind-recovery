@@ -1,6 +1,6 @@
 import { buildRagFlowInspectionPath } from './docmind-inspection-link';
 
-export const DocMindSections = ['search', 'library', 'settings'] as const;
+export const DocMindSections = ['search', 'library'] as const;
 export type DocMindSection = (typeof DocMindSections)[number];
 export type DocMindView = DocMindSection | 'document';
 

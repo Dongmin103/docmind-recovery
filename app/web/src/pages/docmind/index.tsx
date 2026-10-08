@@ -46,7 +46,7 @@ import {
   SourceHierarchyKeys,
 } from './source-document-status';
 import { useFolderSelection } from './use-folder-selection';
-import { ChunkInspection, WorkspaceSettings } from './workspace-views';
+import { ChunkInspection } from './workspace-views';
 import WorkspaceShell from './workspace-shell';
 import './index.less';
 
@@ -249,6 +249,19 @@ export default function DocMind() {
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const scopeTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const toggleScopeMenu = () => setScopeMenuOpen((open) => !open);
+  const closeScopeMenu = () => {
+    setScopeMenuOpen(false);
+    scopeTriggerRef.current?.focus();
+  };
+  const handleScopeKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeScopeMenu();
+    }
+  };
   const [registrationFolderId, setRegistrationFolderId] = useState('');
   const [registrationFiles, setRegistrationFiles] = useState<File[]>([]);
 
@@ -483,6 +496,7 @@ export default function DocMind() {
   const changeQuery = (event: React.ChangeEvent<HTMLInputElement>) =>
     setQuery(event.target.value);
   const clearQuery = () => setQuery('');
+  const searchStart = searchMode === 'search' && retrieval.isIdle;
   const questionInput = (
     <div className="relative min-w-0 flex-1">
       <Input
@@ -590,34 +604,19 @@ export default function DocMind() {
               )}
             </div>
           )}
-          {workspaceView === 'settings' && (
-            <ErrorBoundary
-              FallbackComponent={WorkspaceViewError}
-              resetKeys={[workspaceView]}
-            >
-              <React.Suspense
-                fallback={
-                  <p role="status" className="p-6">
-                    설정을 불러오는 중입니다.
-                  </p>
-                }
-              >
-                <WorkspaceSettings
-                  canAdminister={canAdminister}
-                  sharedWorkspace={
-                    folderCatalog.data?.workspace_mode === 'shared'
-                  }
-                />
-              </React.Suspense>
-            </ErrorBoundary>
-          )}
           {workspaceView === 'search' && (
             <div data-docmind-search-scroll role="region" aria-label="검색 작업 영역" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary">
-              <div className="mx-auto w-full max-w-6xl px-5 py-8">
+              <div className={`docmind-search-layout mx-auto w-full max-w-6xl px-5 py-8${searchStart ? ' docmind-search-start' : ''}`}>
+                {searchStart && (
+                  <header className="docmind-search-intro">
+                    <h1>필요한 문서를 찾아보세요</h1>
+                    <p>검색 범위를 선택하고, 문서 속 내용을 찾아보세요.</p>
+                  </header>
+                )}
                 <div
                   role="tablist"
                   aria-label="검색 방식"
-                  className="mb-5 flex gap-2"
+                  className="docmind-search-tabs mb-5 flex gap-2"
                 >
                   <button
                     type="button"
@@ -630,7 +629,7 @@ export default function DocMind() {
                     onKeyDown={handleModeKey}
                     className={`rounded-lg border border-border-button px-4 py-2 ${searchMode === 'search' ? 'bg-bg-card font-semibold text-accent-primary' : 'text-text-secondary'}`}
                   >
-                    기존 검색
+                    문서 검색
                   </button>
                   <button
                     type="button"
@@ -651,21 +650,21 @@ export default function DocMind() {
                   id={`docmind-${searchMode}-panel`}
                   aria-labelledby={`docmind-${searchMode}-tab`}
                 >
-                  <p className="text-sm text-text-secondary">
+                  <p className="text-sm text-text-secondary" hidden={searchStart}>
                     {searchMode === 'search'
                       ? '전체 · 폴더 · 문서 범위를 직접 선택해 근거 청크를 검색합니다.'
                       : '질문을 입력하면 선택한 범위에서 근거를 찾아 AI가 답변합니다.'}
                   </p>
                   <div
                     className={searchMode === 'search'
-                      ? 'mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]'
+                      ? 'docmind-search-controls mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]'
                       : 'mt-3 flex justify-end'}
                   >
                     {searchMode === 'search' && (
                     <form
                       id="docmind-search"
                       onSubmit={submitSearch}
-                      className="relative"
+                      className="docmind-search-form relative"
                     >
                       <Input
                         value={query}
@@ -673,7 +672,7 @@ export default function DocMind() {
                         form="docmind-search"
                         placeholder="문서에서 찾을 내용을 입력하세요"
                         aria-label="문서 검색 질문"
-                        className="h-11 pr-12 text-base"
+                        className="docmind-search-input h-11 pr-12 text-base"
                       />
                       {query && (
                         <button
@@ -687,13 +686,15 @@ export default function DocMind() {
                       )}
                     </form>
                     )}
-                    <div className="relative">
+                    <div className="docmind-scope relative" onKeyDown={handleScopeKey}>
                       <button
+                        ref={scopeTriggerRef}
                         type="button"
-                        onClick={() => setScopeMenuOpen((open) => !open)}
-                        className="flex h-11 min-w-40 items-center justify-between gap-2 rounded-lg border border-border-button bg-bg-card px-4"
+                        onClick={toggleScopeMenu}
+                        className="docmind-scope-trigger flex h-11 min-w-40 items-center justify-between gap-2 rounded-lg border border-border-button bg-bg-card px-4"
                         aria-expanded={scopeMenuOpen}
                         aria-haspopup="dialog"
+                        aria-controls={scopeMenuOpen ? 'docmind-scope-dialog' : undefined}
                       >
                         <span>
                           {selectionLabel(
@@ -706,10 +707,14 @@ export default function DocMind() {
                       </button>
                       {scopeMenuOpen && (
                         <div
-                          className="absolute right-0 top-12 z-30 max-h-96 w-80 max-w-[calc(100vw-2.5rem)] overflow-y-auto rounded-xl border border-border-button bg-bg-card p-3 shadow-2xl"
+                          id="docmind-scope-dialog"
+                          className="docmind-scope-dialog absolute right-0 top-12 z-30 max-h-96 w-80 max-w-[calc(100vw-2.5rem)] overflow-y-auto rounded-xl border border-border-button bg-bg-component p-3 shadow-2xl"
                           role="dialog"
                           aria-label="검색 범위 선택"
                         >
+                          <button type="button" onClick={closeScopeMenu} aria-label="검색 범위 닫기" className="docmind-scope-close">
+                            <X className="size-4" aria-hidden="true" />
+                          </button>
                           <fieldset>
                             <legend className="mb-2 text-sm font-semibold">
                               검색 범위
@@ -807,13 +812,17 @@ export default function DocMind() {
                           folderCatalog.isError ||
                           folderCatalog.isPending
                         }
-                        className="grid size-11 place-items-center rounded-lg bg-accent-primary text-primary-foreground disabled:opacity-40"
+                        className="docmind-search-submit flex h-11 items-center justify-center gap-2 rounded-lg bg-accent-primary px-4 text-primary-foreground disabled:opacity-40"
                         aria-label="검색 실행"
                       >
-                        <Search className="size-5" />
+                        <Search className="size-4" aria-hidden="true" />
+                        <span>검색</span>
                       </button>
                     )}
                   </div>
+                  {searchStart && folderCatalog.isPending && (
+                    <p role="status" className="mt-4 text-sm text-text-secondary">검색 범위를 불러오는 중입니다.</p>
+                  )}
                   {searchMode === 'question' && (
                     <AnswerPanel
                       invalidationKey={JSON.stringify([
