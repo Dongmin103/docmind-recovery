@@ -284,3 +284,21 @@ tunnel hostname. The task report records exact commands and deployment IDs.
   brackets produced a validated answer with eight citations over nine context
   chunks; the complete backend answer call took 9.52 seconds. Citation
   validation was retained without normalization, retries or fallback.
+
+- The final deployed image is `docmind-ragflow:local-llm-20261008-r2`, based on
+  the pinned prior image. Live verification confirmed the local provider/model,
+  unchanged dependent containers, ports and unrelated mounts, and absence of
+  the OpenRouter credential mount. A synthetic call in the deployed container
+  took 1.94 seconds.
+- Through the live HTTP answer endpoint, the installation-manual summary
+  returned `answered`, eight validated citations and the local model name.
+  Five seeds expanded to nine submitted chunks; every citation belonged to the
+  selected document. The complete HTTP answer request took approximately
+  10.7 seconds (server-reported processing: 11.2 seconds). Anonymous access was
+  rejected and authenticated catalog/search checks passed. The first separate
+  search after restart took 10.5 seconds. These are individual measurements.
+- Private verification metadata is in
+  `.local/local-llm-release-20261008/http-verification-local.json`; source and
+  answer text were not persisted. The original OpenRouter rollback snapshot
+  is preserved as `first-rollback-compose.json`, with the first local image
+  also retained as a second rollback point.
