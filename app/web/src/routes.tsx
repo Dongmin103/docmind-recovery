@@ -320,10 +320,14 @@ const routeConfigOptions = [
             path: `${Routes.UserSetting}${Routes.ChatChannel}`,
             Component: () => import('@/pages/user-setting/chat-channel'),
           },
+          {
+            path: `${Routes.UserSetting}/*`,
+          },
         ],
       },
       {
         path: `${Routes.UserSetting}${Routes.DataSource}${Routes.DataSourceDetailPage}`,
+        loader: () => redirect(Routes.DocMind),
         layout: false,
         Component: () =>
           import('@/pages/user-setting/data-source/data-source-detail-page'),
