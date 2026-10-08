@@ -32,8 +32,9 @@ class AnswerConfig:
         if os.getenv("DOCMIND_ANSWER_ENABLED") != "1":
             raise AnswerError("DOCMIND_ANSWER_DISABLED")
         try:
-            provider = os.getenv("DOCMIND_ANSWER_PROVIDER", "openrouter")
-            model = os.getenv("DOCMIND_ANSWER_MODEL", "qwen/qwen3.8-27b" if provider == "openrouter" else "").strip()
+            provider = os.getenv("DOCMIND_ANSWER_PROVIDER", "openai")
+            default_model = {"openai": "qwen3.8-flash-next", "openrouter": "qwen/qwen3.8-27b"}.get(provider, "")
+            model = os.getenv("DOCMIND_ANSWER_MODEL", default_model).strip()
             context = int(os.getenv("DOCMIND_ANSWER_CONTEXT_TOKENS", "32768"))
             output = int(os.getenv("DOCMIND_ANSWER_OUTPUT_TOKENS", "1024"))
             if not model or not 4096 <= context <= 131072 or not 256 <= output <= 4096 or output + 2048 >= context:
@@ -49,12 +50,22 @@ class AnswerConfig:
                     raise ValueError
                 upstream = os.getenv("DOCMIND_OPENROUTER_PROVIDER", "").strip()
                 return cls(base_url, model, context, output, provider, key, upstream)
-            if provider != "ollama":
+            if provider not in {"ollama", "openai"}:
                 raise ValueError
-            base_url = os.getenv("DOCMIND_OLLAMA_BASE_URL", "http://172.16.5.65:11434").rstrip("/")
+            if provider == "openai":
+                base_url = os.getenv("DOCMIND_ANSWER_BASE_URL", "http://128.134.187.112:13434/v1").rstrip("/")
+            else:
+                base_url = os.getenv("DOCMIND_OLLAMA_BASE_URL", "http://172.16.5.65:11434").rstrip("/")
             parsed = urlsplit(base_url)
             if not (
-                parsed.scheme in {"http", "https"} and parsed.hostname and parsed.port and not parsed.username and not parsed.password and not parsed.path and not parsed.query and not parsed.fragment
+                parsed.scheme in {"http", "https"}
+                and parsed.hostname
+                and parsed.port
+                and not parsed.username
+                and not parsed.password
+                and parsed.path == ("/v1" if provider == "openai" else "")
+                and not parsed.query
+                and not parsed.fragment
             ):
                 raise ValueError
             # Do not even read the external key in local mode.
@@ -137,6 +148,8 @@ _SYSTEM = (
     "answered와 partial의 각 사실 문장 끝에 해당 evidence_id를 [1] 형식으로 인용하고, 사용한 번호를 citations에 빠짐없이 넣으세요. 존재하지 않는 번호는 금지합니다. "
     "answer 문자열 본문에 각 사실을 뒷받침하는 [N] 인용을 반드시 넣으세요. citations 배열만 채우는 것으로는 충분하지 않습니다. "
     "answer 문자열 안의 [N] 번호 집합과 citations 배열의 번호 집합은 정확히 같아야 합니다. "
+    "여러 근거는 [1] [2]처럼 괄호를 따로 쓰세요. [1,2], [1-3]처럼 한 괄호에 여러 번호를 넣는 형식은 금지합니다. "
+    "answer 본문에 실제로 쓴 번호만 citations 배열에 넣으세요. "
     "insufficient는 질문의 전제나 답을 뒷받침할 근거를 찾지 못했을 때 사용하고 answer는 빈 문자열, citations는 빈 배열로 반환하세요. "
     '합성 출력 형식 예시(실제 질문의 근거가 아님): {"status":"answered","answer":"합성 작업의 담당자는 민수입니다 [1]. 점검 주기는 7일입니다 [2].","citations":[1,2]}'
 )
@@ -233,6 +246,9 @@ async def generate(config, messages, citation_count, *, client=None):
     elif config.provider == "ollama":
         url = f"{config.base_url}/api/chat"
         payload["options"] = {"num_ctx": config.context_tokens, "num_predict": config.output_tokens, "temperature": 0}
+    elif config.provider == "openai":
+        url = f"{config.base_url}/chat/completions"
+        payload.update(max_tokens=config.output_tokens, temperature=0, response_format={"type": "json_object"}, chat_template_kwargs={"enable_thinking": False})
     else:
         raise AnswerError("DOCMIND_ANSWER_CONFIG_INVALID")
 
@@ -244,7 +260,7 @@ async def generate(config, messages, citation_count, *, client=None):
             headers=headers,
             follow_redirects=False,
         ) as response:
-            if config.provider == "openrouter":
+            if config.provider in {"openrouter", "openai"}:
                 code = {401: "DOCMIND_LLM_AUTH_FAILED", 402: "DOCMIND_LLM_CREDITS_REQUIRED", 429: "DOCMIND_LLM_RATE_LIMITED"}.get(response.status_code)
                 if code:
                     raise AnswerError(code)
@@ -257,7 +273,7 @@ async def generate(config, messages, citation_count, *, client=None):
         result = json.loads(body)
         if not isinstance(result, dict) or result.get("error"):
             raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
-        if config.provider == "openrouter":
+        if config.provider in {"openrouter", "openai"}:
             choices = result.get("choices")
             if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict) or choices[0].get("error"):
                 raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")

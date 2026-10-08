@@ -13,6 +13,8 @@ def external_env(monkeypatch, tmp_path):
     secret = tmp_path / "key.txt"
     secret.write_text("sk-or-v1-synthetic-test-only\n", encoding="utf-8")
     monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
+    monkeypatch.setenv("DOCMIND_ANSWER_PROVIDER", "openrouter")
+    monkeypatch.setenv("DOCMIND_ANSWER_MODEL", "qwen/qwen3.8-27b")
     monkeypatch.setenv("DOCMIND_ANSWER_EXTERNAL_ALLOWED", "1")
     monkeypatch.setenv("DOCMIND_OPENROUTER_API_KEY_FILE", str(secret))
     return secret
@@ -40,7 +42,7 @@ def call(service, config, respond, citation_count=1):
     return asyncio.run(run())
 
 
-def test_external_default_requires_explicit_egress_opt_in(service, external_env, monkeypatch):
+def test_external_provider_requires_explicit_egress_opt_in(service, external_env, monkeypatch):
     monkeypatch.delenv("DOCMIND_ANSWER_EXTERNAL_ALLOWED")
     with pytest.raises(service.AnswerError, match="CONFIG_INVALID"):
         service.AnswerConfig.from_env()
@@ -74,7 +76,7 @@ def test_openrouter_wire_contract_and_secret_not_in_repr(service, external_env, 
     assert "sk-or" not in seen[0].content.decode()
 
 
-@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize("provider", ["ollama", "openrouter", "openai"])
 def test_prompt_requires_inline_citations_and_sends_a_valid_synthetic_json_example(service, provider):
     config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
     chunks = [
@@ -87,7 +89,7 @@ def test_prompt_requires_inline_citations_and_sends_a_valid_synthetic_json_examp
     def respond(request):
         seen.append(json.loads(request.content))
         content = generated(answer="담당자는 민수입니다 [1]. 점검 주기는 7일입니다 [2].", citations=[1, 2])
-        body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+        body = {"done": True, "message": {"content": content}} if provider == "ollama" else completion(content)
         return httpx.Response(200, json=body)
 
     async def run():
@@ -180,7 +182,9 @@ def test_local_switch_never_reads_or_sends_external_credentials(service, externa
         ([], "RESPONSE_INVALID"),
     ],
 )
-def test_openrouter_invalid_answers_are_not_returned(service, external_env, body, code):
+@pytest.mark.parametrize("provider", ["openrouter", "openai"])
+def test_openai_protocol_invalid_answers_are_not_returned(service, external_env, monkeypatch, provider, body, code):
+    monkeypatch.setenv("DOCMIND_ANSWER_PROVIDER", provider)
     config = service.AnswerConfig.from_env()
     with pytest.raises(service.AnswerError, match=code) as error:
         call(service, config, lambda _: httpx.Response(200, json=body))
@@ -206,7 +210,7 @@ def test_external_response_size_is_bounded(service, external_env):
         call(service, service.AnswerConfig.from_env(), lambda _: httpx.Response(200, content=b"x" * 1_048_577))
 
 
-@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize("provider", ["ollama", "openrouter", "openai"])
 @pytest.mark.parametrize(
     "status,answer,citations,expected_answer,expected_refs",
     [
@@ -223,7 +227,7 @@ def test_generated_states_use_one_call_and_server_owned_insufficient_answer(serv
     def respond(request):
         seen.append(request)
         content = generated(status, answer, citations)
-        body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+        body = {"done": True, "message": {"content": content}} if provider == "ollama" else completion(content)
         return httpx.Response(200, json=body)
 
     result = call(service, config, respond)
@@ -231,7 +235,7 @@ def test_generated_states_use_one_call_and_server_owned_insufficient_answer(serv
     assert len(seen) == 1
 
 
-@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize("provider", ["ollama", "openrouter", "openai"])
 @pytest.mark.parametrize(
     "content,code",
     [
@@ -269,7 +273,7 @@ def test_generated_states_use_one_call_and_server_owned_insufficient_answer(serv
 )
 def test_content_schema_and_citation_integrity_fail_closed(service, provider, content, code):
     config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
-    body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    body = {"done": True, "message": {"content": content}} if provider == "ollama" else completion(content)
     seen = []
 
     def respond(request):
@@ -282,12 +286,12 @@ def test_content_schema_and_citation_integrity_fail_closed(service, provider, co
     assert len(seen) == 1
 
 
-@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize("provider", ["ollama", "openrouter", "openai"])
 @pytest.mark.parametrize("citations", [[1], [2]])
 def test_declared_and_inline_citations_must_agree_even_when_all_ids_are_in_range(service, provider, citations):
     config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
     content = generated(answer="합성 사실 [1] [2]", citations=citations)
-    body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    body = {"done": True, "message": {"content": content}} if provider == "ollama" else completion(content)
     with pytest.raises(service.AnswerError, match="CITATIONS_INVALID"):
         call(service, config, lambda _: httpx.Response(200, json=body), citation_count=2)
 
@@ -299,13 +303,13 @@ def test_multiple_declared_references_are_validated_as_a_set(service):
     assert (result.status, result.answer, result.references) == ("answered", "합성 사실 [1] [2] [1]", (2, 1))
 
 
-@pytest.mark.parametrize("provider", ["ollama", "openrouter"])
+@pytest.mark.parametrize("provider", ["ollama", "openrouter", "openai"])
 def test_deeply_nested_json_is_a_sanitized_format_error(service, provider):
     config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)
     recursion_limit = sys.getrecursionlimit()
     depth = max(20_000, recursion_limit * 2)
     content = "[" * depth + "0" + "]" * depth
-    body = completion(content) if provider == "openrouter" else {"done": True, "message": {"content": content}}
+    body = {"done": True, "message": {"content": content}} if provider == "ollama" else completion(content)
     assert len(json.dumps(body).encode()) < 1_048_576
     seen = []
 
@@ -318,3 +322,75 @@ def test_deeply_nested_json_is_a_sanitized_format_error(service, provider):
     assert str(error.value) == "DOCMIND_LLM_RESPONSE_INVALID"
     assert len(seen) == 1
     assert sys.getrecursionlimit() == recursion_limit
+
+
+def test_default_local_openai_call_does_not_read_or_send_external_credentials(service, monkeypatch, tmp_path):
+    monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
+    monkeypatch.setenv("DOCMIND_OPENROUTER_API_KEY_FILE", str(tmp_path / "missing-key"))
+    config = service.AnswerConfig.from_env()
+
+    def respond(request):
+        assert str(request.url) == "http://128.134.187.112:13434/v1/chat/completions"
+        assert "Authorization" not in request.headers
+        assert json.loads(request.content) == {
+            "model": "qwen3.8-flash-next",
+            "messages": [{"role": "user", "content": "synthetic evidence"}],
+            "stream": False,
+            "max_tokens": 1024,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        return httpx.Response(200, json=completion())
+
+    result = call(service, config, respond)
+    assert (result.status, result.answer, result.references) == ("answered", "근거 답변 [1]", (1,))
+
+
+@pytest.mark.parametrize("base_url", ["http://local:13434/v1", "http://local:13434/v1/"])
+def test_local_openai_configured_base_url_is_used(service, monkeypatch, base_url):
+    monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
+    monkeypatch.setenv("DOCMIND_ANSWER_BASE_URL", base_url)
+    monkeypatch.setenv("DOCMIND_ANSWER_MODEL", "installed-model")
+    config = service.AnswerConfig.from_env()
+
+    def respond(request):
+        assert str(request.url) == "http://local:13434/v1/chat/completions"
+        assert json.loads(request.content)["model"] == "installed-model"
+        return httpx.Response(200, json=completion())
+
+    assert call(service, config, respond).status == "answered"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://user:password@local:13434/v1",
+        "http://local:13434/v1/models",
+        "http://local:13434/v1?key=value",
+        "http://local:13434/v1#fragment",
+        "ftp://local:13434/v1",
+        "http://local:13434",
+        "http://local:bad/v1",
+    ],
+)
+def test_local_openai_invalid_url_fails_before_request(service, monkeypatch, base_url):
+    monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
+    monkeypatch.setenv("DOCMIND_ANSWER_BASE_URL", base_url)
+    with pytest.raises(service.AnswerError, match="CONFIG_INVALID"):
+        service.AnswerConfig.from_env()
+
+
+@pytest.mark.parametrize("status,code", [(301, "UNAVAILABLE"), (401, "AUTH_FAILED"), (429, "RATE_LIMITED"), (503, "UNAVAILABLE")])
+def test_local_openai_http_failure_has_no_external_fallback(service, monkeypatch, status, code):
+    monkeypatch.setenv("DOCMIND_ANSWER_ENABLED", "1")
+    config = service.AnswerConfig.from_env()
+    seen = []
+
+    def respond(request):
+        seen.append(str(request.url))
+        return httpx.Response(status, json={"error": "private"}, headers={"Location": "https://other.invalid"})
+
+    with pytest.raises(service.AnswerError, match=code):
+        call(service, config, respond)
+    assert seen == ["http://128.134.187.112:13434/v1/chat/completions"]

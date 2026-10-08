@@ -1,4 +1,4 @@
-# DocMind answers: external API now, local LLM later
+# DocMind answers: local OpenAI-compatible LLM
 
 ## Approved scope
 
@@ -7,13 +7,13 @@ final five seeds. Add a stateless, opt-in answer endpoint and a separate answer
 button. No conversation persistence, source mutation or indexing changes.
 The separately authorized live rollout is recorded below.
 
-The rollout uses OpenRouter, model `inclusionai/ling-3.0-flash-sante:free`, pinned
-to the `novita` endpoint. The exact model is supplied through server configuration.
-Later, change server configuration to Ollama at `http://172.16.5.65:11434`;
-search, context expansion, prompting, citations and the frontend contract stay
-the same. There is no automatic fallback between external and local providers.
-The local server identity/model/context remain unverified because TCP connections
-timed out on 2026-10-06. This does not block external-first development.
+The default answer provider is the local OpenAI-compatible server at
+`http://128.134.187.112:13434/v1`, model `qwen3.8-flash-next`.
+`/v1/models` lists available models; generation uses `/v1/chat/completions`.
+The server and synthetic generation were verified from the Windows host and
+an application-image container on 2026-10-08. Existing search, context expansion,
+prompting, citations and the frontend contract are preserved.
+There is no automatic fallback to OpenRouter or Ollama.
 
 ## Request and context contract
 
@@ -55,8 +55,13 @@ flags are not a substitute for company approval of external document processing.
 See [API schema](https://openrouter.ai/docs/api/reference/overview) and
 [provider policies](https://openrouter.ai/docs/guides/routing/provider-selection).
 
+The local OpenAI-compatible provider uses `/v1/chat/completions`, `max_tokens`,
+temperature 0, JSON-object output and `chat_template_kwargs.enable_thinking=false`.
+It never reads or sends the OpenRouter key. The returned final content uses the
+same JSON schema, completion-finish and citation checks as OpenRouter.
+
 Ollama uses native `/api/chat`, `num_ctx` and `num_predict`, and does not read the
-external secret or send its authorization header. Both use non-streaming output,
+external secret or send its authorization header. All providers use non-streaming output,
 a 90-second wall deadline and a 1 MiB response cap.
 There are no redirects, environment proxies, retries, tools, automatic fallback,
 conversation storage or prompt logging in the new path. This narrow client is
@@ -80,12 +85,28 @@ Append `app/docker/docker-compose-windows-dev-answer.yml` after the existing
 Windows development and generationless E2E overlay files, with the usual secure
 local environment files. Do not replace existing compose inputs or secrets.
 
-Common settings: `DOCMIND_ANSWER_PROVIDER` (`openrouter` default or `ollama`),
-`DOCMIND_ANSWER_MODEL`, `DOCMIND_ANSWER_CONTEXT_TOKENS` (default 32768),
-`DOCMIND_ANSWER_OUTPUT_TOKENS` (default 1024). The Compose overlay requires an
-explicit model to prevent accidentally using an external slug against Ollama.
+Common settings: `DOCMIND_ANSWER_PROVIDER` (`openai` default, `openrouter`,
+or `ollama`), `DOCMIND_ANSWER_MODEL` (default `qwen3.8-flash-next`),
+`DOCMIND_ANSWER_CONTEXT_TOKENS` (default 32768),
+`DOCMIND_ANSWER_OUTPUT_TOKENS` (default 1024).
 The model must support the chosen context; the packing budget is conservative,
-not an exact token count or a billing cap.
+not an exact token count. Set an explicit model when choosing another provider.
+
+Local server settings:
+
+```dotenv
+DOCMIND_ANSWER_PROVIDER=openai
+DOCMIND_ANSWER_MODEL=qwen3.8-flash-next
+DOCMIND_ANSWER_BASE_URL=http://128.134.187.112:13434/v1
+DOCMIND_ANSWER_CONTEXT_TOKENS=32768
+DOCMIND_ANSWER_OUTPUT_TOKENS=1024
+```
+
+Use the common answer overlay without the OpenRouter overlay. The base URL must
+end in `/v1`; credentials, query strings, fragments and `/v1/models` are rejected.
+The server owns the actual context-window setting; the client only limits input
+packing and output tokens. `/v1/models` reported an effective 172032-token context,
+which exceeds the retained 32768-token application budget.
 
 For OpenRouter, also append `docker-compose-windows-dev-openrouter-answer.yml`:
 
@@ -111,7 +132,7 @@ path is `/mnt/c/DocMindDev/docmind/.local/secrets/openrouter-api-key.txt`.
 Optionally set `DOCMIND_OPENROUTER_PROVIDER` to an approved exact endpoint slug.
 Recheck availability/prices and account logging settings before live calls.
 
-For local-only generation later, omit the OpenRouter overlay (so its secret is
+For an explicitly selected Ollama server, omit the OpenRouter overlay (so its secret is
 not mounted), set `DOCMIND_ANSWER_PROVIDER=ollama`, `DOCMIND_ANSWER_MODEL` to the
 exact installed name from `/api/tags`, and set the verified context size. Optional
 `DOCMIND_OLLAMA_BASE_URL` defaults to `http://172.16.5.65:11434`. Native HTTP has no
@@ -122,13 +143,13 @@ The overlay sets `DOCMIND_ANSWER_ENABLED=1`; without it answers fail closed and
 search still works. The existing generationless flag is retained only for its
 existing search/Jina credential behavior. DashScope credentials are not needed
 for this answer endpoint. **Jina reranking remains external**, including after
-switching generation to Ollama: this is not
+switching generation to a local LLM: this is not
 a fully air-gapped RAG pipeline.
 
 Rollout is a separate, explicit action. For external mode, first verify a synthetic
 live call from the intended runtime, account budget and data approval. For local
-mode, first verify host/container connectivity, `/api/version`, `/api/tags`, model
-capabilities and context settings. Build backend/frontend from this branch; the overlay alone cannot add
+mode, first verify host/container connectivity, `/v1/models` (or Ollama
+`/api/tags`), model capabilities and context settings. Build backend/frontend from this branch; the overlay alone cannot add
 code to an old image. Do not run a deployment or restart as part of review.
 
 ## Verification and comparison
@@ -236,3 +257,30 @@ again. Both app and frontend rollback artifacts are retained in the ignored
 main-checkout directory `.local/answer-ui-release-20261006`. Its old frontend
 rollback package uses the working restored origin, rather than the expired
 tunnel hostname. The task report records exact commands and deployment IDs.
+
+
+## Local provider verification — 2026-10-08
+
+- The Windows host returned HTTP 200 from `/v1/models` and a direct chat
+  completion (`OK`, 1.58 seconds). The model is `qwen3.8-flash-next`.
+- The real answer service, loaded in an application-image Docker container,
+  successfully validated synthetic `answered`, `partial` and `insufficient`
+  responses. Generation-only wall times were 3.21, 0.71 and 0.51 seconds.
+  These short probes are not a workload latency or answer-quality benchmark.
+- Targeted backend/config/Quart-route regression tests: 215 passed. New cases
+  cover local URL validation, credential isolation, local HTTP errors, truncated
+  completions, malformed output and citation integrity. Ruff lint/format,
+  retired-runtime verification and whitespace checks passed.
+- Independent code review found no actionable defects.
+- Runtime artifacts, the pinned prior image and the complete private rollback
+  configuration are retained in the main checkout's ignored
+  `.local/local-llm-release-20261008` directory. The app image is built on the
+  exact deployed image and replaces only `docmind_answer_service.py`.
+
+- A live installation-manual summary initially failed citation validation:
+  the local model grouped references as `[2, 3]` while the contract requires
+  `[2] [3]`. A read-only diagnostic recorded only citation numbers, not source
+  text or answer text. Clarifying the existing prompt to require separate
+  brackets produced a validated answer with eight citations over nine context
+  chunks; the complete backend answer call took 9.52 seconds. Citation
+  validation was retained without normalization, retries or fallback.
