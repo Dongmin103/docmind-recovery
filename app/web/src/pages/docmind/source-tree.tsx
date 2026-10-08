@@ -1,8 +1,6 @@
 import type { DocMindHierarchyNode } from '@/services/docmind-service';
-import { ChevronRight, FileText, Folder, FolderOpen } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { SourceIndexStatus } from './source-index-status';
-import './source-tree.less';
 
 export interface SourceTreeProps {
   nodes: DocMindHierarchyNode[];
@@ -40,39 +38,26 @@ export function SourceTree({ nodes, renderDocumentAction }: SourceTreeProps) {
   });
   const visited = new Set<number>();
 
-  const renderNode = (indexedNode: IndexedNode, depth: number): ReactNode => {
+  const renderNode = (indexedNode: IndexedNode): ReactNode => {
     if (visited.has(indexedNode.index)) return null;
     visited.add(indexedNode.index);
 
     const { node } = indexedNode;
     if (node.type === 'file') {
       return (
-        <li key={node.file_id} className="docmind-source-node">
-          <div className="docmind-source-file">
-            <FileText className="docmind-source-file-icon" aria-hidden="true" />
-            <div className="docmind-source-file-content">
-              <div className="docmind-source-document">
-                <span
-                  className="docmind-source-name"
-                  title={node.relative_path}
-                >
-                  {node.name}
-                </span>
-                {node.index_state ? (
-                  <span
-                    className="docmind-source-status"
-                    data-state={node.index_state}
-                  >
-                    <SourceIndexStatus node={node} />
-                  </span>
-                ) : null}
-              </div>
-              {node.document_exists && renderDocumentAction ? (
-                <div className="docmind-source-document-actions">
-                  {renderDocumentAction(node)}
-                </div>
-              ) : null}
-            </div>
+        <li key={node.file_id} className="py-1.5">
+          <div className="flex min-w-0 items-center gap-3 text-sm">
+            <span className="min-w-0 flex-1 truncate text-text-primary">
+              {node.name}
+            </span>
+            {node.index_state ? (
+              <span className="shrink-0 text-xs text-text-secondary">
+                <SourceIndexStatus node={node} />
+              </span>
+            ) : null}
+            {node.document_exists && renderDocumentAction ? (
+              <span className="shrink-0">{renderDocumentAction(node)}</span>
+            ) : null}
           </div>
         </li>
       );
@@ -85,40 +70,22 @@ export function SourceTree({ nodes, renderDocumentAction }: SourceTreeProps) {
     const folderCount = children.length - fileCount;
 
     return (
-      <li
-        key={node.file_id}
-        className="docmind-source-node"
-        data-deep={depth >= 3 || undefined}
-      >
-        <details className="docmind-source-folder" open={depth < 2}>
-          <summary title={node.relative_path}>
-            <ChevronRight
-              className="docmind-source-chevron"
-              aria-hidden="true"
-            />
-            <span className="docmind-source-folder-icon" aria-hidden="true">
-              <Folder className="docmind-source-folder-closed" />
-              <FolderOpen className="docmind-source-folder-open" />
-            </span>
-            <span className="docmind-source-folder-info">
-              <span className="docmind-source-name">{node.name}</span>
-              <span className="docmind-source-folder-meta">
-                <span>
-                  파일 {fileCount}개 · 하위 폴더 {folderCount}개
-                </span>
-                {depth >= 4 && <span>{depth + 1}단계</span>}
-                {node.source_enabled === false && (
-                  <span className="docmind-source-paused">동기화 중지</span>
-                )}
+      <li key={node.file_id} className="py-1">
+        <details className="group rounded-lg border border-border-button bg-bg-card px-3 py-2">
+          <summary className="cursor-pointer text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary">
+            <span className="font-medium">{node.name}</span>
+            {node.source_enabled === false && (
+              <span className="ml-2 text-xs text-state-warning">
+                동기화 중지
               </span>
+            )}
+            <span className="ml-2 text-xs text-text-secondary">
+              파일 {fileCount}개 · 하위 폴더 {folderCount}개
             </span>
           </summary>
           {children.length > 0 ? (
-            <ul
-              className="docmind-source-children"
-              aria-label={`${node.name} 하위 항목`}
-            >
-              {children.map((child) => renderNode(child, depth + 1))}
+            <ul className="ml-3 mt-2 border-l border-border-button pl-3">
+              {children.map(renderNode)}
             </ul>
           ) : null}
         </details>
@@ -126,14 +93,12 @@ export function SourceTree({ nodes, renderDocumentAction }: SourceTreeProps) {
     );
   };
 
-  const renderedRoots = roots.map((node) => renderNode(node, 0));
-  const renderedOrCycles = indexedNodes.map((node) => renderNode(node, 0));
+  const renderedRoots = roots.map(renderNode);
+  const renderedOrCycles = indexedNodes.map(renderNode);
 
   return (
-    <section aria-label="문서 라이브러리" className="docmind-source-tree">
-      <ul className="docmind-source-roots">
-        {renderedRoots.concat(renderedOrCycles)}
-      </ul>
+    <section aria-label="문서 라이브러리">
+      <ul>{renderedRoots.concat(renderedOrCycles)}</ul>
     </section>
   );
 }

@@ -1,6 +1,6 @@
 # DocMind AI and library UI implementation plan
 
-**Goal:** Finish the staged redesign after phase-1 approval, retaining backend behavior and source HTML.
+**Goal:** Deliver the authorized search/AI redesign, retaining backend behavior and source HTML. Restore the original library following the user's scope correction.
 
 **Baseline:** `7ec9dfc`, clean worktree; live review server `127.0.0.1:18081`.
 
@@ -15,13 +15,11 @@
 - [x] Verify with targeted regression tests and identical before/after browser fixtures at 360/768/1440. Fixtures are labeled; no live AI generation is required for UI verification.
 - [x] Commit phase 3 with screenshots and a report.
 
-## Phase 4: Library and final audit
+## Phase 4: withdrawn by the user's scope correction
 
-- [x] Make the document library primary and processing status secondary; preserve existing capabilities, real badges, folder/document navigation and supported actions.
-- [x] Distinguish loading/empty/error states, including registration loading currently falling through to an empty list.
-- [ ] Add the real All-in-One navigation target only after identifying it. Current code/docs do not provide a confirmed URL or protocol; ask the user for this missing target while other work continues.
-- [x] Check library/mobile/keyboard and all existing search/scope/citation/original invariants; no page-wide overflow at 360/768/1440.
-- [x] Commit phase 4, compare screenshots, record pre-existing TypeScript diagnostics and require test-server review before any production release.
+The user clarified that only the search folder picker should change and requested the document-management screen be restored. The phase-4 library UI and associated tests/styles are restored to `ed6cf64`. The search folder picker, document-search/AI improvements, and settings-route guard remain.
+
+All-in-One navigation is no longer a required change for this task. The prior request for its URL is withdrawn; retain the original library guidance and behavior.
 
 ## Review focus
 
@@ -31,4 +29,4 @@
 - Large HTML tables retain merged cells and scroll within the table region.
 - Unknown All-in-One addresses are missing information, never inferred links.
 
-**Phase 4 remaining:** All-in-One target URL/protocol is still unconfirmed; user input requested. Keep the existing guidance until provided. UI verification and staged UI commits are otherwise complete; no production deployment.
+**Current scope:** Keep the phase-1–3 search and AI work, restore the original library, and verify the corrected scope on the test server. No production deployment.

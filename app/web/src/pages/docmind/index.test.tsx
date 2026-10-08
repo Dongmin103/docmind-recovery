@@ -7,7 +7,6 @@ let mockCanAdminister = false;
 let mockFolderError = false;
 let mockHierarchyError = false;
 let mockRegistrationError = false;
-let mockRegistrationPending = false;
 let mockSearchResult: any;
 let mockSearchVariables: any;
 let mockDocumentOptions: any[];
@@ -75,9 +74,8 @@ jest.mock('@tanstack/react-query', () => ({
       };
     }
     return {
-      data: mockRegistrationPending ? undefined : { registrations: [] },
+      data: { registrations: [] },
       isError: mockRegistrationError,
-      isPending: mockRegistrationPending,
       refetch: mockRefetch,
     };
   },
@@ -115,10 +113,6 @@ jest.mock('@/hooks/use-document-request', () => ({
 }));
 jest.mock('lucide-react', () => ({
   ChevronDown: () => null,
-  ChevronRight: () => null,
-  FileText: () => null,
-  Folder: () => null,
-  FolderOpen: () => null,
   Search: () => null,
   X: () => null,
 }));
@@ -150,7 +144,6 @@ describe('DocMind search scopes', () => {
     mockFolderError = false;
     mockHierarchyError = false;
     mockRegistrationError = false;
-    mockRegistrationPending = false;
     mockHierarchyDocumentId = 'document-1';
     mockSearchResult = undefined;
     mockSearchVariables = undefined;
@@ -266,31 +259,6 @@ describe('DocMind search scopes', () => {
     expect(mockRefetch).toHaveBeenCalledTimes(1);
   });
 
-  it('shows registration loading until the request resolves instead of an empty work list', () => {
-    mockCanAdminister = true;
-    mockRegistrationPending = true;
-    const view = renderDocMind('/docmind?view=library');
-
-    expect(
-      screen.queryByText('현재 진행하거나 반영할 작업이 없습니다.'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByText('문서 처리 현황을 불러오는 중입니다.'),
-    ).toHaveAttribute('role', 'status');
-
-    mockRegistrationPending = false;
-    view.rerender(
-      <MemoryRouter initialEntries={['/docmind?view=library']}>
-        <DocMind />
-      </MemoryRouter>,
-    );
-    expect(
-      screen.queryByText('문서 처리 현황을 불러오는 중입니다.'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByText('현재 진행하거나 반영할 작업이 없습니다.'),
-    ).toBeInTheDocument();
-  });
   it('shows a failed library request instead of an empty library and supports retry', () => {
     mockCanAdminister = true;
     mockHierarchyError = true;

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import type { DocMindHierarchyNode } from '@/services/docmind-service';
 import { SourceTree } from './source-tree';
@@ -77,56 +77,34 @@ describe('SourceTree', () => {
     ).toHaveTextContent('이전 색인 검색 가능 (HOST_WORKER_ERROR)');
   });
   it('labels a searchable partial PPTX and unrecognized image text separately', () => {
-    render(
-      <SourceTree
-        nodes={[
-          {
-            ...Nodes[1],
-            index_partial_coverage: true,
-            index_image_ocr_not_run: true,
-            searchable: true,
-          },
-        ]}
-      />,
-    );
-    expect(
-      screen.getByText(/인덱싱 완료 · 일부 내용 미추출/),
-    ).toBeInTheDocument();
+    render(<SourceTree nodes={[{
+      ...Nodes[1],
+      index_partial_coverage: true,
+      index_image_ocr_not_run: true,
+      searchable: true,
+    }]} />);
+    expect(screen.getByText(/인덱싱 완료 · 일부 내용 미추출/)).toBeInTheDocument();
     expect(screen.getByText(/이미지 속 글자 미인식/)).toBeInTheDocument();
   });
   it('keeps active-index coverage visible while a newer attempt fails', () => {
-    render(
-      <SourceTree
-        nodes={[
-          {
-            ...Nodes[1],
-            index_state: 'FAILED',
-            index_partial_coverage: true,
-            index_image_ocr_not_run: true,
-            searchable: true,
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByText(/이전 색인 검색 가능/)).toHaveTextContent(
-      '일부 내용 미추출',
-    );
+    render(<SourceTree nodes={[{
+      ...Nodes[1],
+      index_state: 'FAILED',
+      index_partial_coverage: true,
+      index_image_ocr_not_run: true,
+      searchable: true,
+    }]} />);
+    expect(screen.getByText(/이전 색인 검색 가능/)).toHaveTextContent('일부 내용 미추출');
     expect(screen.getByText(/이미지 속 글자 미인식/)).toBeInTheDocument();
   });
   it('does not imply partial indexed coverage without an active index', () => {
-    render(
-      <SourceTree
-        nodes={[
-          {
-            ...Nodes[1],
-            index_state: 'FAILED',
-            index_partial_coverage: true,
-            index_image_ocr_not_run: true,
-            searchable: false,
-          },
-        ]}
-      />,
-    );
+    render(<SourceTree nodes={[{
+      ...Nodes[1],
+      index_state: 'FAILED',
+      index_partial_coverage: true,
+      index_image_ocr_not_run: true,
+      searchable: false,
+    }]} />);
     expect(screen.queryByText(/일부 내용 미추출/)).not.toBeInTheDocument();
     expect(screen.queryByText(/이미지 속 글자 미인식/)).not.toBeInTheDocument();
   });
@@ -136,7 +114,7 @@ describe('SourceTree', () => {
     expect(screen.getByText('파일 0개 · 하위 폴더 0개')).toBeInTheDocument();
   });
 
-  it('starts the first two folder levels open and preserves explicit document availability', () => {
+  it('keeps nested folders collapsed and exposes document actions after expansion', () => {
     render(
       <SourceTree
         nodes={Nodes}
@@ -150,20 +128,20 @@ describe('SourceTree', () => {
     const rootDetails = rootSummary?.closest('details');
     const nestedDetails = screen.getByText('검증').closest('details');
 
-    expect(rootDetails).toHaveAttribute('open');
-    expect(nestedDetails).toHaveAttribute('open');
+    expect(rootDetails).not.toHaveAttribute('open');
+    expect(nestedDetails).not.toHaveAttribute('open');
     expect(screen.getByText('파일 1개 · 하위 폴더 1개')).toBeInTheDocument();
     expect(screen.getByText('인덱싱 완료')).toBeInTheDocument();
     expect(screen.getByText('인덱싱 대기')).toBeInTheDocument();
     const documentAction = screen.getByRole('button', {
       name: 'SOP.pdf 열기',
     });
-    expect(documentAction).toBeVisible();
+    expect(documentAction).not.toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Validation.pdf 열기' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('검증').closest('summary')!);
+    fireEvent.click(rootSummary!);
 
     expect(rootDetails).toHaveAttribute('open');
     expect(nestedDetails).not.toHaveAttribute('open');
@@ -175,6 +153,7 @@ describe('SourceTree', () => {
     const { rerender } = render(<SourceTree nodes={Nodes} />);
     const rootSummary = screen.getByText('품질 문서').closest('summary');
 
+    fireEvent.click(rootSummary!);
     expect(rootSummary?.closest('details')).toHaveAttribute('open');
 
     const earlierSibling: DocMindHierarchyNode = {
@@ -220,62 +199,6 @@ describe('SourceTree', () => {
 
     expect(summary).toHaveFocus();
     expect(summary?.parentElement?.tagName).toBe('DETAILS');
-  });
-
-  it('names each folder list so its documents can be located within the hierarchy', () => {
-    render(<SourceTree nodes={Nodes} />);
-    const children = screen.getByRole('list', { name: '품질 문서 하위 항목' });
-    expect(within(children).getByText('SOP.pdf')).toBeVisible();
-    const nested = screen.getByRole('list', { name: '검증 하위 항목' });
-    expect(within(nested).getByText('Validation.pdf')).toBeVisible();
-    expect(within(nested).queryByText('SOP.pdf')).not.toBeInTheDocument();
-  });
-
-  it('keeps manually closed folders closed after a catalog refresh', () => {
-    const { rerender } = render(<SourceTree nodes={Nodes} />);
-    const summary = screen.getByText('품질 문서').closest('summary')!;
-    fireEvent.click(summary);
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    rerender(
-      <SourceTree
-        nodes={[{ ...Nodes[0], file_id: 'new', name: '추가 폴더' }, ...Nodes]}
-      />,
-    );
-    expect(
-      screen.getByText('품질 문서').closest('details'),
-    ).not.toHaveAttribute('open');
-  });
-
-  it('starts deeper folders closed and preserves their manually opened state', () => {
-    const deepFolder: DocMindHierarchyNode = {
-      ...Nodes[2],
-      file_id: 'deep',
-      parent_file_id: 'nested',
-      name: '세부 자료',
-      relative_path: '품질 문서/검증/세부 자료',
-      depth: 2,
-    };
-    const deepFile = { ...Nodes[3], parent_file_id: 'deep' };
-    const deepNodes = [...Nodes.slice(0, 3), deepFolder, deepFile];
-    const { rerender } = render(<SourceTree nodes={deepNodes} />);
-    const summary = screen.getByText('세부 자료').closest('summary')!;
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    expect(screen.getByText('Validation.pdf')).not.toBeVisible();
-
-    fireEvent.click(summary);
-    expect(screen.getByText('Validation.pdf')).toBeVisible();
-    rerender(
-      <SourceTree
-        nodes={[
-          { ...Nodes[0], file_id: 'new', name: '추가 폴더' },
-          ...deepNodes,
-        ]}
-      />,
-    );
-    expect(screen.getByText('세부 자료').closest('details')).toHaveAttribute(
-      'open',
-    );
-    expect(screen.getByText('Validation.pdf')).toBeVisible();
   });
 
   it('shows a concise empty state', () => {
