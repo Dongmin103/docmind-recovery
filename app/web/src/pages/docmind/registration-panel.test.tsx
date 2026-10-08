@@ -38,13 +38,37 @@ const setup = (
 };
 
 describe('minimal registration history', () => {
+  it('identifies each processing record by its document without changing retry eligibility', () => {
+    setup([
+      row('working', { state: 'INDEXING', progress: 0.4, index_ready: false }),
+      row('removed', {
+        document_exists: false,
+        index_ready: false,
+        retry_allowed: true,
+      }),
+    ]);
+    expect(
+      screen.getByRole('article', { name: 'working.pdf' }),
+    ).toHaveTextContent('인덱싱 중 40%');
+    expect(
+      screen.getByRole('article', { name: 'removed.pdf' }),
+    ).not.toHaveTextContent('문서 상세');
+    expect(
+      screen.queryByRole('button', { name: '재시도' }),
+    ).not.toBeInTheDocument();
+  });
   it('shows native partial coverage and skipped image OCR in indexed history', () => {
-    setup([row('partial', {
-      parser_run: {
-        parse_run_id: 'run-partial', parser_name: 'pptx-native', parser_version: '1.1.0',
-        phase: 'READY_WITH_WARNING', warnings: ['PPTX_NATIVE_PARTIAL_COVERAGE', 'IMAGE_OCR_NOT_RUN'],
-      } as DocMindRegistration['parser_run'],
-    })]);
+    setup([
+      row('partial', {
+        parser_run: {
+          parse_run_id: 'run-partial',
+          parser_name: 'pptx-native',
+          parser_version: '1.1.0',
+          phase: 'READY_WITH_WARNING',
+          warnings: ['PPTX_NATIVE_PARTIAL_COVERAGE', 'IMAGE_OCR_NOT_RUN'],
+        } as DocMindRegistration['parser_run'],
+      }),
+    ]);
     fireEvent.click(screen.getByRole('button', { name: '등록 기록 1건' }));
     expect(screen.getByText('일부 내용 미추출')).toBeVisible();
     expect(screen.getByText('이미지 속 글자 미인식')).toBeVisible();

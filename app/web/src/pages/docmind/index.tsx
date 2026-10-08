@@ -48,6 +48,7 @@ import SearchPreview from './search-preview';
 import ScopeFolderPicker from './scope-folder-picker';
 import SearchResultContent from './search-result-content';
 import './index.less';
+import './library.less';
 
 const RESULTS_PER_PAGE = 10;
 const DocMindKeys = {
@@ -1015,19 +1016,20 @@ export default function DocMind() {
             </div>
           )}
           {workspaceView === 'library' && canAdminister && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-6xl px-5 py-8">
-                <h2 className="text-2xl font-semibold">자료 관리</h2>
-                <p className="mt-1 text-sm text-text-secondary">
-                  인덱싱 완료 후 별도 발행 없이 검색됩니다.
-                </p>
-                <button
-                  type="button"
-                  onClick={refreshLibrary}
-                  className="mt-3 rounded-lg border border-border-button px-3 py-2 text-sm"
-                >
-                  자료 목록 새로고침
-                </button>
+            <div
+              data-docmind-library-scroll
+              className="min-h-0 flex-1 overflow-y-auto"
+            >
+              <div className="docmind-library-layout">
+                <header className="docmind-library-heading">
+                  <div>
+                    <h2>자료 관리</h2>
+                    <p>연결된 문서를 둘러보고 검색 준비 상태를 확인하세요.</p>
+                  </div>
+                  <button type="button" onClick={refreshLibrary}>
+                    자료 목록 새로고침
+                  </button>
+                </header>
                 {folderCatalog.data?.can_upload === true ? (
                   <form
                     onSubmit={submitRegistration}
@@ -1071,9 +1073,9 @@ export default function DocMind() {
                     </button>
                   </form>
                 ) : (
-                  <p className="mt-4 text-sm text-text-secondary">
+                  <p className="docmind-library-origin">
                     문서 추가·수정은 All-in-One에서 진행하세요. 연결된 원본의
-                    처리 상태는 아래에서 확인할 수 있습니다.
+                    처리 상태는 이 화면에서 확인할 수 있습니다.
                   </p>
                 )}
                 {registrationUpload.isError && (
@@ -1081,61 +1083,74 @@ export default function DocMind() {
                     {registrationUpload.error.message}
                   </p>
                 )}
-                <section className="mt-6 rounded-xl border border-border-button p-4">
-                  <h3 className="mb-3 font-semibold">문서 라이브러리</h3>
-                  {hierarchyQuery.isError ? (
-                    <p role="alert" className="text-state-error">
-                      문서 목록을 불러오지 못했습니다. 자료 목록 새로고침으로
-                      다시 시도하세요.
-                    </p>
-                  ) : hierarchyQuery.isPending ? (
-                    <p role="status">문서 목록을 불러오는 중입니다.</p>
-                  ) : (
-                    <SourceTree
-                      nodes={hierarchyQuery.data?.nodes ?? []}
-                      renderDocumentAction={(node: DocMindHierarchyNode) => (
-                        <span className="flex items-center gap-2">
-                          <InspectionLink
-                            datasetId={hierarchyQuery.data?.dataset_id}
-                            documentId={node.document_id}
-                            compact
-                          />
-                          <PdfOcrChoice
-                            node={node}
-                            onConfirm={async (documentId, versionId, key) => {
-                              await pdfOcrRequest.mutateAsync({
-                                documentId,
-                                versionId,
-                                key,
-                              });
-                            }}
-                          />
-                        </span>
-                      )}
-                    />
-                  )}
-                </section>
-                {registrationQuery.isError ? (
-                  <p role="alert" className="mt-3 text-state-error">
-                    문서 처리 현황을 불러오지 못했습니다. 자료 목록 새로고침으로
-                    다시 시도하세요.
-                  </p>
-                ) : (
-                  <RegistrationPanel
-                    registrations={registrationQuery.data?.registrations ?? []}
-                    folderNames={folderNames}
-                    documentFolderNames={documentFolderNames}
-                    retryPending={registrationRetry.isPending}
-                    onRetry={(id: string) => registrationRetry.mutate(id)}
-                    renderInspection={(registration: DocMindRegistration) => (
-                      <InspectionLink
-                        datasetId={registrationQuery.data?.dataset_id}
-                        documentId={registration.document_id}
-                        compact
+                <div className="docmind-library-columns">
+                  <section className="docmind-library-documents">
+                    <h3>문서 라이브러리</h3>
+                    {hierarchyQuery.isError ? (
+                      <p role="alert" className="text-state-error">
+                        문서 목록을 불러오지 못했습니다. 자료 목록 새로고침으로
+                        다시 시도하세요.
+                      </p>
+                    ) : hierarchyQuery.isPending ? (
+                      <p role="status">문서 목록을 불러오는 중입니다.</p>
+                    ) : (
+                      <SourceTree
+                        nodes={hierarchyQuery.data?.nodes ?? []}
+                        renderDocumentAction={(node: DocMindHierarchyNode) => (
+                          <span className="flex items-center gap-2">
+                            <InspectionLink
+                              datasetId={hierarchyQuery.data?.dataset_id}
+                              documentId={node.document_id}
+                              compact
+                            />
+                            <PdfOcrChoice
+                              node={node}
+                              onConfirm={async (documentId, versionId, key) => {
+                                await pdfOcrRequest.mutateAsync({
+                                  documentId,
+                                  versionId,
+                                  key,
+                                });
+                              }}
+                            />
+                          </span>
+                        )}
                       />
                     )}
-                  />
-                )}
+                  </section>
+                  <aside
+                    className="docmind-library-processing"
+                    aria-label="처리 현황 영역"
+                  >
+                    {registrationQuery.isError ? (
+                      <p role="alert" className="mt-3 text-state-error">
+                        문서 처리 현황을 불러오지 못했습니다. 자료 목록
+                        새로고침으로 다시 시도하세요.
+                      </p>
+                    ) : registrationQuery.isPending ? (
+                      <p role="status">문서 처리 현황을 불러오는 중입니다.</p>
+                    ) : (
+                      <RegistrationPanel
+                        registrations={
+                          registrationQuery.data?.registrations ?? []
+                        }
+                        folderNames={folderNames}
+                        documentFolderNames={documentFolderNames}
+                        retryPending={registrationRetry.isPending}
+                        onRetry={(id: string) => registrationRetry.mutate(id)}
+                        renderInspection={(
+                          registration: DocMindRegistration,
+                        ) => (
+                          <InspectionLink
+                            datasetId={registrationQuery.data?.dataset_id}
+                            documentId={registration.document_id}
+                            compact
+                          />
+                        )}
+                      />
+                    )}
+                  </aside>
+                </div>
               </div>
             </div>
           )}

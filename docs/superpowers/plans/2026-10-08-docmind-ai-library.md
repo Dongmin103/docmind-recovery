@@ -17,11 +17,11 @@
 
 ## Phase 4: Library and final audit
 
-- [ ] Make the document library primary and processing status secondary; preserve existing capabilities, real badges, folder/document navigation and supported actions.
-- [ ] Distinguish loading/empty/error states, including registration loading currently falling through to an empty list.
+- [x] Make the document library primary and processing status secondary; preserve existing capabilities, real badges, folder/document navigation and supported actions.
+- [x] Distinguish loading/empty/error states, including registration loading currently falling through to an empty list.
 - [ ] Add the real All-in-One navigation target only after identifying it. Current code/docs do not provide a confirmed URL or protocol; ask the user for this missing target while other work continues.
-- [ ] Check library/mobile/keyboard and all existing search/scope/citation/original invariants; no page-wide overflow at 360/768/1440.
-- [ ] Commit phase 4, compare screenshots, record pre-existing TypeScript diagnostics and require test-server review before any production release.
+- [x] Check library/mobile/keyboard and all existing search/scope/citation/original invariants; no page-wide overflow at 360/768/1440.
+- [x] Commit phase 4, compare screenshots, record pre-existing TypeScript diagnostics and require test-server review before any production release.
 
 ## Review focus
 
@@ -30,3 +30,5 @@
 - Scope popup placement must remain usable above a bottom composer and within short viewports.
 - Large HTML tables retain merged cells and scroll within the table region.
 - Unknown All-in-One addresses are missing information, never inferred links.
+
+**Phase 4 remaining:** All-in-One target URL/protocol is still unconfirmed; user input requested. Keep the existing guidance until provided. UI verification and staged UI commits are otherwise complete; no production deployment.
