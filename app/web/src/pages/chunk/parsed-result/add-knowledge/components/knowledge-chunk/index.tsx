@@ -87,6 +87,10 @@ function Chunk({ embedded = false, readOnly = false, onBack }: ChunkProps) {
   const { handleChunkCardClick, selectedChunkId } = useHandleChunkCardClick();
 
   const { t } = useTranslation();
+  const chunkResultTitle = readOnly ? '문서 내용' : t('chunk.chunkResult');
+  const chunkResultDescription = readOnly
+    ? '검색과 AI 답변에 사용되는 문서 내용입니다.'
+    : t('chunk.chunkResultTip');
   const { changeChunkTextMode, textMode } = useChangeChunkTextMode();
   const { switchChunk } = useSwitchChunk();
   const [chunkList, setChunkList] = useState(data);
@@ -250,7 +254,7 @@ function Chunk({ embedded = false, readOnly = false, onBack }: ChunkProps) {
               {documentInfo?.name}
             </div>
             <div className="text-xs text-text-secondary">
-              {t('chunk.chunkResult')}
+              {chunkResultTitle}
             </div>
           </div>
           {readOnly && (
@@ -343,9 +347,9 @@ function Chunk({ embedded = false, readOnly = false, onBack }: ChunkProps) {
               <ResizablePanel defaultSize={narrowLayout ? 30 : 60} minSize={30}>
                 <article className="h-full flex flex-col">
                   <header className="flex-0 p-5 pb-2.5 border-b-0.5 border-b-border-button">
-                    <h2 className="text-[24px]">{t('chunk.chunkResult')}</h2>
+                    <h2 className="text-[24px]">{chunkResultTitle}</h2>
                     <div className="text-[14px] text-text-secondary">
-                      {t('chunk.chunkResultTip')}
+                      {chunkResultDescription}
                     </div>
                   </header>
 
