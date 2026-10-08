@@ -115,7 +115,13 @@ function InspectionLink({
   );
 }
 
-function RankedResult({ chunk, rank, datasetId, selected, onOpen }: {
+function RankedResult({
+  chunk,
+  rank,
+  datasetId,
+  selected,
+  onOpen,
+}: {
   chunk: ITestingChunk;
   rank: number;
   datasetId?: string;
@@ -125,13 +131,22 @@ function RankedResult({ chunk, rank, datasetId, selected, onOpen }: {
   const name = chunk.docnm_kwd || chunk.doc_name;
   const location = getSourceLocations(chunk);
   const relativePath = chunk.document_relative_path?.trim().replace(/\\/g, '/');
-  const open = (event: React.MouseEvent<HTMLButtonElement>) => onOpen(chunk, event.currentTarget);
+  const open = (event: React.MouseEvent<HTMLButtonElement>) =>
+    onOpen(chunk, event.currentTarget);
   return (
     <article className="docmind-result" data-selected={selected || undefined}>
-      <button type="button" onClick={open} className="docmind-result-open"
+      <button
+        type="button"
+        onClick={open}
+        className="docmind-result-open"
         aria-label={`${name} ${location} 원문 열기`}
-        aria-expanded={selected} aria-controls={selected ? 'docmind-original-panel' : undefined}>
-        <span className="docmind-result-title"><FileIcon name={name} /><span>{name}</span></span>
+        aria-expanded={selected}
+        aria-controls={selected ? 'docmind-original-panel' : undefined}
+      >
+        <span className="docmind-result-title">
+          <FileIcon name={name} />
+          <span>{name}</span>
+        </span>
         <span className="docmind-result-meta">
           <span className="docmind-result-rank">{rank}</span>
           {relativePath && <span>{relativePath}</span>}
@@ -140,9 +155,17 @@ function RankedResult({ chunk, rank, datasetId, selected, onOpen }: {
       </button>
       <SearchResultContent content={chunk.content_with_weight} />
       <div className="docmind-result-actions">
-        <button type="button" onClick={open}>원문 보기</button>
-        <InspectionLink datasetId={datasetId} documentId={chunk.doc_id} compact />
-        {selected && <span className="docmind-result-selected">원문 확인 중</span>}
+        <button type="button" onClick={open}>
+          원문 보기
+        </button>
+        <InspectionLink
+          datasetId={datasetId}
+          documentId={chunk.doc_id}
+          compact
+        />
+        {selected && (
+          <span className="docmind-result-selected">원문 확인 중</span>
+        )}
       </div>
     </article>
   );
@@ -286,7 +309,11 @@ export default function DocMind() {
     },
     onSuccess: async () => registrationQuery.refetch(),
   });
-  const pdfOcrRequest = useMutation<unknown, Error, { documentId: string; versionId: string; key: string }>({
+  const pdfOcrRequest = useMutation<
+    unknown,
+    Error,
+    { documentId: string; versionId: string; key: string }
+  >({
     mutationKey: ['docmind-pdf-ocr-request'],
     mutationFn: async ({ documentId, versionId, key }) => {
       const { data } = await requestDocMindPdfOcr(documentId, versionId, key);
@@ -346,25 +373,43 @@ export default function DocMind() {
     documentNodes.map((document) => document.id),
   );
   const searchContextValid = Boolean(
-      retrieval.variables &&
-      !explicitScopeEmpty &&
-      !folderCatalog.isError &&
-      !folderCatalog.isPending &&
-      retrieval.variables.projectId === folderCatalog.data?.project_id &&
-      JSON.stringify(retrieval.variables.scope) === JSON.stringify(currentScope),
+    retrieval.variables &&
+    !explicitScopeEmpty &&
+    !folderCatalog.isError &&
+    !folderCatalog.isPending &&
+    retrieval.variables.projectId === folderCatalog.data?.project_id &&
+    JSON.stringify(retrieval.variables.scope) === JSON.stringify(currentScope),
   );
-  const searchResultValid = Boolean(retrieval.data && searchContextValid &&
-    returnedChunks.every((chunk) => availableDocumentIds.has(chunk.doc_id)));
+  const searchResultValid = Boolean(
+    retrieval.data &&
+    searchContextValid &&
+    returnedChunks.every((chunk) => availableDocumentIds.has(chunk.doc_id)),
+  );
 
   const searchChunks = searchResultValid ? returnedChunks : [];
-  const currentSelectedChunk = selectedChunk && searchChunks.find((chunk) =>
-    chunk.doc_id === selectedChunk.doc_id &&
-    chunk.source_version_id === selectedChunk.source_version_id &&
-    chunk.chunk_id === selectedChunk.chunk_id) || selectedChunk && searchChunks.find((chunk) =>
-    chunk.doc_id === selectedChunk.doc_id && chunk.source_version_id === selectedChunk.source_version_id);
-  const previewChunk = workspaceView === 'search' && searchMode === 'search' &&
-    searchContextValid && selectedChunk && availableDocumentIds.has(selectedChunk.doc_id)
-      ? (retrieval.isPending || retrieval.isError) && refreshingPreview ? selectedChunk : currentSelectedChunk
+  const currentSelectedChunk =
+    (selectedChunk &&
+      searchChunks.find(
+        (chunk) =>
+          chunk.doc_id === selectedChunk.doc_id &&
+          chunk.source_version_id === selectedChunk.source_version_id &&
+          chunk.chunk_id === selectedChunk.chunk_id,
+      )) ||
+    (selectedChunk &&
+      searchChunks.find(
+        (chunk) =>
+          chunk.doc_id === selectedChunk.doc_id &&
+          chunk.source_version_id === selectedChunk.source_version_id,
+      ));
+  const previewChunk =
+    workspaceView === 'search' &&
+    searchMode === 'search' &&
+    searchContextValid &&
+    selectedChunk &&
+    availableDocumentIds.has(selectedChunk.doc_id)
+      ? (retrieval.isPending || retrieval.isError) && refreshingPreview
+        ? selectedChunk
+        : currentSelectedChunk
       : undefined;
   useEffect(() => {
     // The catalog can invalidate the selection after an asynchronous refresh.
@@ -381,10 +426,14 @@ export default function DocMind() {
     const origin = previewOrigin.current;
     window.requestAnimationFrame(() => {
       if (origin?.isConnected) origin.focus({ preventScroll: true });
-      else document.querySelector<HTMLInputElement>('.docmind-search-input')?.focus();
+      else
+        document
+          .querySelector<HTMLInputElement>('.docmind-search-input')
+          ?.focus();
     });
   };
-  const showMoreResults = () => setVisibleCount((count) => count + RESULTS_PER_PAGE);
+  const showMoreResults = () =>
+    setVisibleCount((count) => count + RESULTS_PER_PAGE);
   const folderNames = useMemo(
     () => new Map(folders.map((folder) => [folder.id, folder.name])),
     [folders],
@@ -473,14 +522,35 @@ export default function DocMind() {
     const fitScopeDialog = () => {
       const dialog = scopeDialogRef.current;
       if (!dialog) return;
-      const available = Math.max(0, window.innerHeight - dialog.getBoundingClientRect().top - 16);
-      const height = `min(32rem, ${available}px)`;
+      const trigger = scopeTriggerRef.current;
+      if (!trigger) return;
+      const bounds = trigger.getBoundingClientRect();
+      const mobile = window.innerWidth < 768;
+      const below = Math.max(0, window.innerHeight - bounds.bottom - 24);
+      const above = Math.max(0, bounds.top - 24);
+      const placement =
+        !mobile && below < Math.min(320, above) ? 'above' : 'below';
+      dialog.dataset.placement = placement;
+      const available = mobile
+        ? window.innerHeight - 80
+        : placement === 'above'
+          ? above
+          : below;
+      const height = `min(32rem, ${Math.max(0, available)}px)`;
       if (dialog.style.maxHeight !== height) dialog.style.maxHeight = height;
     };
     fitScopeDialog();
+    // The AI composer moves between the entry screen and the bottom of an answer.
+    const layout = scopeTriggerRef.current?.closest('.docmind-answer-panel');
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(fitScopeDialog);
+    if (layout) observer?.observe(layout);
     window.addEventListener('resize', fitScopeDialog);
     window.addEventListener('scroll', fitScopeDialog, true);
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', fitScopeDialog);
       window.removeEventListener('scroll', fitScopeDialog, true);
     };
@@ -492,7 +562,7 @@ export default function DocMind() {
         onChange={changeQuery}
         placeholder="문서에 대해 질문하세요"
         aria-label="문서 검색 질문"
-        className="h-11 pr-10 text-base"
+        className="docmind-question-input h-11 pr-10 text-base"
       />
       {query && (
         <button
@@ -531,6 +601,105 @@ export default function DocMind() {
     });
   };
 
+  const scopeControl = (
+    <div className="docmind-scope relative" onKeyDown={handleScopeKey}>
+      <button
+        ref={scopeTriggerRef}
+        type="button"
+        onClick={toggleScopeMenu}
+        className="docmind-scope-trigger flex h-11 min-w-40 items-center justify-between gap-2 rounded-lg border border-border-button bg-bg-card px-4"
+        aria-expanded={scopeMenuOpen}
+        aria-haspopup="dialog"
+        aria-controls={scopeMenuOpen ? 'docmind-scope-dialog' : undefined}
+      >
+        <span>
+          {selectionLabel(
+            scopeMode,
+            canonicalFolderIds.length,
+            canonicalDocumentIds.length,
+          )}
+        </span>
+        <ChevronDown className="size-5" />
+      </button>
+      {scopeMenuOpen && (
+        <div
+          ref={scopeDialogRef}
+          id="docmind-scope-dialog"
+          className="docmind-scope-dialog absolute right-0 top-12 z-30 overflow-y-auto border border-border-button bg-bg-component"
+          role="dialog"
+          aria-label="검색 범위 선택"
+        >
+          <button
+            type="button"
+            onClick={closeScopeMenu}
+            aria-label="검색 범위 닫기"
+            className="docmind-scope-close"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+          <fieldset className="docmind-scope-modes">
+            <legend className="mb-3 text-sm font-semibold">검색 범위</legend>
+            {(['all', 'folders', 'documents'] as const).map((mode) => (
+              <label key={mode} className="docmind-scope-mode">
+                <input
+                  type="radio"
+                  name="docmind-scope"
+                  checked={scopeMode === mode}
+                  value={mode}
+                  aria-label={
+                    mode === 'all'
+                      ? '전체 문서'
+                      : mode === 'folders'
+                        ? '선택 폴더와 하위 폴더'
+                        : '선택 문서'
+                  }
+                  onChange={changeScopeMode}
+                />
+                {mode === 'all' ? '전체' : mode === 'folders' ? '폴더' : '문서'}
+              </label>
+            ))}
+          </fieldset>
+          {scopeMode === 'folders' && (
+            <ScopeFolderPicker
+              folders={folders}
+              selectedIds={canonicalFolderIds}
+              onToggle={toggleScopeFolder}
+            />
+          )}
+          {scopeMode === 'all' && (
+            <p className="docmind-scope-hint">
+              검색 가능한 모든 문서에서 찾습니다.
+            </p>
+          )}
+          {scopeMode === 'documents' && (
+            <div className="mt-2 border-t border-border-button pt-2">
+              {documentNodes.map((document) => (
+                <label
+                  key={document.id}
+                  className="flex items-center gap-2 rounded px-2 py-2"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedDocumentIds.includes(document.id)}
+                    onChange={() => toggle(document.id, setSelectedDocumentIds)}
+                  />
+                  <span className="truncate">
+                    {document.relative_path || document.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {explicitScopeEmpty && (
+            <p role="alert" className="mt-2 text-sm text-state-warning">
+              하나 이상 선택하세요.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <InspectionNavigation.Provider
       value={{ view: activeSection, open: openInspection }}
@@ -540,7 +709,9 @@ export default function DocMind() {
         canAdminister={canAdminister}
         sharedWorkspace={folderCatalog.data?.workspace_mode === 'shared'}
       >
-        <main className={`docmind-main flex h-full min-h-0 flex-col${previewChunk ? ' docmind-has-preview' : ''}`}>
+        <main
+          className={`docmind-main flex h-full min-h-0 flex-col${previewChunk ? ' docmind-has-preview' : ''}`}
+        >
           {folderCatalog.isError && (
             <div role="alert" className="p-5 text-state-error">
               <p>
@@ -599,12 +770,28 @@ export default function DocMind() {
             </div>
           )}
           {workspaceView === 'search' && (
-            <div data-docmind-search-scroll role="region" aria-label="검색 작업 영역" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary">
-              <div className={`docmind-search-layout mx-auto w-full max-w-6xl px-5 py-8${searchStart ? ' docmind-search-start' : searchMode === 'search' ? ' docmind-search-results' : ''}`}>
-                {searchStart && (
+            <div
+              data-docmind-search-scroll
+              role="region"
+              aria-label="검색 작업 영역"
+              tabIndex={0}
+              className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary"
+            >
+              <div
+                className={`docmind-search-layout mx-auto w-full max-w-6xl px-5 py-8${searchStart ? ' docmind-search-start' : searchMode === 'search' ? ' docmind-search-results' : ' docmind-question-layout'}`}
+              >
+                {(searchStart || searchMode === 'question') && (
                   <header className="docmind-search-intro">
-                    <h1>필요한 문서를 찾아보세요</h1>
-                    <p>검색 범위를 선택하고, 문서 속 내용을 찾아보세요.</p>
+                    <h1>
+                      {searchMode === 'search'
+                        ? '필요한 문서를 찾아보세요'
+                        : '문서에 질문하세요'}
+                    </h1>
+                    <p>
+                      {searchMode === 'search'
+                        ? '검색 범위를 선택하고, 문서 속 내용을 찾아보세요.'
+                        : '검색 범위를 선택하고, 문서의 근거를 바탕으로 답변을 확인하세요.'}
+                    </p>
                   </header>
                 )}
                 <div
@@ -644,140 +831,46 @@ export default function DocMind() {
                   id={`docmind-${searchMode}-panel`}
                   aria-labelledby={`docmind-${searchMode}-tab`}
                 >
-                  <p className="text-sm text-text-secondary" hidden={searchMode === 'search'}>
+                  <p className="text-sm text-text-secondary" hidden>
                     {searchMode === 'search'
                       ? '전체 · 폴더 · 문서 범위를 직접 선택해 근거 청크를 검색합니다.'
                       : '질문을 입력하면 선택한 범위에서 근거를 찾아 AI가 답변합니다.'}
                   </p>
                   <div
-                    className={searchMode === 'search'
-                      ? 'docmind-search-controls mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]'
-                      : 'mt-3 flex justify-end'}
+                    hidden={searchMode !== 'search'}
+                    className={
+                      searchMode === 'search'
+                        ? 'docmind-search-controls mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]'
+                        : 'mt-3 flex justify-end'
+                    }
                   >
                     {searchMode === 'search' && (
-                    <form
-                      id="docmind-search"
-                      onSubmit={submitSearch}
-                      className="docmind-search-form relative"
-                    >
-                      <Input
-                        value={query}
-                        onChange={changeQuery}
-                        form="docmind-search"
-                        placeholder="문서에서 찾을 내용을 입력하세요"
-                        aria-label="문서 검색 질문"
-                        className="docmind-search-input h-11 pr-12 text-base"
-                      />
-                      {query && (
-                        <button
-                          type="button"
-                          onClick={clearQuery}
-                          className="absolute right-4 top-1/2 -translate-y-1/2"
-                          aria-label="검색어 지우기"
-                        >
-                          <X className="size-5" />
-                        </button>
-                      )}
-                    </form>
-                    )}
-                    <div className="docmind-scope relative" onKeyDown={handleScopeKey}>
-                      <button
-                        ref={scopeTriggerRef}
-                        type="button"
-                        onClick={toggleScopeMenu}
-                        className="docmind-scope-trigger flex h-11 min-w-40 items-center justify-between gap-2 rounded-lg border border-border-button bg-bg-card px-4"
-                        aria-expanded={scopeMenuOpen}
-                        aria-haspopup="dialog"
-                        aria-controls={scopeMenuOpen ? 'docmind-scope-dialog' : undefined}
+                      <form
+                        id="docmind-search"
+                        onSubmit={submitSearch}
+                        className="docmind-search-form relative"
                       >
-                        <span>
-                          {selectionLabel(
-                            scopeMode,
-                            canonicalFolderIds.length,
-                            canonicalDocumentIds.length,
-                          )}
-                        </span>
-                        <ChevronDown className="size-5" />
-                      </button>
-                      {scopeMenuOpen && (
-                        <div
-                          ref={scopeDialogRef}
-                          id="docmind-scope-dialog"
-                          className="docmind-scope-dialog absolute right-0 top-12 z-30 overflow-y-auto border border-border-button bg-bg-component"
-                          role="dialog"
-                          aria-label="검색 범위 선택"
-                        >
-                          <button type="button" onClick={closeScopeMenu} aria-label="검색 범위 닫기" className="docmind-scope-close">
-                            <X className="size-4" aria-hidden="true" />
+                        <Input
+                          value={query}
+                          onChange={changeQuery}
+                          form="docmind-search"
+                          placeholder="문서에서 찾을 내용을 입력하세요"
+                          aria-label="문서 검색 질문"
+                          className="docmind-search-input h-11 pr-12 text-base"
+                        />
+                        {query && (
+                          <button
+                            type="button"
+                            onClick={clearQuery}
+                            className="absolute right-4 top-1/2 -translate-y-1/2"
+                            aria-label="검색어 지우기"
+                          >
+                            <X className="size-5" />
                           </button>
-                          <fieldset className="docmind-scope-modes">
-                            <legend className="mb-3 text-sm font-semibold">
-                              검색 범위
-                            </legend>
-                            {(['all', 'folders', 'documents'] as const).map(
-                              (mode) => (
-                                <label
-                                  key={mode}
-                                  className="docmind-scope-mode"
-                                >
-                                  <input
-                                    type="radio"
-                                    name="docmind-scope"
-                                    checked={scopeMode === mode}
-                                    value={mode}
-                                    aria-label={mode === 'all' ? '전체 문서' : mode === 'folders' ? '선택 폴더와 하위 폴더' : '선택 문서'}
-                                    onChange={changeScopeMode}
-                                  />
-                                  {mode === 'all'
-                                    ? '전체'
-                                    : mode === 'folders'
-                                      ? '폴더'
-                                      : '문서'}
-                                </label>
-                              ),
-                            )}
-                          </fieldset>
-                          {scopeMode === 'folders' && (
-                            <ScopeFolderPicker folders={folders} selectedIds={canonicalFolderIds} onToggle={toggleScopeFolder} />
-                          )}
-                          {scopeMode === 'all' && <p className="docmind-scope-hint">검색 가능한 모든 문서에서 찾습니다.</p>}
-                          {scopeMode === 'documents' && (
-                            <div className="mt-2 border-t border-border-button pt-2">
-                              {documentNodes.map((document) => (
-                                <label
-                                  key={document.id}
-                                  className="flex items-center gap-2 rounded px-2 py-2"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedDocumentIds.includes(
-                                      document.id,
-                                    )}
-                                    onChange={() =>
-                                      toggle(
-                                        document.id,
-                                        setSelectedDocumentIds,
-                                      )
-                                    }
-                                  />
-                                  <span className="truncate">
-                                    {document.relative_path || document.name}
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-                          {explicitScopeEmpty && (
-                            <p
-                              role="alert"
-                              className="mt-2 text-sm text-state-warning"
-                            >
-                              하나 이상 선택하세요.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </form>
+                    )}
+                    {searchMode === 'search' && scopeControl}
                     {searchMode === 'search' && (
                       <button
                         type="submit"
@@ -797,9 +890,15 @@ export default function DocMind() {
                       </button>
                     )}
                   </div>
-                  {searchStart && folderCatalog.isPending && (
-                    <p role="status" className="mt-4 text-sm text-text-secondary">검색 범위를 불러오는 중입니다.</p>
-                  )}
+                  {(searchStart || searchMode === 'question') &&
+                    folderCatalog.isPending && (
+                      <p
+                        role="status"
+                        className="mt-4 text-sm text-text-secondary"
+                      >
+                        검색 범위를 불러오는 중입니다.
+                      </p>
+                    )}
                   {searchMode === 'question' && (
                     <AnswerPanel
                       invalidationKey={JSON.stringify([
@@ -821,19 +920,30 @@ export default function DocMind() {
                       pendingRef={answerPendingRef}
                       onPendingChange={setAnswerPending}
                       composer={questionInput}
+                      scopeControl={scopeControl}
                       renderInspection={renderAnswerInspection}
                     />
                   )}
                   {searchMode === 'search' && retrieval.isError && (
-                    <div role="alert" className="docmind-search-state docmind-search-error">
+                    <div
+                      role="alert"
+                      className="docmind-search-state docmind-search-error"
+                    >
                       <h2>검색을 완료하지 못했습니다</h2>
                       <p>{retrieval.error.message}</p>
                       <p>연결 상태를 확인한 뒤 다시 검색해 주세요.</p>
                     </div>
                   )}
                   {searchMode === 'search' && retrieval.isPending && (
-                    <div role="status" className="docmind-search-state" aria-live="polite">
-                      <span className="docmind-search-pulse" aria-hidden="true" />
+                    <div
+                      role="status"
+                      className="docmind-search-state"
+                      aria-live="polite"
+                    >
+                      <span
+                        className="docmind-search-pulse"
+                        aria-hidden="true"
+                      />
                       <h2>문서에서 관련 내용을 찾고 있습니다</h2>
                       <p>선택한 검색 범위를 확인하고 있습니다.</p>
                     </div>
@@ -850,17 +960,28 @@ export default function DocMind() {
                     retrieval.data &&
                     !retrieval.isPending &&
                     searchResultValid && (
-                      <section className="docmind-results" aria-label="검색 결과">
+                      <section
+                        className="docmind-results"
+                        aria-label="검색 결과"
+                      >
                         <p className="docmind-results-count" role="status">
                           결과 {searchChunks.length}개
-                          {typeof retrieval.data.candidate_count === 'number' && (
-                            <span> · 검색 후보 {retrieval.data.candidate_count}개</span>
+                          {typeof retrieval.data.candidate_count ===
+                            'number' && (
+                            <span>
+                              {' '}
+                              · 검색 후보 {retrieval.data.candidate_count}개
+                            </span>
                           )}
                         </p>
                         {searchChunks.length === 0 ? (
                           <div className="docmind-search-state">
-                            <h2>선택한 범위에서 관련 문서를 찾지 못했습니다.</h2>
-                            <p>다른 검색어를 입력하거나 검색 범위를 넓혀보세요.</p>
+                            <h2>
+                              선택한 범위에서 관련 문서를 찾지 못했습니다.
+                            </h2>
+                            <p>
+                              다른 검색어를 입력하거나 검색 범위를 넓혀보세요.
+                            </p>
                           </div>
                         ) : (
                           <>
@@ -982,7 +1103,11 @@ export default function DocMind() {
                           <PdfOcrChoice
                             node={node}
                             onConfirm={async (documentId, versionId, key) => {
-                              await pdfOcrRequest.mutateAsync({ documentId, versionId, key });
+                              await pdfOcrRequest.mutateAsync({
+                                documentId,
+                                versionId,
+                                key,
+                              });
                             }}
                           />
                         </span>
@@ -1017,8 +1142,20 @@ export default function DocMind() {
         </main>
         <SearchPreview
           chunk={previewChunk}
-          evidenceState={refreshingPreview ? retrieval.isError ? 'error' : 'pending' : 'ready'}
-          inspection={<InspectionLink datasetId={retrieval.data?.dataset_id} documentId={previewChunk?.doc_id} compact />}
+          evidenceState={
+            refreshingPreview
+              ? retrieval.isError
+                ? 'error'
+                : 'pending'
+              : 'ready'
+          }
+          inspection={
+            <InspectionLink
+              datasetId={retrieval.data?.dataset_id}
+              documentId={previewChunk?.doc_id}
+              compact
+            />
+          }
           onClose={closePreview}
           onChunkSetChanged={refreshSearchAfterChunkChange}
         />

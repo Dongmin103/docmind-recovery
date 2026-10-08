@@ -1,24 +1,289 @@
+.docmind-question-layout {
+  min-height: 100%;
+  max-width: 66rem;
+  padding: 1.5rem 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  > [role='tabpanel'] {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  &:not(:has([data-state='idle'])) > .docmind-search-intro {
+    display: none;
+  }
+  &:has([data-state='idle']) {
+    min-height: 0;
+  }
+}
 .docmind-answer-panel {
   container: docmind-answer / inline-size;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  &[data-state='idle'] {
+    .docmind-answer-body {
+      display: none;
+    }
+    .docmind-question-dock {
+      position: static;
+      padding-top: 0;
+    }
+  }
 }
-
+.docmind-answer-body {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 2rem;
+}
+.docmind-answer-question {
+  max-width: 48rem;
+  margin: 0 0 2rem;
+  overflow-wrap: anywhere;
+  p {
+    color: rgb(var(--text-secondary));
+    font-size: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.375rem;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+}
 .docmind-answer-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 1.25rem;
+  gap: 2rem;
 }
-
+.docmind-answer-article {
+  min-width: 0;
+  max-width: 48rem;
+}
+.docmind-answer-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-button);
+  margin-bottom: 1rem;
+  h2 {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  span {
+    color: rgb(var(--text-secondary));
+    font-size: 0.75rem;
+  }
+}
+.docmind-answer-context,
+.docmind-answer-guide {
+  color: rgb(var(--text-secondary));
+  font-size: 0.75rem;
+  line-height: 1.7;
+  summary {
+    cursor: pointer;
+    width: fit-content;
+    padding: 0.25rem 0;
+  }
+  p {
+    margin-top: 0.5rem;
+  }
+}
+.docmind-answer-context {
+  margin-top: 1.5rem;
+}
+.docmind-answer-guide {
+  margin-top: 0.5rem;
+}
+.docmind-answer-notice {
+  margin-top: 0.5rem;
+  color: rgb(var(--text-secondary));
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+.docmind-answer-sources {
+  margin-top: 1.5rem;
+  h3 {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  button {
+    display: flex;
+    width: 100%;
+    gap: 0.75rem;
+    padding: 0.75rem 0;
+    text-align: left;
+    border-top: 1px solid var(--border-button);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: rgb(var(--text-secondary));
+    overflow-wrap: anywhere;
+    &[aria-pressed='true'],
+    &:hover {
+      color: rgb(var(--text-primary));
+    }
+    > span:last-child {
+      min-width: 0;
+    }
+  }
+}
+.docmind-answer-source-number {
+  flex-shrink: 0;
+  color: rgb(var(--accent-primary));
+}
+.docmind-answer-state {
+  padding: 1rem 0 2rem;
+  line-height: 1.7;
+  h2 {
+    font-size: 1rem;
+    font-weight: 500;
+  }
+  p {
+    font-size: 0.875rem;
+    color: rgb(var(--text-secondary));
+    margin-top: 0.5rem;
+  }
+  .docmind-search-pulse {
+    margin: 0 0 1rem;
+  }
+}
+.docmind-answer-error h2 {
+  color: rgb(var(--state-error));
+}
+.docmind-question-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 25;
+  flex-shrink: 0;
+  max-width: 48rem;
+  padding: 1rem 0 0.5rem;
+  background: var(--bg-base);
+}
+.docmind-question-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'input input' 'scope submit';
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-button);
+  border-radius: 0.5rem;
+  background: var(--bg-component);
+  &:focus-within {
+    border-color: rgb(var(--accent-primary) / 0.6);
+  }
+  .docmind-scope {
+    grid-area: scope;
+    justify-self: start;
+  }
+  .docmind-scope-trigger {
+    height: 2.75rem;
+    padding: 0 0.75rem;
+    gap: 0.75rem;
+    min-width: 0;
+    background: var(--bg-card);
+    border-color: transparent;
+    font-size: 0.875rem;
+    color: rgb(var(--text-secondary));
+    svg {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+  .docmind-scope-dialog {
+    left: 0;
+    right: auto;
+  }
+}
+.docmind-question-form {
+  grid-area: input;
+  min-width: 0;
+}
+.docmind-question-input {
+  height: 3.5rem;
+  padding-left: 0.5rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 1rem;
+  &::placeholder {
+    color: rgb(var(--text-secondary));
+  }
+}
+.docmind-question-submit {
+  grid-area: submit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 0.375rem;
+}
+.docmind-answer-evidence {
+  border-left: 1px solid var(--border-button);
+  padding-left: 1.5rem;
+}
+.docmind-evidence-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-button);
+  h2 {
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+}
+.docmind-evidence-path {
+  color: rgb(var(--text-secondary));
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  margin-top: 0.5rem;
+}
+.docmind-evidence-body {
+  min-width: 0;
+  padding: 1rem 0;
+}
+.docmind-evidence-footer {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border-button);
+}
 @container docmind-answer (min-width: 56rem) {
   .docmind-answer-flow-with-evidence {
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   }
   .docmind-answer-evidence {
     position: sticky;
     top: 1rem;
-    max-height: calc(100dvh - 6rem);
+    max-height: calc(100dvh - 16rem);
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+}
+@media (max-width: 767px) {
+  .docmind-question-layout {
+    padding: 1rem 1rem 0.5rem;
+  }
+  .docmind-answer-question h1 {
+    font-size: 1.125rem;
+  }
+  .docmind-question-composer {
+    padding: 0.75rem;
+  }
+  .docmind-question-input {
+    font-size: 0.9375rem;
+  }
+  .docmind-answer-evidence {
+    border-left: 0;
+    border-top: 1px solid var(--border-button);
+    padding: 1rem 0 0;
   }
 }
 

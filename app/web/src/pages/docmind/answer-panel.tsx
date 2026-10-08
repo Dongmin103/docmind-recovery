@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Search } from 'lucide-react';
 import AnswerMarkdown from './answer-markdown';
 import AnswerEvidence from './answer-evidence';
 import './answer-panel.less';
@@ -50,6 +51,7 @@ export default function AnswerPanel({
   onPendingChange,
   invalidationKey,
   composer,
+  scopeControl,
   renderInspection,
 }: {
   request: DocMindSearchRequest;
@@ -59,6 +61,7 @@ export default function AnswerPanel({
   onPendingChange?: (pending: boolean) => void;
   invalidationKey?: string;
   composer?: ReactNode;
+  scopeControl?: ReactNode;
   renderInspection?: (datasetId: string, documentId: string) => ReactNode;
 }) {
   const localSubmitting = useRef(false);
@@ -76,6 +79,7 @@ export default function AnswerPanel({
     selectionId: number;
   }>();
   const panelRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const answerStartRef = useRef<HTMLDivElement>(null);
   const followAnswer = useRef(false);
   const revealedTop = useRef(0);
@@ -218,11 +222,18 @@ export default function AnswerPanel({
     if (!viewport) return;
     const bounds = trigger.getBoundingClientRect();
     const visible = viewport.getBoundingClientRect();
+    const composerBounds = composerRef.current?.getBoundingClientRect();
+    const visibleBottom =
+      composerBounds &&
+      composerBounds.height > 0 &&
+      composerBounds.top > visible.top
+        ? Math.min(visible.bottom, composerBounds.top)
+        : visible.bottom;
     const delta =
       bounds.top < visible.top + 16
         ? bounds.top - visible.top - 16
-        : bounds.bottom > visible.bottom - 16
-          ? bounds.bottom - visible.bottom + 16
+        : bounds.bottom > visibleBottom - 16
+          ? bounds.bottom - visibleBottom + 16
           : 0;
     if (delta)
       viewport.scrollTo({
@@ -237,26 +248,32 @@ export default function AnswerPanel({
         )
       : undefined;
 
+  const state = isPending
+    ? 'pending'
+    : generation.isError
+      ? 'error'
+      : generation.data
+        ? 'complete'
+        : 'idle';
+  const answerStatus =
+    generation.data?.answer_status === 'partial'
+      ? '일부 근거 확인'
+      : generation.data?.answer_status === 'insufficient'
+        ? '근거 부족'
+        : '답변 완료';
   return (
     <section
       ref={panelRef}
       aria-label="문서 근거 답변"
-      className="docmind-answer-panel mt-5 min-w-0 text-text-primary"
+      data-state={state}
+      className="docmind-answer-panel min-w-0 text-text-primary"
     >
-      <div className="min-w-0 space-y-5 pb-5">
+      <div className="docmind-answer-body">
         {submittedQuestion && (
-          <div
-            aria-label="내 질문"
-            className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-accent-primary/10 px-5 py-3"
-          >
-            {submittedQuestion}
+          <div aria-label="내 질문" className="docmind-answer-question">
+            <p>질문</p>
+            <h1>{submittedQuestion}</h1>
           </div>
-        )}
-        {!submittedQuestion && !isPending && (
-          <p className="py-12 text-center text-text-secondary">
-            문서에 대해 질문해 보세요. 답변의 인용 번호로 실제 근거를 확인할 수
-            있습니다.
-          </p>
         )}
         <div
           ref={answerStartRef}
@@ -265,64 +282,74 @@ export default function AnswerPanel({
         >
           <div className="min-w-0">
             {isPending && (
-              <p role="status" className="mt-3">
-                주변 문맥을 확인하고 LLM 답변을 생성하는 중입니다.
-              </p>
+              <div role="status" className="docmind-answer-state">
+                <span className="docmind-search-pulse" aria-hidden="true" />
+                <h2>문서에서 답변을 준비하고 있습니다</h2>
+                <p>선택한 범위의 근거를 확인하고 있습니다.</p>
+              </div>
             )}
             {generation.isError && (
-              <p role="alert" className="mt-3 text-state-error">
-                {generation.error.message}
-              </p>
+              <div
+                role="alert"
+                className="docmind-answer-state docmind-answer-error"
+              >
+                <h2>답변을 생성하지 못했습니다</h2>
+                <p>{generation.error.message}</p>
+              </div>
             )}
             {generation.data && !isPending && !generation.isError && (
-              <article
-                aria-label="AI 답변"
-                className="min-w-0 rounded-2xl border border-border-button bg-bg-component p-5 sm:p-6"
-              >
-                <p className="mb-4 text-sm font-semibold text-text-secondary">
-                  DocMind
-                </p>
+              <article aria-label="AI 답변" className="docmind-answer-article">
+                <header className="docmind-answer-heading">
+                  <h2>답변</h2>
+                  <span role="status">{answerStatus}</span>
+                </header>
                 <AnswerMarkdown
                   content={generation.data.answer}
                   citationNumbers={generation.data.citations.map(
-                    (citation) => citation.number,
+                    (item) => item.number,
                   )}
                   onCitation={selectCitation}
                 />
-                <details className="mt-4 text-xs text-text-secondary">
-                  <summary className="cursor-pointer">검색 문맥 상세</summary>
-                  <p className="mt-2">
+                <details className="docmind-answer-context">
+                  <summary>검색 문맥 상세</summary>
+                  <p>
                     검색 근거 {generation.data.context.seed_count}개 · 문맥 확장{' '}
                     {generation.data.context.expanded_count}개 · 실제 입력{' '}
                     {generation.data.context.used_count}개
                   </p>
+                  {generation.data.context.budget_pruned && (
+                    <p>입력 한도에 맞춰 주변 청크 일부 제외</p>
+                  )}
+                  {Boolean(generation.data.context.seed_only_count) && (
+                    <p>순서/버전 정보가 없는 근거는 확장하지 않음</p>
+                  )}
                 </details>
-                {generation.data.context.budget_pruned && (
-                  <p className="mt-2 text-xs text-text-secondary">
-                    입력 한도에 맞춰 주변 청크 일부 제외
-                  </p>
-                )}
-                {Boolean(generation.data.context.seed_only_count) && (
-                  <p className="mt-2 text-xs text-text-secondary">
-                    순서/버전 정보가 없는 근거는 확장하지 않음
-                  </p>
-                )}
-                <p className="mt-2 text-sm text-text-secondary">
+                <p className="docmind-answer-notice">
                   생성된 답변은 틀릴 수 있습니다. 인용 근거를 확인하세요.
                 </p>
-                {generation.data.citations.map((citation) => (
-                  <button
-                    type="button"
-                    key={citation.number}
-                    data-citation={citation.number}
-                    onClick={selectSource}
-                    className="mr-2 mt-3 max-w-full rounded-lg border border-border-button px-3 py-2 text-left text-sm text-text-secondary hover:text-accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
+                {generation.data.citations.length > 0 && (
+                  <div
+                    className="docmind-answer-sources"
+                    role="group"
+                    aria-label="답변 출처"
                   >
-                    <span className="break-words">
-                      [{citation.number}] {citation.document_name}
-                    </span>
-                  </button>
-                ))}
+                    <h3>출처</h3>
+                    {generation.data.citations.map((item) => (
+                      <button
+                        type="button"
+                        key={item.number}
+                        data-citation={item.number}
+                        onClick={selectSource}
+                        aria-pressed={citation?.number === item.number}
+                      >
+                        <span className="docmind-answer-source-number">
+                          [{item.number}]
+                        </span>
+                        <span>{item.document_name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </article>
             )}
           </div>
@@ -335,33 +362,39 @@ export default function AnswerPanel({
           />
         </div>
       </div>
-      <form
-        id="docmind-question"
-        onSubmit={handleGenerate}
-        aria-label="AI 질문 작성"
-        className="min-w-0 rounded-xl border border-border-button bg-bg-component p-3 shadow-sm"
+      <div
+        ref={composerRef}
+        data-docmind-composer
+        className="docmind-question-dock"
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          {composer}
+        <div className="docmind-question-composer docmind-search-controls">
+          <form
+            id="docmind-question"
+            onSubmit={handleGenerate}
+            aria-label="AI 질문 작성"
+            className="docmind-question-form"
+          >
+            {composer}
+          </form>
+          {scopeControl}
           <button
             type="submit"
+            form="docmind-question"
             disabled={disabled || !request.question.trim() || isPending}
-            className="ml-auto shrink-0 rounded-lg bg-accent-primary px-4 py-2 text-primary-foreground disabled:opacity-40"
+            className="docmind-question-submit bg-accent-primary text-primary-foreground disabled:opacity-40"
           >
+            <Search className="size-4" aria-hidden="true" />
             질문하기
           </button>
         </div>
-        <p className="mt-2 text-xs leading-5 text-text-secondary">
-          선택한 범위 · 앞뒤 5개 청크
-        </p>
-        <details className="mt-1 text-xs leading-5 text-text-secondary">
-          <summary className="cursor-pointer">답변 생성 안내</summary>
+        <details className="docmind-answer-guide">
+          <summary>답변 생성 안내</summary>
           <p>
             선택한 범위와 앞뒤 5개 청크를 확인하여 답변합니다. 문서 안의
             지시문은 답변 지침으로 사용하지 않습니다.
           </p>
         </details>
-      </form>
+      </div>
     </section>
   );
 }

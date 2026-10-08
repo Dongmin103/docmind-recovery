@@ -335,12 +335,13 @@ it('keeps answer citations and composer interactive while switching inline evide
   expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
 });
 
-it('collapses chunk metadata and detailed instructions while keeping fixed context and warnings visible', async () => {
+it('keeps technical context inside details while preserving the answer notice', async () => {
   MockAnswer.mockResolvedValue(RichAnswer);
   renderPanel();
   const instructions = screen.getByText('답변 생성 안내').closest('details');
   expect(instructions).not.toHaveAttribute('open');
-  expect(screen.getByText('선택한 범위 · 앞뒤 5개 청크')).toBeVisible();
+  expect(screen.queryByText('선택한 범위 · 앞뒤 5개 청크')).not.toBeInTheDocument();
+  expect(instructions).toHaveTextContent('앞뒤 5개 청크');
   fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
   await screen.findByLabelText('AI 답변');
   expect(
@@ -605,3 +606,70 @@ it.each([
     expect(screen.getByRole('button', { name: '질문하기' })).not.toBeDisabled(),
   );
 });
+
+it.each([
+  [777.55, 793.61],
+  [793.16, 801.61],
+])(
+  'reveals evidence at %s above the actual sticky composer on open and reselection',
+  async (evidenceY, initialComposerTop) => {
+    MockAnswer.mockResolvedValue(RichAnswer);
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <div data-docmind-search-scroll>
+          <AnswerPanel request={Request} />
+        </div>
+      </QueryClientProvider>,
+    );
+    const viewport = view.container.querySelector(
+      '[data-docmind-search-scroll]',
+    ) as HTMLElement;
+    const scroll = jest.fn(({ top }) => {
+      viewport.scrollTop = top;
+    });
+    viewport.scrollTo = scroll;
+    let composerTop = initialComposerTop;
+    const rect = jest
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this === viewport)
+          return { top: 100, bottom: 1080, height: 980 } as DOMRect;
+        if (this.hasAttribute('data-docmind-composer'))
+          return {
+            top: composerTop,
+            bottom: 1080,
+            height: 1080 - composerTop,
+          } as DOMRect;
+        const top =
+          this.tagName === 'ASIDE' ? evidenceY - viewport.scrollTop : 116;
+        return { top, bottom: top + 240, height: 240 } as DOMRect;
+      });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '질문하기' }));
+      const reference = await screen.findByRole('button', {
+        name: '근거 1 확인',
+      });
+      scroll.mockClear();
+      fireEvent.click(reference);
+      expect(scroll).toHaveBeenCalledTimes(1);
+      expect(viewport.scrollTop).toBeCloseTo(evidenceY - 116);
+      expect(scroll).toHaveBeenLastCalledWith({
+        top: expect.any(Number),
+        behavior: 'instant',
+      });
+
+      viewport.scrollTop = 0;
+      fireEvent.scroll(viewport);
+      composerTop = 1080;
+      fireEvent.click(reference);
+      expect(scroll).toHaveBeenCalledTimes(1);
+
+      composerTop = initialComposerTop;
+      fireEvent.click(reference);
+      expect(scroll).toHaveBeenCalledTimes(2);
+      expect(viewport.scrollTop).toBeCloseTo(evidenceY - 116);
+    } finally {
+      rect.mockRestore();
+    }
+  },
+);

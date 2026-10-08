@@ -37,7 +37,16 @@ export default function AnswerEvidence({
     if (!viewport) return;
     const bounds = evidence.getBoundingClientRect();
     const visible = viewport.getBoundingClientRect();
-    if (bounds.top < visible.top + 16 || bounds.top > visible.bottom - 128) {
+    const composerBounds = viewport
+      .querySelector<HTMLElement>('[data-docmind-composer]')
+      ?.getBoundingClientRect();
+    const visibleBottom =
+      composerBounds &&
+      composerBounds.height > 0 &&
+      composerBounds.top > visible.top
+        ? Math.min(visible.bottom, composerBounds.top)
+        : visible.bottom;
+    if (bounds.top < visible.top + 16 || bounds.top > visibleBottom - 128) {
       viewport.scrollTo({
         top: Math.max(0, viewport.scrollTop + bounds.top - visible.top - 16),
         behavior: 'instant',
@@ -60,9 +69,9 @@ export default function AnswerEvidence({
       ref={evidenceRef}
       aria-labelledby={headingId}
       onKeyDown={handleKeyDown}
-      className="docmind-answer-evidence min-w-0 rounded-2xl border border-border-button bg-bg-component text-text-primary"
+      className="docmind-answer-evidence min-w-0 text-text-primary"
     >
-      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-button p-5">
+      <div className="docmind-evidence-header">
         <div className="min-w-0">
           <p className="mb-1 text-xs text-text-secondary">
             인용 근거 [{citation?.number}]
@@ -70,9 +79,7 @@ export default function AnswerEvidence({
           <h2 id={headingId} className="break-words text-lg font-semibold">
             {citation?.document_name}
           </h2>
-          <p className="mt-1 break-all text-sm text-text-secondary">
-            {citation?.document_relative_path || '반환된 문서 근거'}
-          </p>
+          {citation.document_relative_path && <p className="docmind-evidence-path">{citation.document_relative_path}</p>}
         </div>
         <button
           type="button"
@@ -83,11 +90,11 @@ export default function AnswerEvidence({
           <X className="size-5" />
         </button>
       </div>
-      <div className="min-w-0 p-5">
+      <div className="docmind-evidence-body">
         <AnswerEvidenceContent citation={citation} datasetId={datasetId} />
       </div>
       {citation && path && (
-        <div className="shrink-0 border-t border-border-button p-5">
+        <div className="docmind-evidence-footer">
           {renderInspection && datasetId ? (
             renderInspection(datasetId, citation.doc_id)
           ) : (

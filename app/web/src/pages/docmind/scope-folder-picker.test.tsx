@@ -54,10 +54,8 @@ it('changes only the clicked ID and distinguishes included descendants from expl
   expect(screen.getByLabelText('선택 ID')).toHaveTextContent(/^quality$/);
   expect(screen.getByRole('checkbox', { name: '보고서' })).not.toBeChecked();
   expect(
-    within(
-      screen.getByRole('checkbox', { name: '보고서' }).closest('li')!,
-    ).getByText('상위 폴더에 포함'),
-  ).toBeInTheDocument();
+    screen.getByRole('checkbox', { name: '보고서' }),
+  ).toHaveAccessibleDescription('상위 폴더에 포함');
   fireEvent.click(screen.getByRole('checkbox', { name: '보고서' }));
   fireEvent.click(screen.getByRole('checkbox', { name: '품질' }));
   expect(screen.getByLabelText('선택 ID')).toHaveTextContent(/^reports$/);
@@ -183,4 +181,83 @@ it('keeps supplied folder counts independent instead of summing descendants', ()
   expect(
     screen.getByText('상위 폴더를 선택하면 하위 폴더도 검색합니다.'),
   ).toBeInTheDocument();
+});
+
+const DeepFolders: DocMindFolder[] = [
+  { id: 'root', name: '자료', document_count: 0 },
+  { id: 'division', name: '부서', parent_id: 'root', document_count: 0 },
+  { id: 'project', name: '프로젝트', parent_id: 'division', document_count: 0 },
+  { id: 'year', name: '연도별', parent_id: 'project', document_count: 0 },
+  {
+    id: 'archive',
+    name: '2026년 문서 검토와 승인 결과를 보관하는 폴더',
+    parent_id: 'year',
+    document_count: 2,
+  },
+];
+
+it('shows the first two expanded levels as nested lists and requires disclosure for deeper branches', () => {
+  render(<PickerHarness folders={DeepFolders} />);
+  expect(
+    screen.getByRole('button', { name: '자료 하위 폴더 접기' }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  expect(
+    screen.getByRole('button', { name: '부서 하위 폴더 접기' }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  const project = screen.getByRole('button', {
+    name: '프로젝트 하위 폴더 펼치기',
+  });
+  expect(project).toHaveAttribute('aria-expanded', 'false');
+  expect(
+    screen.queryByRole('checkbox', { name: '연도별' }),
+  ).not.toBeInTheDocument();
+  const root = screen.getByRole('checkbox', { name: '자료' }).closest('li')!;
+  expect(
+    within(root).getByRole('checkbox', { name: '부서' }),
+  ).toBeInTheDocument();
+  fireEvent.click(project);
+  expect(screen.getByRole('checkbox', { name: '연도별' })).toBeInTheDocument();
+  expect(
+    screen.queryByRole('checkbox', { name: DeepFolders[4].name }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText('선택 ID')).toBeEmptyDOMElement();
+});
+
+it('reveals an initially selected deep path but respects an explicit collapse without losing its ID', () => {
+  render(<PickerHarness folders={DeepFolders} selected={['archive']} />);
+  expect(
+    screen.getByRole('checkbox', { name: DeepFolders[4].name }),
+  ).toBeChecked();
+  fireEvent.click(
+    screen.getByRole('button', { name: '프로젝트 하위 폴더 접기' }),
+  );
+  expect(
+    screen.queryByRole('checkbox', { name: DeepFolders[4].name }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText('선택 ID')).toHaveTextContent(/^archive$/);
+  fireEvent.change(screen.getByRole('searchbox', { name: '폴더 찾기' }), {
+    target: { value: '승인 결과' },
+  });
+  expect(
+    screen.getByRole('checkbox', { name: DeepFolders[4].name }),
+  ).toBeChecked();
+  fireEvent.change(screen.getByRole('searchbox', { name: '폴더 찾기' }), {
+    target: { value: '' },
+  });
+  expect(
+    screen.queryByRole('checkbox', { name: DeepFolders[4].name }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole('button', { name: '프로젝트 하위 폴더 펼치기' }),
+  );
+  expect(
+    screen.getByRole('checkbox', { name: DeepFolders[4].name }),
+  ).toBeChecked();
+});
+
+it('shows a parent as containing subfolders instead of reporting its zero direct count as empty', () => {
+  render(<PickerHarness folders={DeepFolders} />);
+  const root = screen.getByRole('checkbox', { name: '자료' }).closest('label')!;
+  expect(within(root).queryByText('문서 0개')).not.toBeInTheDocument();
+  expect(within(root).getByText('하위 폴더 1개')).toBeInTheDocument();
 });
