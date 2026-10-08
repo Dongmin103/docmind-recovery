@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-08",
+  "status": "deployed-and-verified",
+  "source_commit": "9123dcffbd789f28ead31c60980991b60cbb480b",
+  "git_branch": "feat/local-llm-context",
+  "scope": "Approved DocMind frontend redesign, restored original library, simplified read-only inspection, and Korean document-content labels",
+  "public_url": "https://temporary-speedy-tuba-bfs78eb.vercel.app/docmind",
+  "public_deployment_id": "dpl_FBLZirnnmUQSqkXgYqXxAin79GbU",
+  "local_url": "http://127.0.0.1:18080/docmind",
+  "local_image": "docmind-ragflow:ui-redesign-20261008",
+  "local_image_id": "sha256:b8515610fa78b841259945bb06bc448eab32ee0e6ed5722657c354b12c92eeb7",
+  "index_sha256": "f3947b8b874dfe1304e15e17c9b5cb48902558a8f41eab899e4c5610946f7e08",
+  "preserved": {
+    "backend_code_and_models": true,
+    "container_environment": true,
+    "mounts_and_ports": true,
+    "dependent_containers": true,
+    "public_api_rewrites_and_access_policy": true,
+    "existing_nginx_entry_redirects": true
+  },
+  "verification": {
+    "build_sources_match_git_commit": true,
+    "local_and_public_index_match_tested_build": true,
+    "jest_suites_passed": 18,
+    "jest_tests_passed": 197,
+    "typescript_existing_errors": 236,
+    "typescript_new_errors": 0,
+    "typescript_passed": false,
+    "local_and_public_search_http": 200,
+    "korean_document_content_labels": true,
+    "native_html_tables_preserved": true,
+    "read_only_artifact_ellipse_filter_removed": true,
+    "checked_viewport_widths": [360, 768, 1440],
+    "browser_errors": 0,
+    "anonymous_answer_access_rejected": true,
+    "active_ingestion_and_preview_jobs_at_cutover": 0
+  },
+  "rollback": {
+    "public_deployment_id": "dpl_HjN1GuUoGPUxAXh8AfntFxiMxp4U",
+    "local_image_id": "sha256:00a5821085c0a320dfd59af3b62ac4cd9bb92af8f8b78174be141dcdc01a90bf",
+    "private_runtime_directory": "C:/DocMindDev/docmind/.local/ui-redesign-release-20261008",
+    "private_compose_file": "rollback-compose.private.json"
+  },
+  "notes": [
+    "Production verification did not invoke original-document decryption or AI generation.",
+    "The existing external tunnel configuration was retained.",
+    "Private runtime configuration, document contents, and screenshots are excluded from Git."
+  ]
+}
