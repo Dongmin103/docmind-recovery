@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-12",
+  "source_commit": "ab07c7f",
+  "scope": "System prompt only: scoped totals, table interpretation, deduplication, evidence dates and incomplete coverage",
+  "image": "docmind-ragflow:answer-prompt-20261012",
+  "status": "deployed-public-answer-verified",
+  "public_url": "https://temporary-speedy-tuba-bfs78eb.vercel.app/docmind",
+  "verification": {
+    "answer_unit_tests_passed": 215,
+    "removed_runtime_check_passed": true,
+    "predeployment_model_cases_passed": 4,
+    "public_answer_status": "answered",
+    "public_count_question_correct": true,
+    "public_context_seed_count": 5,
+    "public_context_used_count": 20,
+    "public_citation_count": 2,
+    "public_frontend_hash_unchanged": true,
+    "running_image_tag_verified": true,
+    "environment_and_ports_verified_unchanged": true
+  },
+  "limitations": [
+    "Intermittent WSL 0x8007274c interrupted final Docker checks and the automatic rollback command. A later docker ps confirmed the new image remains running; the public end-to-end answer succeeded.",
+    "Final in-container source checksum and mount comparison were not confirmed due to WSL command failures.",
+    "Prompt evaluations cover selected examples and do not guarantee every numeric answer."
+  ],
+  "rollback": {
+    "previous_image": "docmind-ragflow:ui-redesign-20261008",
+    "private_compose": "C:/DocMindDev/docmind/.local/prompt-release-20261012/rollback-compose.json"
+  }
+}
