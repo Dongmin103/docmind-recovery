@@ -29,6 +29,7 @@ services:
     gpus: all
     tmpfs: !override ['/tmp:rw,nosuid,size=2g,mode=1777', '/home/surya/.cache:rw,nosuid,size=1g,uid=10001,gid=10001']
     environment:
+      HOME: /home/surya
       LLAMA_CPP_NGL: '99'
       LLAMA_CPP_EXTRA_ARGS: --threads 8 -lv 4
       LLAMA_CPP_BINARY: /opt/llama/llama-server
