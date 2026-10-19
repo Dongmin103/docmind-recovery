@@ -8,10 +8,12 @@
 
 다른 Windows 서버에서 빌드 없이 실행하려면 같은 저장소의
 [Windows 실행 릴리스](https://github.com/Dongmin103/docmind-recovery/releases/tag/v2026.10.19-runtime)에서
-CPU 또는 NVIDIA GPU 실행 패키지를 받습니다. 이미지·GTE·OCR 모델과
+CPU 실행 패키지를 받습니다. 이미지·GTE·OCR 모델과
 초기화/시작/중지 스크립트를 포함하며, 서버별 문서 경로·uEncryptor2 위치·API 키는
 [Windows 실행 안내](deploy/windows/README.md)에 따라 지정합니다.
 CPU 패키지는 RAM 16GB 기준이며 OCR은 선택 기동합니다.
+GPU 실행 구성도 이 저장소에 포함되어 있습니다. GPU 사전 빌드 이미지 ZIP은
+현재 GitHub 릴리스에 포함하지 않습니다.
 
 아래는 소스에서 직접 빌드하는 절차입니다.
 
