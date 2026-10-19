@@ -230,6 +230,81 @@ async function selectSearchResult() {
   return result;
 }
 
+it('groups evidence in one document card and opens the exact supporting location', async () => {
+  const base = {
+    doc_id: 'document-1',
+    doc_name: 'protocol.pdf',
+    source_version_id: 'version-1',
+    chunk_set_id: 'set-1',
+  };
+  MockSearch.mockResolvedValueOnce({
+    data: {
+      code: 0,
+      data: {
+        dataset_id: 'dataset-1',
+        total: 1,
+        candidate_count: 30,
+        relevance: { status: 'matched', filtered_chunks: 0 },
+        ranked_chunks: [
+          {
+            ...base,
+            chunk_id: 'main',
+            content_with_weight: '대표 근거',
+            supporting_chunks: [
+              {
+                ...base,
+                chunk_id: 'support',
+                content_with_weight: '다른 위치의 근거',
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  await start();
+  question();
+  fireEvent.click(screen.getByLabelText('검색 실행'));
+  const results = await screen.findByRole('region', { name: '검색 결과' });
+  expect(results.querySelectorAll('article')).toHaveLength(1);
+  fireEvent.click(screen.getByText('이 문서의 다른 관련 위치 1개'));
+  fireEvent.click(screen.getByRole('button', { name: '이 위치 원문 보기' }));
+  const preview = await screen.findByRole('dialog', { name: '근거 · 원문' });
+  expect(preview).toHaveTextContent('다른 위치의 근거');
+  expect(screen.getByTestId('original-preview')).toHaveAttribute(
+    'data-chunk-set',
+    'set-1',
+  );
+});
+
+it.each(['low', 'no_match'] as const)(
+  'explains %s relevance without inventing five results',
+  async (status) => {
+    MockSearch.mockResolvedValueOnce({
+      data: {
+        code: 0,
+        data: {
+          dataset_id: 'dataset-1',
+          total: 0,
+          candidate_count: 30,
+          ranked_chunks: [],
+          relevance: { status, filtered_chunks: 30 },
+        },
+      },
+    });
+    await start();
+    question();
+    fireEvent.click(screen.getByLabelText('검색 실행'));
+    const results = await screen.findByRole('region', { name: '검색 결과' });
+    expect(results).toHaveTextContent(
+      status === 'low'
+        ? '관련성이 낮은 참고 결과입니다.'
+        : '관련 자료를 충분히 찾지 못했습니다.',
+    );
+    expect(results.querySelectorAll('article')).toHaveLength(0);
+  },
+);
+
 it('opens the selected result with its exact original identity and restores focus on Escape', async () => {
   const result = await selectSearchResult();
   const preview = await screen.findByRole('dialog', { name: '근거 · 원문' });

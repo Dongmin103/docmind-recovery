@@ -418,7 +418,7 @@ describe('DocMind search scopes', () => {
     };
     renderDocMind();
     expect(screen.getByRole('region', { name: '검색 결과' })).toHaveTextContent(
-      '결과 1개 · 검색 후보 1개',
+      '문서 1개 · 검색 후보 1개',
     );
 
     fireEvent.click(screen.getByText('전체 문서'));
@@ -487,7 +487,7 @@ describe('DocMind search scopes', () => {
     };
     const view = renderDocMind();
     expect(screen.getByRole('region', { name: '검색 결과' })).toHaveTextContent(
-      '결과 1개 · 검색 후보 1개',
+      '문서 1개 · 검색 후보 1개',
     );
 
     mockDocumentOptions = [];

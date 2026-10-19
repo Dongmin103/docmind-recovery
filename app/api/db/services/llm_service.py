@@ -214,13 +214,13 @@ class LLMBundle(LLM4Tenant):
 
         return emd, used_tokens
 
-    def similarity(self, query: str, texts: list):
+    def similarity(self, query: str, texts: list, *, normalize: bool = True):
         if self.langfuse:
             generation = self._start_langfuse_observation(
                 trace_context=self.trace_context, as_type="generation", name="similarity", model=self.model_config["llm_name"], input={"query": query, "texts": texts}
             )
 
-        sim, used_tokens = self.mdl.similarity(query, texts)
+        sim, used_tokens = self.mdl.similarity(query, texts) if normalize else self.mdl.similarity(query, texts, normalize=False)
         logging.info("LLMBundle.similarity used_tokens: %d", used_tokens)
 
         if self.langfuse:

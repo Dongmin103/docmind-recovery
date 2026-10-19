@@ -28,12 +28,12 @@ class Base(ABC):
     def __init__(self, key, model_name, **kwargs):
         pass
 
-    def similarity(self, query: str, texts: List) -> Tuple[np.ndarray, int]:
+    def similarity(self, query: str, texts: List, *, normalize: bool = True) -> Tuple[np.ndarray, int]:
         """Score ``texts`` against ``query`` and return ``(rank, token_count)``.
 
         This is the single public entry point shared by every reranker. It
-        short-circuits empty input and guarantees the returned scores are
-        min-max normalized to ``[0, 1]`` regardless of what the backend emits
+        short-circuits empty input and, by default, maps returned scores to
+        ``[0, 1]`` regardless of what the backend emits
         (relevance scores, cosine similarities or raw logits). Downstream
         hybrid scoring blends the reranker output with token similarity on a
         fixed ``[0, 1]`` scale, so an un-normalized provider (e.g. NVIDIA's
@@ -41,6 +41,8 @@ class Base(ABC):
 
         Subclasses implement provider-specific scoring in :meth:`_compute_rank`
         and must not normalize themselves.
+        ``normalize=False`` preserves provider scores for calibrated search
+        relevance gates; those scores are not probabilities.
         """
         if not query or not texts:
             return np.zeros(len(texts) if texts else 0, dtype=float), 0
@@ -54,7 +56,8 @@ class Base(ABC):
                 float(np.min(rank)),
                 float(np.max(rank)),
             )
-        return self._normalize_rank(rank), token_count
+        # Search relevance gates need provider magnitudes, not a best-in-batch 1.
+        return (self._normalize_rank(rank) if normalize else rank), token_count
 
     def _compute_rank(self, query: str, texts: List) -> Tuple[np.ndarray, int]:
         """Provider-specific scoring. ``query`` and ``texts`` are non-empty."""

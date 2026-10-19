@@ -37,17 +37,25 @@ export interface DocMindFolderCatalog {
   workspace_mode?: 'authenticated' | 'shared';
 }
 
+export interface DocMindSearchChunk extends ITestingChunk {
+  supporting_chunks?: ITestingChunk[];
+}
+
 export interface DocMindSearchResult {
   dataset_id: string;
-  chunks: ITestingChunk[];
-  ranked_chunks?: ITestingChunk[];
+  chunks: DocMindSearchChunk[];
+  ranked_chunks?: DocMindSearchChunk[];
   ranked_total?: number;
   total: number;
   candidate_count: number;
   caps?: {
     candidates: number;
-    per_document: number;
-    results: number;
+    per_document_first_pass: number;
+    documents: number;
+  };
+  relevance?: {
+    status: 'matched' | 'low' | 'no_match';
+    filtered_chunks: number;
   };
 }
 

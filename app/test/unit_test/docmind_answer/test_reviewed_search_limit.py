@@ -1,6 +1,7 @@
 """Execute the staged search function with synthetic recall/rerank boundaries."""
 
 import ast
+import importlib.util
 import asyncio
 import math
 import time
@@ -26,9 +27,14 @@ def staged_search():
     async def lane(*_args, **_kwargs):
         return candidates
     class Reranker:
-        def similarity(self, question, inputs):
+        def similarity(self, question, inputs, *, normalize=True):
             return [20 - i for i in range(len(inputs))], 1
+    selection_spec = importlib.util.spec_from_file_location("selection_test", SOURCE.with_name("docmind_search_selection.py"))
+    selection = importlib.util.module_from_spec(selection_spec)
+    selection_spec.loader.exec_module(selection)
     env = {
+        "select_document_groups": selection.select_document_groups,
+        "refill_candidates": selection.refill_candidates,
         "Any": Any, "_FINAL_RESULT_LIMIT": 5, "_ANSWER_RESULT_LIMIT": 16, "_LANE_LIMIT": 128,
         "_RERANK_CANDIDATE_LIMIT": 128, "_DOCUMENT_CANDIDATE_LIMIT": 8,
         "_RECALL_TIMEOUT_SECONDS": 5, "_RERANK_TIMEOUT_SECONDS": 5,
@@ -116,9 +122,12 @@ def test_public_default_five_answer_internal_sixteen_and_caps():
     search = staged_search()
     public = asyncio.run(search("tenant", "q", scope={"mode": "all"}))
     answer = asyncio.run(search("tenant", "q", scope={"mode": "all"}, answer_mode=True))
-    assert len(public["chunks"]) == public["caps"]["results"] == 5
+    assert len(public["chunks"]) == 1
+    assert public["caps"]["documents"] == 5
+    assert len(public["chunks"][0]["supporting_chunks"]) == 4
     assert len(answer["chunks"]) == answer["caps"]["results"] == 16
-    assert public["chunks"] == answer["chunks"][:5]
+    assert public["chunks"][0]["chunk_id"] == answer["chunks"][0]["chunk_id"]
+    assert "supporting_chunks" not in answer["chunks"][0]
 
 
 @pytest.mark.parametrize("invalid", [0, 1, 16, "true", None])

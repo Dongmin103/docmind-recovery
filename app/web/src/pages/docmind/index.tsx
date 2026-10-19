@@ -8,6 +8,7 @@ import type {
   DocMindRegistration,
   DocMindRegistrationList,
   DocMindSearchRequest,
+  DocMindSearchChunk,
   DocMindSearchResult,
   DocMindSearchScope,
 } from '@/services/docmind-service';
@@ -120,15 +121,17 @@ function RankedResult({
   chunk,
   rank,
   datasetId,
-  selected,
+  previewChunk,
   onOpen,
 }: {
-  chunk: ITestingChunk;
+  chunk: DocMindSearchChunk;
   rank: number;
   datasetId?: string;
-  selected: boolean;
+  previewChunk: ITestingChunk | undefined;
   onOpen: (chunk: ITestingChunk, origin: HTMLButtonElement) => void;
 }) {
+  const selected = previewChunk === chunk;
+  const supporting = chunk.supporting_chunks ?? [];
   const name = chunk.docnm_kwd || chunk.doc_name;
   const location = getSourceLocations(chunk);
   const relativePath = chunk.document_relative_path?.trim().replace(/\\/g, '/');
@@ -168,7 +171,52 @@ function RankedResult({
           <span className="docmind-result-selected">원문 확인 중</span>
         )}
       </div>
+      {supporting.length > 0 && (
+        <details className="mt-4 border-t border-border-button pt-3">
+          <summary className="cursor-pointer text-sm text-text-secondary">
+            이 문서의 다른 관련 위치 {supporting.length}개
+          </summary>
+          <div className="mt-3 space-y-4">
+            {supporting.map((evidence) => (
+              <SupportingEvidence
+                key={evidence.chunk_id}
+                chunk={evidence}
+                selected={previewChunk === evidence}
+                onOpen={onOpen}
+              />
+            ))}
+          </div>
+        </details>
+      )}
     </article>
+  );
+}
+
+function SupportingEvidence({
+  chunk,
+  selected,
+  onOpen,
+}: {
+  chunk: ITestingChunk;
+  selected: boolean;
+  onOpen: (chunk: ITestingChunk, origin: HTMLButtonElement) => void;
+}) {
+  const open = (event: React.MouseEvent<HTMLButtonElement>) =>
+    onOpen(chunk, event.currentTarget);
+  return (
+    <div className="border-l border-border-button pl-4">
+      <p className="text-xs text-text-secondary">{getSourceLocations(chunk)}</p>
+      <SearchResultContent content={chunk.content_with_weight} />
+      <button
+        type="button"
+        onClick={open}
+        className="mt-2 text-sm text-accent-primary"
+        aria-expanded={selected}
+        aria-controls={selected ? 'docmind-original-panel' : undefined}
+      >
+        이 위치 원문 보기
+      </button>
+    </div>
   );
 }
 
@@ -402,16 +450,20 @@ export default function DocMind() {
   );
 
   const searchChunks = searchResultValid ? returnedChunks : [];
+  const searchEvidence = searchChunks.flatMap((chunk) => [
+    chunk,
+    ...(chunk.supporting_chunks ?? []),
+  ]);
   const currentSelectedChunk =
     (selectedChunk &&
-      searchChunks.find(
+      searchEvidence.find(
         (chunk) =>
           chunk.doc_id === selectedChunk.doc_id &&
           chunk.source_version_id === selectedChunk.source_version_id &&
           chunk.chunk_id === selectedChunk.chunk_id,
       )) ||
     (selectedChunk &&
-      searchChunks.find(
+      searchEvidence.find(
         (chunk) =>
           chunk.doc_id === selectedChunk.doc_id &&
           chunk.source_version_id === selectedChunk.source_version_id,
@@ -979,7 +1031,7 @@ export default function DocMind() {
                         aria-label="검색 결과"
                       >
                         <p className="docmind-results-count" role="status">
-                          결과 {searchChunks.length}개
+                          문서 {searchChunks.length}개
                           {typeof retrieval.data.candidate_count ===
                             'number' && (
                             <span>
@@ -988,10 +1040,21 @@ export default function DocMind() {
                             </span>
                           )}
                         </p>
+                        {retrieval.data.relevance?.status === 'low' && (
+                          <p
+                            role="status"
+                            className="mb-4 px-4 text-sm text-text-secondary"
+                          >
+                            관련성이 낮은 참고 결과입니다. 검색어를 구체적으로
+                            입력해 보세요.
+                          </p>
+                        )}
                         {searchChunks.length === 0 ? (
                           <div className="docmind-search-state">
                             <h2>
-                              선택한 범위에서 관련 문서를 찾지 못했습니다.
+                              {retrieval.data.relevance?.status === 'no_match'
+                                ? '관련 자료를 충분히 찾지 못했습니다.'
+                                : '선택한 범위에서 관련 문서를 찾지 못했습니다.'}
                             </h2>
                             <p>
                               다른 검색어를 입력하거나 검색 범위를 넓혀보세요.
@@ -1007,7 +1070,7 @@ export default function DocMind() {
                                   chunk={chunk}
                                   rank={index + 1}
                                   datasetId={retrieval.data?.dataset_id}
-                                  selected={previewChunk === chunk}
+                                  previewChunk={previewChunk}
                                   onOpen={openPreview}
                                 />
                               ))}
@@ -1121,10 +1184,7 @@ export default function DocMind() {
                             documentId={node.document_id}
                             compact
                           />
-                          <PdfOcrChoice
-                            node={node}
-                            onConfirm={confirmPdfOcr}
-                          />
+                          <PdfOcrChoice node={node} onConfirm={confirmPdfOcr} />
                         </span>
                       )}
                     />
