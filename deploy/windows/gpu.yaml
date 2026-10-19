@@ -16,6 +16,7 @@ services:
   parser:
     mem_limit: 3g
     cpus: 4
+    tmpfs: !override ['/tmp:rw,noexec,nosuid,nodev,size=1g']
     environment:
       KORDOC_WORKERS: '2'
       KORDOC_OCR_MODEL_REVISION: disabled-for-dept2-reindex
@@ -26,6 +27,7 @@ services:
       ocr: {condition: service_healthy}
   ocr:
     gpus: all
+    tmpfs: !override ['/tmp:rw,nosuid,size=2g,mode=1777', '/home/surya/.cache:rw,nosuid,size=1g,uid=10001,gid=10001']
     environment:
       LLAMA_CPP_NGL: '99'
       LLAMA_CPP_EXTRA_ARGS: --threads 8 -lv 4
