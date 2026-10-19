@@ -31,6 +31,7 @@ class Tests(unittest.TestCase):
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.engine=GTEEngine.__new__(GTEEngine)
+        self.engine.device='cuda'
         self.engine.tokenizer=lambda texts,**kwargs:{'input_ids':[range(int(t)) for t in texts]}
         self.calls=[]
         def batch(texts):self.calls.append(texts);return [[int(t)] for t in texts]
@@ -52,6 +53,12 @@ class EngineTests(unittest.TestCase):
         self.calls.clear()
         with self.assertRaises(RequestError):self.engine.encode(['8193'])
         self.assertEqual(self.calls,[])
+    def test_explicit_cpu_keeps_order_and_uses_single_item_batches(self):
+        self.engine.device='cpu'
+        vectors,tokens=self.engine.encode(['10','1000','20'])
+        self.assertEqual(vectors,[[10],[1000],[20]])
+        self.assertEqual(tokens,1030)
+        self.assertTrue(all(len(batch)==1 for batch in self.calls))
     def test_sort_and_restore(self):
         texts=['10','3000','1200','11','2500']
         vectors,tokens=self.engine.encode(texts)

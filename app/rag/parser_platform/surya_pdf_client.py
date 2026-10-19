@@ -1,4 +1,4 @@
-"""Validated HTTP boundary for user-consented PDF OCR on the GPU service."""
+"""Validated boundary for explicit CPU/CUDA user-consented PDF OCR."""
 
 from __future__ import annotations
 
@@ -45,15 +45,22 @@ def _json_request(url: str, *, timeout: int, payload: dict[str, Any] | None = No
 
 
 def _manifest(value: dict[str, Any], *, parser_version: str, model_version: str, backend: str,
-              require_execution: bool) -> None:
+              require_execution: bool, device: str = "cuda") -> None:
+    if device not in {"cpu", "cuda"}:
+        raise ValueError("Invalid Surya execution device")
+    cpu_valid = (value.get("execution_device") == "cpu"
+                 and type(value.get("gpu_layers_requested")) is int and value["gpu_layers_requested"] == 0
+                 and (not require_execution or value.get("cpu_execution_verified") is True))
+    gpu_valid = (value.get("gpu_device_visible") is True
+                 and type(value.get("gpu_layers_requested")) is int and value["gpu_layers_requested"] > 0
+                 and (not require_execution or value.get("gpu_execution_verified") is True
+                      or value.get("gpu_offload_verified") is True))
     if (value.get("parser_name") != "surya" or value.get("parser_version") != parser_version
             or value.get("model_version") != model_version or value.get("backend") != backend
-            or value.get("status") != "ready" or value.get("gpu_device_visible") is not True
-            or type(value.get("gpu_layers_requested")) is not int or value["gpu_layers_requested"] <= 0
+            or value.get("status") != "ready"
             or "pdf_document_parse" not in (value.get("task_kinds") or ())
             or value.get("model_files_verified") is not True
-            or (require_execution and value.get("gpu_execution_verified") is not True
-                and value.get("gpu_offload_verified") is not True)):
+            or not (cpu_valid if device == "cpu" else gpu_valid)):
         raise parser_error("PARSER_SURYA_NOT_READY")
 
 
@@ -92,7 +99,7 @@ def _valid_page(page: dict[str, Any], *, source_hash: str, parser_fingerprint: s
 def parse_surya_pdf(
     source_bytes: bytes, *, service_url: str, timeout: int, parse_run_id: str,
     parser_fingerprint: str, expected_page_count: int, requested_page_numbers: list[int],
-    parser_version: str, model_version: str, backend: str,
+    parser_version: str, model_version: str, backend: str, device: str = "cuda",
 ) -> dict[str, Any]:
     if (not service_url.startswith("http://") or not isinstance(source_bytes, bytes)
             or not source_bytes.startswith(b"%PDF-") or not 1 <= expected_page_count <= 5000
@@ -104,7 +111,7 @@ def parse_surya_pdf(
     _manifest(
         _json_request(base + "/ready", timeout=min(timeout, 10)),
         parser_version=parser_version, model_version=model_version, backend=backend,
-        require_execution=False,
+        require_execution=False, device=device,
     )
     response = _json_request(base + "/v1/parse", timeout=timeout, payload={
         "task_kind": "pdf_document_parse", "parse_run_id": parse_run_id,
@@ -133,6 +140,6 @@ def parse_surya_pdf(
     _manifest(
         _json_request(base + "/health", timeout=min(timeout, 10)),
         parser_version=parser_version, model_version=model_version, backend=backend,
-        require_execution=True,
+        require_execution=True, device=device,
     )
     return response

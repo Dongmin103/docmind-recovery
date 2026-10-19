@@ -66,12 +66,15 @@ class ParserPlatformConfig:
     surya_parser_version: str = "0.22.1"
     surya_model_revision: str = "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470"
     surya_backend: str = "llamacpp"
+    surya_device: str = "cuda"
     pdf_ocr_merge_revision: str = "kordoc-native-surya-block-merge-v1"
     libreoffice_converter_revision: str = "libreoffice-4:7.4.7-1+deb12u14"
     hwp_enabled: bool = True
     artifact_root: str = ".parser-platform-artifacts"
 
     def __post_init__(self) -> None:
+        if self.surya_device not in {"cpu", "cuda"}:
+            raise ValueError("Surya device must be cpu or cuda")
         if not all((self.kordoc_parser_version, self.kordoc_patch_revision,
                     self.kordoc_ocr_model_revision, self.kordoc_normalizer_revision,
                     self.kordoc_chunker_revision, self.libreoffice_converter_revision)):
@@ -120,6 +123,7 @@ class ParserPlatformConfig:
             surya_parser_version=source.get("PARSER_PLATFORM_SURYA_PARSER_VERSION", "0.22.1").strip(),
             surya_model_revision=source.get("PARSER_PLATFORM_SURYA_MODEL_REVISION", "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470").strip(),
             surya_backend=source.get("PARSER_PLATFORM_SURYA_BACKEND", "llamacpp").strip(),
+            surya_device=source.get("PARSER_PLATFORM_SURYA_DEVICE", "cuda").strip(),
             libreoffice_converter_revision=source.get("PARSER_PLATFORM_LIBREOFFICE_CONVERTER_REVISION", "libreoffice-4:7.4.7-1+deb12u14").strip(),
             hwp_enabled=_strict_bool(source, "PARSER_PLATFORM_HWP_ENABLED", True),
             artifact_root=str(Path(source.get("PARSER_PLATFORM_ARTIFACT_ROOT", ".parser-platform-artifacts")).expanduser()),
@@ -208,6 +212,8 @@ class ParserPlatformConfig:
                     surya_deadline_seconds=self.surya_deadline_seconds,
                     pdf_ocr_merge_revision=self.pdf_ocr_merge_revision,
                 )
+                if self.surya_device == "cpu":
+                    settings["surya_device"] = "cpu"
         if source_format == "doc" or (source_format == "pptx" and not self.pptx_native_enabled):
             settings["converter_revision"] = self.libreoffice_converter_revision
         if source_format == "pptx":
@@ -226,4 +232,4 @@ class ParserPlatformConfig:
 
     @property
     def pdf_backend(self) -> str:
-        return f"kordoc-native+surya-{self.surya_backend}-gpu"
+        return f"kordoc-native+surya-{self.surya_backend}-{'gpu' if self.surya_device == 'cuda' else 'cpu'}"

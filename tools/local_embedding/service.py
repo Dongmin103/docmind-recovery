@@ -1,4 +1,4 @@
-"""Authenticated GPU-only GTE OpenAI embeddings endpoint. Never logs payloads."""
+"""Authenticated GTE endpoint with an explicit CPU or CUDA deployment device."""
 import argparse
 import gc
 import hmac
@@ -24,7 +24,7 @@ class EmbeddingService:
         texts=payload.get('input')
         if isinstance(texts,str):texts=[texts]
         if not isinstance(texts,list) or not 1<=len(texts)<=64 or any(not isinstance(t,str) or not t.strip() for t in texts):raise RequestError('Expected 1 to 64 nonempty strings')
-        if not self.lock.acquire(timeout=180):raise RequestError('GPU queue busy',503)
+        if not self.lock.acquire(timeout=180):raise RequestError('Embedding queue busy',503)
         try:vectors,tokens=self.engine.encode(texts)
         finally:self.lock.release()
         return {'object':'list','model':MODEL,'data':[{'object':'embedding','index':i,'embedding':v} for i,v in enumerate(vectors)],'usage':{'prompt_tokens':tokens,'total_tokens':tokens}}
@@ -36,15 +36,18 @@ class GTEEngine:
     def __init__(self,config):
         import torch
         from transformers import AutoModel,AutoTokenizer
-        if not torch.cuda.is_available():raise RuntimeError('CUDA required; CPU fallback is disabled')
-        torch.set_num_threads(6)
+        self.device=config.get('device','cuda')
+        if self.device not in {'cpu','cuda'}:raise ValueError('device must be cpu or cuda')
+        if self.device=='cuda' and not torch.cuda.is_available():raise RuntimeError('CUDA required; CPU fallback is disabled')
+        torch.set_num_threads(int(config.get('threads',6)))
+        if self.device=='cpu':self.short_batch=1
         self.torch=torch
         self.tokenizer=AutoTokenizer.from_pretrained(config['model_path'],local_files_only=True)
-        self.model=AutoModel.from_pretrained(config['model_path'],local_files_only=True,trust_remote_code=True,code_revision=config['code_revision'],dtype=torch.float32,attn_implementation='eager').cuda().eval()
+        self.model=AutoModel.from_pretrained(config['model_path'],local_files_only=True,trust_remote_code=True,code_revision=config['code_revision'],dtype=torch.float32,attn_implementation='eager').to(self.device).eval()
         if next(self.model.parameters()).dtype!=torch.float32:raise RuntimeError('FP32 required')
     def _batch(self,texts):
         t=self.torch
-        x=self.tokenizer(texts,padding=True,truncation=False,return_tensors='pt').to('cuda')
+        x=self.tokenizer(texts,padding=True,truncation=False,return_tensors='pt').to(self.device)
         with t.inference_mode():
             vectors=t.nn.functional.normalize(self.model(**x).last_hidden_state[:,0],p=2,dim=1).cpu()
         if vectors.shape!=(len(texts),768) or not t.isfinite(vectors).all():raise RuntimeError('Invalid embedding output')
@@ -52,7 +55,8 @@ class GTEEngine:
     def _retry(self,texts):
         try:return self._batch(texts)
         except self.torch.cuda.OutOfMemoryError:pass
-        gc.collect();self.torch.cuda.empty_cache()
+        gc.collect()
+        if self.device=='cuda':self.torch.cuda.empty_cache()
         if len(texts)==1:raise RequestError('Input cannot fit available GPU memory',503)
         mid=len(texts)//2
         return self._retry(texts[:mid])+self._retry(texts[mid:])
@@ -65,7 +69,7 @@ class GTEEngine:
         offset = 0
         while offset < len(order):
             n = lengths[order[offset]]
-            size = 1 if n > 2048 else 2 if n > 1024 else self.short_batch
+            size = 1 if self.device=='cpu' or n > 2048 else 2 if n > 1024 else self.short_batch
             ids = order[offset:offset + size]
             if n <= 1024 and self.min_token_fill:
                 # Sorted lengths make the average fill decrease as this group grows.
@@ -91,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
         data=json.dumps(payload,separators=(',',':'),allow_nan=False).encode()
         self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
     def do_GET(self):
-        if self.path=='/health':self.reply(200,{'status':'ok','model':MODEL,'dimensions':768,'device':'cuda'})
+        if self.path=='/health':self.reply(200,{'status':'ok','model':MODEL,'dimensions':768,'device':getattr(self.server.service.engine,'device','cuda')})
         else:self.reply(404,{'error':'Not found'})
     def do_POST(self):
         if self.path!='/v1/embeddings':self.reply(404,{'error':'Not found'});return
@@ -111,6 +115,7 @@ def main():
     config=json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
     engine=GTEEngine(config);engine.encode(['서비스 준비 확인'])
     server=ThreadingHTTPServer((config.get('bind','127.0.0.1'),config.get('port',18882)),Handler)
-    server.service=EmbeddingService(engine,config['api_key'])
+    key=Path(config['api_key_file']).read_text(encoding='utf-8').strip() if config.get('api_key_file') else config['api_key']
+    server.service=EmbeddingService(engine,key)
     print('GTE service ready',flush=True);server.serve_forever()
 if __name__=='__main__':main()

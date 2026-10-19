@@ -6,10 +6,10 @@ import json
 from unittest.mock import patch
 
 import pytest
-
 from rag.parser_platform.canonical import canonical_sha256
 from rag.parser_platform.errors import ParserPlatformError
 from rag.parser_platform.surya_pdf_adapter import merge_surya_pdf
+from rag.parser_platform.surya_pdf_client import _manifest as validate_manifest
 from rag.parser_platform.surya_pdf_client import parse_surya_pdf
 
 SOURCE = b"%PDF-1.7\nsynthetic"
@@ -26,6 +26,22 @@ def _manifest(*, proved: bool) -> dict:
         "gpu_offload_verified": False, "model_files_verified": True,
         "task_kinds": ["pdf_document_parse"],
     }
+
+
+def test_explicit_cpu_ocr_requires_cpu_process_proof_and_cannot_satisfy_gpu():
+    value = _manifest(proved=False)
+    value.update(execution_device="cpu", gpu_device_visible=False, gpu_layers_requested=0)
+    arguments = {"parser_version": "0.22.1", "model_version": "revision-a", "backend": "llamacpp"}
+    validate_manifest(value, device="cpu", require_execution=False, **arguments)
+    with pytest.raises(ParserPlatformError):
+        validate_manifest(value, device="cpu", require_execution=True, **arguments)
+    value["cpu_execution_verified"] = True
+    validate_manifest(value, device="cpu", require_execution=True, **arguments)
+    with pytest.raises(ParserPlatformError):
+        validate_manifest(value, device="cuda", require_execution=True, **arguments)
+    value["gpu_layers_requested"] = 1
+    with pytest.raises(ParserPlatformError):
+        validate_manifest(value, device="cpu", require_execution=True, **arguments)
 
 
 def _response() -> dict:

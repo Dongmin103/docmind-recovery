@@ -78,6 +78,13 @@ class SuryaEngine:
         self.model_version = os.environ.get("SURYA_MODEL_REVISION", "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470")
         self.backend = settings.SURYA_INFERENCE_BACKEND or "llamacpp"
         self.gpu_layers_requested = int(getattr(settings, "LLAMA_CPP_NGL", 0)) if self.backend == "llamacpp" else None
+        self.execution_device = os.environ.get("SURYA_EXECUTION_DEVICE", "cuda")
+        if self.execution_device not in {"cpu", "cuda"}:
+            raise ValueError("SURYA_EXECUTION_DEVICE must be cpu or cuda")
+        if self.execution_device == "cpu" and (self.backend != "llamacpp" or self.gpu_layers_requested != 0):
+            raise ValueError("CPU OCR requires llamacpp with zero GPU layers")
+        self._cpu_execution_handle = None
+        self._cpu_execution_pid = None
         self.gpu_device_visible = self._gpu_device_visible()
         self.gpu_offloaded_layers: int | None = None
         self.gpu_total_layers: int | None = None
@@ -224,6 +231,44 @@ class SuryaEngine:
         except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
             return
 
+    def _cpu_execution_process_current(self, handle: Any) -> bool:
+        if handle is None or handle is not self._cpu_execution_handle or self._cpu_execution_pid is None:
+            return False
+        try:
+            sentinel = json.loads(self._llama_sentinel_path.read_text(encoding="utf-8"))
+            return (int(sentinel["pid"]) == self._cpu_execution_pid
+                    and os.path.samefile(self._proc_root / str(self._cpu_execution_pid) / "exe", settings.LLAMA_CPP_BINARY))
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def _verify_cpu_execution_from_process(self) -> None:
+        if self.execution_device != "cpu" or self.gpu_layers_requested != 0:
+            return
+        handle = getattr(getattr(self.manager, "backend", None), "handle", None)
+        if handle is None or not getattr(handle, "spawned_by_us", False):
+            return
+        self._cpu_execution_handle = None
+        self._cpu_execution_pid = None
+        try:
+            sentinel = json.loads(self._llama_sentinel_path.read_text(encoding="utf-8"))
+            pid = int(sentinel["pid"])
+            port = urlparse(handle.base_url).port
+            if pid <= 0 or sentinel.get("backend") != "llamacpp" or sentinel.get("port") != port:
+                return
+            proc = self._proc_root / str(pid)
+            if not os.path.samefile(proc / "exe", settings.LLAMA_CPP_BINARY):
+                return
+            args = [os.fsdecode(value) for value in (proc / "cmdline").read_bytes().split(b"\0") if value]
+            if (self._argument_value(args, "-m") != self.model_path
+                    or self._argument_value(args, "--mmproj") != self.mmproj_path
+                    or self._argument_value(args, "-ngl") != "0"
+                    or self._argument_value(args, "--port") != str(port)):
+                return
+            self._cpu_execution_handle = handle
+            self._cpu_execution_pid = pid
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+
     def manifest(self) -> dict[str, Any]:
         handle = getattr(getattr(self.manager, "backend", None), "handle", None)
         offload_verified = handle is not None and handle is self._gpu_offload_handle
@@ -237,6 +282,8 @@ class SuryaEngine:
             "parser_version": self.parser_version,
             "model_version": self.model_version,
             "backend": self.backend,
+            "execution_device": self.execution_device,
+            "cpu_execution_verified": self._cpu_execution_process_current(handle),
             "gpu_layers_requested": self.gpu_layers_requested,
             "gpu_device_visible": self.gpu_device_visible,
             "gpu_execution_verified": execution_verified,
@@ -358,6 +405,7 @@ class SuryaEngine:
                         with self.lock:
                             results = self.predictor(images, full_page=True)
                             self._verify_gpu_offload_from_log()
+                            self._verify_cpu_execution_from_process()
                             self._verify_gpu_execution_from_process()
                         LOGGER.info(
                             "surya_inference_completed parse_run_id=%s pages=%s elapsed_seconds=%.3f",
@@ -481,6 +529,7 @@ class SuryaEngine:
                 try:
                     result = self.predictor([safe_image], full_page=True)[0]
                     self._verify_gpu_offload_from_log()
+                    self._verify_cpu_execution_from_process()
                     self._verify_gpu_execution_from_process()
                 finally:
                     settings.SURYA_MAX_TOKENS_FULL_PAGE = full_page_max_tokens

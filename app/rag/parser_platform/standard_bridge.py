@@ -139,6 +139,7 @@ class ParserPlatformStandardBridge:
                                 parser_version=self.config.surya_parser_version,
                                 model_version=self.config.surya_model_revision,
                                 backend=self.config.surya_backend,
+                                device=self.config.surya_device,
                             )
                         result = merge_surya_pdf(result, ocr_result)
                         result["surya_response"] = ocr_result
