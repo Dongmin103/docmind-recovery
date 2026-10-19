@@ -1,6 +1,6 @@
 # GitHub 기반 다른 서버 배포
 
-현재 DOCMIND 배포 소스는 **기본 브랜치 `main`**에 있다. 초기 인수인계·복구 브랜치 대신 `main`을 받는다. 검색 구현 커밋은 `59a3005`, 평가·기존 색인 보강 도구는 `d5cac9b`에 포함된다. `feat/answer-jobs`는 작업 이력을 보존한 브랜치다.
+현재 DOCMIND 배포 소스는 **기본 브랜치 `main`**에 있다. 초기 인수인계·복구 브랜치 대신 `main`을 받는다. 검색 구현 커밋은 `59a3005`, 평가·기존 색인 보강 도구는 `d5cac9b`에 포함된다. 통합이 끝난 원격 작업 브랜치는 정리했으며 변경 이력은 `main`의 Git 이력에 보존한다.
 
 ```bash
 git clone --branch main --single-branch https://github.com/Dongmin103/docmind-recovery.git docmind

@@ -2,7 +2,7 @@ name: DOCMIND package
 
 on:
   push:
-    branches: [main, feat/answer-jobs]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
