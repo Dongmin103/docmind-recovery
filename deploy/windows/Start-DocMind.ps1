@@ -15,9 +15,13 @@ foreach ($file in $manifest.files) {
 $needsImport=$false
 foreach ($image in $manifest.images) {
     # Windows PowerShell 5.1 raises on native stderr for an absent image.
-    try { $id=& docker image inspect --format '{{.Id}}' ([string]$image.tag) 2>$null }
+    $found=$false
+    try {
+        $id=& docker image inspect --format '{{.Id}}' ([string]$image.tag) 2>$null
+        $found=$LASTEXITCODE -eq 0
+    }
     catch { $id=$null }
-    if ($LASTEXITCODE -ne 0 -or [string]$id -ne [string]$image.id) { $needsImport=$true }
+    if (-not $found -or [string]$id -ne [string]$image.id) { $needsImport=$true }
 }
 if ($needsImport) {
     foreach ($archive in $manifest.image_archives) {
