@@ -1,9 +1,9 @@
 # GitHub 기반 다른 서버 배포
 
-2026-10-19 현재 실행 중인 검색 개선과 비동기 답변 코드는 **`feat/answer-jobs` 브랜치**에 있다. 저장소 기본 브랜치 `main`이나 초기 `windows-development-handoff` 대신 이 브랜치를 받는다. 검색 구현 커밋은 `59a3005`, 평가·기존 색인 보강 도구는 `d5cac9b`에 포함된다.
+현재 DOCMIND 배포 소스는 **기본 브랜치 `main`**에 있다. 초기 인수인계·복구 브랜치 대신 `main`을 받는다. 검색 구현 커밋은 `59a3005`, 평가·기존 색인 보강 도구는 `d5cac9b`에 포함된다. `feat/answer-jobs`는 작업 이력을 보존한 브랜치다.
 
 ```bash
-git clone --branch feat/answer-jobs --single-branch https://github.com/Dongmin103/docmind-recovery.git docmind
+git clone --branch main --single-branch https://github.com/Dongmin103/docmind-recovery.git docmind
 cd docmind
 git rev-parse HEAD
 ```

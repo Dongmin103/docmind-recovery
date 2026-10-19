@@ -1,7 +1,7 @@
 [project]
-name = "ragflow"
+name = "docmind"
 version = "0.27.1"
-description = "[RAGFlow](https://ragflow.io/) is an open-source RAG (Retrieval-Augmented Generation) engine based on deep document understanding. It offers a streamlined RAG workflow for businesses of any scale, combining LLM (Large Language Models) to provide truthful question-answering capabilities, backed by well-founded citations from various complex formatted data."
+description = "DOCMIND document indexing, scoped hybrid search, and grounded answers. Includes components derived from RAGFlow."
 authors = [{ name = "Zhichang Yu", email = "yuzhichang@gmail.com" }]
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -200,7 +200,6 @@ packages = [
     'api',
     'deepdoc',
     'rag',
-    'sdk.python.ragflow_sdk',
 ]
 
 [tool.ruff]

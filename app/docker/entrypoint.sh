@@ -19,7 +19,7 @@ case "${STORAGE_IMPL-MINIO}" in
     *) echo "Unsupported STORAGE_IMPL: ${STORAGE_IMPL}; only MINIO is supported" >&2; exit 1 ;;
 esac
 
-echo "Start RAGFlow cluster, version: "
+echo "Start DOCMIND, version: "
 cat /ragflow/VERSION
 
 # -----------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 Windows PowerShell에서 Git이 설치된 상태로 실행한다. 대상 폴더는 새 개발용 경로를 사용한다.
 
 ```powershell
-git clone --branch windows-development-handoff --single-branch https://github.com/Dongmin103/docmind-recovery.git C:\DocMindDev\docmind
+git clone --branch main --single-branch https://github.com/Dongmin103/docmind-recovery.git C:\DocMindDev\docmind
 Set-Location C:\DocMindDev\docmind
 Get-Content .\START_HERE.md
 powershell -NoProfile -File .\tools\windows\Test-DevelopmentEnvironment.ps1

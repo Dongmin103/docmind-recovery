@@ -1,4 +1,4 @@
-# RAGFlow .dockerignore
+# DOCMIND image build context
 # Reduces Docker build context sent to the daemon.
 # All excluded items are either rebuilt inside Docker, mounted from
 # infiniflow/ragflow_deps, or are local-only artifacts.

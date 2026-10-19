@@ -171,14 +171,14 @@ COPY web/package.json web/package-lock.json web/.npmrc ./web/
 RUN --mount=type=cache,id=ragflow_npm,target=/root/.npm,sharing=locked \
     cd web && NODE_OPTIONS="--max-old-space-size=8192" npm install
 
-# Copy full web source and docs for the frontend build.
+# Copy the DOCMIND frontend and its API documentation.
 COPY web web
 COPY docs docs
 ARG WEB_BUILD_HEAP_MB=8192
 RUN --mount=type=cache,id=ragflow_npm,target=/root/.npm,sharing=locked \
     cd web && NODE_OPTIONS="--max-old-space-size=${WEB_BUILD_HEAP_MB}" VITE_BUILD_SOURCEMAP=false VITE_MINIFY=esbuild npm run build
 
-ARG RAGFLOW_VERSION=v0.27.1-docmind-kordoc-cutover-20260929
+ARG RAGFLOW_VERSION=docmind-2026.10.19
 RUN printf '%s\n' "$RAGFLOW_VERSION" > /ragflow/VERSION
 
 # production stage

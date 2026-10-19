@@ -1,98 +1,19 @@
+# DOCMIND 회귀 검증
 
----
-
-### (1). Deploy RAGFlow services and images
-
-[https://ragflow.io/docs/build_docker_image](https://ragflow.io/docs/build_docker_image)
-
-### (2). Configure the required environment for testing
-
-**Install Python dependencies (including test dependencies):**
+테스트는 소스 저장소에서 개발·검증할 때 사용하며 배포 ZIP에는 포함하지 않습니다.
+프로젝트 의존성을 준비한 격리 환경에서 변경 범위의 테스트만 실행합니다.
+실제 문서·모델 키·운영 설정을 단위 테스트에 전달하지 않습니다.
 
 ```bash
-uv sync --python 3.13 --only-group test --no-default-groups --frozen
-
+# app/ 기준, 합성 설정과 프로젝트 Python 환경에서 실행
+python -m pytest test/unit_test/rag/nlp/test_docmind_lexical.py \
+  test/unit_test/rag/parser_platform/test_search_fields.py \
+  test/unit_test/rag/utils/test_docmind_lexical_scope.py
 ```
 
-**Activate the environment:**
+프런트는 `app/web`에서 `npm test -- --runInBand --coverage=false src/pages/docmind`
+및 `npm run build`로 확인합니다. 저장소 루트의 패키지 경계·변조 검증은
+`python -m unittest discover -s tools/tests -p test_package_docmind.py -v`입니다.
 
-```bash
-source .venv/bin/activate
-
-```
-
-**Install SDK:**
-
-```bash
-uv pip install sdk/python
-
-```
-
-**Modify the `.env` file:** Add the following code:
-
-```env
-COMPOSE_PROFILES=${COMPOSE_PROFILES},tei-cpu
-TEI_MODEL=BAAI/bge-small-en-v1.5
-RAGFLOW_IMAGE=infiniflow/ragflow:v0.27.1 #Replace with the image you are using
-
-```
-
-**Start the container（wait two minutes）:**
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-
-```
-
----
-
-### (3). Test Elasticsearch
-
-**a) Run sdk tests against Elasticsearch:**
-
-```bash
-export HTTP_API_TEST_LEVEL=p2
-export HOST_ADDRESS=http://127.0.0.1:9380  # Ensure that this port is the API port mapped to your localhost
-pytest -s --tb=short --level=${HTTP_API_TEST_LEVEL} test/testcases/test_sdk_api
-
-```
-
-**b) Run http api tests against Elasticsearch:**
-
-```bash
-pytest -s --tb=short --level=${HTTP_API_TEST_LEVEL} test/testcases/test_http_api
-
-```
-
----
-
-### (4). Test Infinity
-
-**Modify the `.env` file:**
-
-```env
-DOC_ENGINE=${DOC_ENGINE:-infinity}
-
-```
-
-**Start the container:**
-
-```bash
-docker compose -f docker/docker-compose.yml down -v
-docker compose -f docker/docker-compose.yml up -d
-
-```
-
-**a) Run sdk tests against Infinity:**
-
-```bash
-DOC_ENGINE=infinity pytest -s --tb=short --level=${HTTP_API_TEST_LEVEL} test/testcases/test_sdk_api
-
-```
-
-**b) Run http api tests against Infinity:**
-
-```bash
-DOC_ENGINE=infinity pytest -s --tb=short --level=${HTTP_API_TEST_LEVEL} test/testcases/test_http_api
-
-```
+범용 RAGFlow SDK와 해당 SDK 통합 테스트는 이 DOCMIND 저장소에서
+제거했습니다. 인증·문서 처리 등 현재 공통 코드의 회귀 테스트는 유지합니다.

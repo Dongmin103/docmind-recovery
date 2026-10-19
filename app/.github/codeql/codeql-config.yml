@@ -1,3 +1,0 @@
-# Ignore vendored dependencies during Python/JavaScript analysis.
-paths-ignore:
-  - "**/node_modules/**"

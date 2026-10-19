@@ -1,7 +1,7 @@
-# Third-party notices for the DocMind CPU canary
+# Third-party notices for DOCMIND
 
 This file summarizes the additional runtime components introduced by the
-DocMind canary. It does not replace the corresponding upstream license text.
+DOCMIND runtime. It does not replace the corresponding upstream license text.
 
 | Component | Pinned use | License/source |
 | --- | --- | --- |

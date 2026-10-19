@@ -1,4 +1,4 @@
-# RAGFlow Instructions
+# DOCMIND Application Instructions
 
 Use this file as the local operating guide for the current codebase. Prefer the code and the current CLAUDE.md over any older convention or remembered project shape.
 
@@ -17,12 +17,11 @@ Use this file as the local operating guide for the current codebase. Prefer the 
 
 ## Code Layout to Expect
 - `api/`: Python API server entrypoints, blueprints, services, and database code.
-- `rag/`: ingestion, retrieval, LLM integration, and graph RAG logic.
+- `rag/`: DOCMIND ingestion, retrieval, and LLM integration.
 - `deepdoc/`: parsing and OCR.
-- `agent/`: workflow canvas, components, tools, and templates.
 - `web/`: frontend application.
 - `docker/`: local and production compose files.
-- `sdk/` and `test/`: SDK and automated tests.
+- `test/`: automated regression tests; excluded from deployment packages.
 
 ## Working Rules
 - When reviewing documentation or code, inspect the full affected path and report all verifiable findings in one review; do not return after only a few findings and expose further issues in later rounds.

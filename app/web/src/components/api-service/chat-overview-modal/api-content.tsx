@@ -18,7 +18,7 @@ import { useIsDarkTheme } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { useSetModalState, useTranslate } from '@/hooks/common-hooks';
 import { LangfuseCard } from '@/pages/user-setting/setting-model/langfuse';
-import apiDoc from '@parent/docs/references/http_api_reference.md?raw';
+import apiDoc from '@parent/docs/docmind-api.md?raw';
 import { Loader2 } from 'lucide-react';
 import {
   lazy,
@@ -65,7 +65,7 @@ const ApiContent = ({ id, idKey }: { id?: string; idKey: string }) => {
 
   const cleanDoc = useMemo(() => removeFrontmatter(apiDoc), []);
 
-  // Defer the heavy 230KB markdown rendering so the page paints immediately.
+  // Defer documentation rendering so the page paints immediately.
   const [docReady, setDocReady] = useState(false);
   useEffect(() => {
     const id = requestAnimationFrame(() => setDocReady(true));

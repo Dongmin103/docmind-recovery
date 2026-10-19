@@ -1,53 +1,43 @@
-# DOCMIND 배포 및 개발
+# DOCMIND
 
-현재 배포 소스는 **`feat/answer-jobs` 브랜치**입니다. 소스는 `app/`, 요구사항은 [PRD.md](PRD.md)에 있습니다. 다른 서버의 설치·설정·빌드·검증은 [서버 배포 안내](docs/SERVER-DEPLOYMENT-2026-10-19.md)를 따르세요. 개발 안내는 [START_HERE.md](START_HERE.md)에 있습니다.
+등록한 Windows 원본 폴더의 문서를 색인하고, 전체·폴더·문서 범위로 검색하며 근거가 있는 AI 답변을 제공합니다.
+
+## 설치와 실행
+
+배포 브랜치는 `main`입니다.
 
 ```powershell
-git clone --branch feat/answer-jobs --single-branch https://github.com/Dongmin103/docmind-recovery.git
+git clone --branch main --single-branch https://github.com/Dongmin103/docmind-recovery.git docmind
+cd docmind
 ```
 
-## 다른 경로의 문서를 색인하려면
+1. [서버 배포 안내](docs/SERVER-DEPLOYMENT-2026-10-19.md)에 따라 Docker, 파서, GTE, 모델 인증과 서버별 설정을 준비합니다.
+2. [원본 폴더 등록 절차](docs/SERVER-DEPLOYMENT-2026-10-19.md#새-서버에서-다른-원본-폴더를-색인하기)에 따라 대상 서버의 원본과 실제 경로를 연결합니다.
+3. DOCMIND 이미지를 빌드하고 서버 설정으로 실행한 뒤, 감시기와 색인 워커를 시작합니다.
 
-새 서버에서 원본 루트를 등록하고 그 서버의 문서를 새로 색인합니다. 현재 PC의 문서나 색인을 옮길 필요는 없습니다. **README는 설정 방법을 안내하는 문서이며, README에 경로를 적는 것만으로 등록되지는 않습니다.**
+```powershell
+docker build -f app/Dockerfile -t docmind:2026.10.19 ./app
+```
 
-1. 서버의 DOCMIND source 등록에 고유한 `source_id`, 표시 이름, 연결할 기본 폴더를 설정합니다.
-2. Git 밖의 실제 호스트 워커 설정에서 같은 `source_id`에 새 서버의 `root` 경로를 연결합니다. 설정 형식은 [예제 JSON](tools/windows/docmind-host-worker.config.example.json)을 참고합니다.
-3. 해당 폴더를 읽을 수 있는 Windows 계정으로 감시기와 색인 워커를 실행합니다. 감시기의 시작 스캔이 하위 폴더를 조사하고, 워커가 복호화·파싱·임베딩·색인을 처리합니다. 이후 변경도 감지합니다.
+소스·환경설정 예제와 실행 도구를 포함합니다. Docker 이미지·모델 가중치·uEncryptor2·실제 인증 키·문서·DB·색인 데이터는 Git에 포함하지 않습니다. 서버별 실제 설정은 Git 밖에 보관합니다. 새 서버의 문서는 새로 색인하며, 제목·한국어·식별자 검색 보강이 자동 적용됩니다.
 
-루트 여러 개를 등록할 수 있습니다. 서버별 경로·인증 키·복호화 실행 파일은 실제 서버 설정으로 관리합니다. 자세한 등록 항목, 예시 및 실행 명령은 [새 원본 폴더 등록 절차](docs/SERVER-DEPLOYMENT-2026-10-19.md#새-서버에서-다른-원본-폴더를-색인하기)를 보세요. 이 절차는 uEncryptor2 암호화 문서 경로를 기준으로 하며, 일반 평문 폴더를 같은 방식으로 바로 처리한다고 가정하지 않습니다.
+## 배포 패키지 만들기
 
-아래는 변경 전 복구 기록이며, 새 개발용 데이터 준비 절차가 아닙니다.
+```powershell
+python tools/package_docmind.py --output .local/packages/docmind.zip
+python tools/package_docmind.py --verify .local/packages/docmind.zip
+```
 
----
+패키지는 커밋된 소스에서 DOCMIND 빌드·실행에 필요한 파일을 선별한 ZIP입니다. 테스트·개발 기록·범용 SDK·예제와 비공개 설정을 포함하지 않습니다. 파일별 SHA-256과 소스 커밋을 함께 기록합니다. 사전 빌드된 이미지 묶음은 아니며 대상 서버에서 의존성과 이미지를 준비해야 합니다. 구성 기준은 [패키지 안내](deploy/README.md)에 있습니다.
 
-# DocMind recovery
+## 구성
 
-OpenViking 검색 구조 변경 전의 코드 복구 지점을 보관합니다.
+| 경로 | 용도 |
+|---|---|
+| `app/` | DOCMIND API·검색·파싱·프런트와 이미지 빌드 소스 |
+| `tools/windows/` | Windows 원본 감시·임시 복호화·색인 실행부 |
+| `tools/local_embedding/` | 로컬 GTE 임베딩 서비스 |
+| `deploy/` | 배포 패키지 구성과 안내 |
+| `docs/` | DOCMIND 설치·운영·검증 기록 |
 
-## 변경 전 기준점
-
-- 복구 태그: `pre-openviking-refactor-20260921T061958Z`
-- 원본 운영 Git HEAD: `432dd7e6f98796b875beb41dd1abf2ced3ad8d5b`
-- 추적 파일 6,058개, 미커밋 추적 파일 변경 20개, 신규 파일 10개를 보존했습니다.
-- 무시된 환경설정 파일 1개도 포함하여 작업 트리 6,069개 항목을 보존했습니다.
-- 백업 중 원본 HEAD·Git 상태·파일 해시가 변하지 않았음을 확인했습니다.
-
-이 공개 저장소에는 복구 도구와 검증 기록을 기록합니다. 소스와 설정의 원본은 **AES-256-GCM으로 암호화한 릴리스 첨부파일**에 있습니다. 소스의 Git 이력은 암호화 묶음 안의 `history.bundle`에 보존됩니다. 복호화 키는 GitHub에 올리지 않습니다.
-
-## 백업 범위
-
-Git 이력과 refs, 현재 작업 파일, Git index, staged/unstaged patch, 환경설정, 실제 실행 중인 DocMind 소스·빌드된 프런트엔드, 설치된 OpenViking 패키지, 컨테이너 설정과 이미지 식별자를 포함합니다.
-
-**DB·검색 색인·원본 문서 저장소·OpenViking 영속 카탈로그·모델 가중치·컨테이너 이미지 레이어는 포함하지 않습니다.** 따라서 이 백업은 코드와 설정 복구용이며, 전체 서비스 데이터의 시점 복원본은 아닙니다. 이후 데이터 마이그레이션이나 컨테이너 이미지 정리를 하기 전에는 해당 데이터와 이미지도 별도로 보존해야 합니다.
-
-## 검증
-
-`checkpoint.json`에 암호화 파일 크기·SHA-256과 검증 상태가 있습니다. 복호화 결과, 내부 구성 파일 11개, 작업 트리 6,069개 항목의 해시를 확인했고, Git bundle을 별도 디렉터리에 복원하여 `git fsck --full`을 통과했습니다. GitHub 첨부파일을 다시 내려받은 결과는 후속 검증 기록에서 확인합니다.
-
-## 복구 방법
-
-`RESTORE.md`를 따르세요. **별도로 보관한 32바이트 복호화 키가 반드시 필요합니다.** 복구 도구는 서비스 배포·재시작을 수행하지 않습니다.
-
-## 이후 변경 범위
-
-전체 검색·폴더 검색·사용자가 고른 문서 검색을 하나의 검색 경로로 통합하고, 질문마다 AI가 폴더·문서를 먼저 선택하는 경로를 제거할 예정입니다. C128 채택 결정을 유지하며 업로드 시 AI 자동 폴더 정리는 후속 작업으로 미룹니다. 이 저장소 생성과 백업 과정에서는 운영 코드를 수정하거나 서비스를 재시작하지 않았습니다.
+DOCMIND는 RAGFlow에서 파생된 검색·파싱·공통 API 코드를 사용합니다. 내부 모듈명, 데이터베이스 키, 컨테이너 내부 경로와 외부 의존 이미지명은 기존 실행 계약을 유지합니다. 원저작자 표기와 라이선스는 [LICENSE](app/LICENSE), [서드파티 고지](app/THIRD_PARTY_NOTICES.md)에 보존합니다.

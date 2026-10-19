@@ -1,0 +1,34 @@
+{
+  "schema": "docmind-package-v1",
+  "trees": [
+    "app/api", "app/common", "app/conf", "app/deepdoc", "app/rag",
+    "app/parser_services", "app/ragflow_deps", "app/web", "app/docker",
+    "app/docs", "app/scripts", "app/tools/scripts",
+    "tools/windows", "tools/local_embedding"
+  ],
+  "files": [
+    "README.md", "PRD.md", "WINDOWS_DEVELOPMENT.md", "deploy/README.md",
+    "deploy/package.json", "app/README.md", "app/LICENSE",
+    "app/THIRD_PARTY_NOTICES.md", "app/pyproject.toml", "app/uv.lock",
+    "app/Dockerfile", "app/.dockerignore", "app/Dockerfile_deepdoc_oss",
+    "tools/package_docmind.py", "tools/backfill_docmind_search_fields.py",
+    "docs/SERVER-DEPLOYMENT-2026-10-19.md"
+  ],
+  "exclude": [
+    "*/test/*", "*/tests/*", "*/__tests__/*", "*/test_*.py", "*/conftest.py", "*.test.*", "*.spec.*",
+    "*/.storybook/*", "*/AGENTS.md", "*/CLAUDE.md",
+    "app/scripts/benchmark*", "app/scripts/*probe*", "app/scripts/*seed*",
+    "app/scripts/preview_synthetic_fixtures.py", "app/scripts/recovery/*",
+    "tools/windows/Test-DocMind*", "tools/windows/Measure-*", "tools/windows/*Probe*",
+    "tools/windows/*Recovery*", "tools/local_embedding/benchmark*",
+    "tools/local_embedding/compare*", "tools/local_embedding/pipeline_probe.py",
+    "tools/local_embedding/measure*"
+  ],
+  "required": [
+    "app/api/ragflow_server.py", "app/rag/nlp/docmind_lexical.py",
+    "app/docker/entrypoint.sh", "app/docs/docmind-api.md", "app/LICENSE",
+    "app/THIRD_PARTY_NOTICES.md", "app/web/package-lock.json",
+    "tools/windows/Start-DocMindUEncryptorHostWorker.ps1",
+    "tools/windows/Watch-DocMindEncryptedSources.ps1"
+  ]
+}

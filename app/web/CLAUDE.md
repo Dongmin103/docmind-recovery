@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with the RAGFlow frontend (`web/`).
+This file provides guidance when working with the DOCMIND frontend (`web/`).
 
 ## Project Overview
 
-RAGFlow frontend is a React/TypeScript application built with UmiJS:
+DOCMIND frontend is a React/TypeScript application built with Vite:
 
 - **Components**: shadcn/ui
 - **Styling**: Tailwind CSS

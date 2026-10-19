@@ -2991,7 +2991,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ragflow"
+name = "docmind"
 version = "0.27.1"
 source = { virtual = "." }
 dependencies = [
