@@ -1,10 +1,20 @@
-# Windows 개발 인수인계
+# DOCMIND 배포 및 개발
 
-**새 개발은 [START_HERE.md](START_HERE.md)에서 시작하세요.** 소스는 app/, 최신 요구사항은 PRD.md에 있습니다. Windows 서버에서 이 브랜치만 clone하면 개발을 시작할 수 있습니다. 기존 PDF·운영 청크·암호화 복구 파일은 필요하지 않습니다.
+현재 배포 소스는 **`feat/answer-jobs` 브랜치**입니다. 소스는 `app/`, 요구사항은 [PRD.md](PRD.md)에 있습니다. 다른 서버의 설치·설정·빌드·검증은 [서버 배포 안내](docs/SERVER-DEPLOYMENT-2026-10-19.md)를 따르세요. 개발 안내는 [START_HERE.md](START_HERE.md)에 있습니다.
 
 ```powershell
-git clone --branch windows-development-handoff --single-branch https://github.com/Dongmin103/docmind-recovery.git
+git clone --branch feat/answer-jobs --single-branch https://github.com/Dongmin103/docmind-recovery.git
 ```
+
+## 다른 경로의 문서를 색인하려면
+
+새 서버에서 원본 루트를 등록하고 그 서버의 문서를 새로 색인합니다. 현재 PC의 문서나 색인을 옮길 필요는 없습니다. **README는 설정 방법을 안내하는 문서이며, README에 경로를 적는 것만으로 등록되지는 않습니다.**
+
+1. 서버의 DOCMIND source 등록에 고유한 `source_id`, 표시 이름, 연결할 기본 폴더를 설정합니다.
+2. Git 밖의 실제 호스트 워커 설정에서 같은 `source_id`에 새 서버의 `root` 경로를 연결합니다. 설정 형식은 [예제 JSON](tools/windows/docmind-host-worker.config.example.json)을 참고합니다.
+3. 해당 폴더를 읽을 수 있는 Windows 계정으로 감시기와 색인 워커를 실행합니다. 감시기의 시작 스캔이 하위 폴더를 조사하고, 워커가 복호화·파싱·임베딩·색인을 처리합니다. 이후 변경도 감지합니다.
+
+루트 여러 개를 등록할 수 있습니다. 서버별 경로·인증 키·복호화 실행 파일은 실제 서버 설정으로 관리합니다. 자세한 등록 항목, 예시 및 실행 명령은 [새 원본 폴더 등록 절차](docs/SERVER-DEPLOYMENT-2026-10-19.md#새-서버에서-다른-원본-폴더를-색인하기)를 보세요. 이 절차는 uEncryptor2 암호화 문서 경로를 기준으로 하며, 일반 평문 폴더를 같은 방식으로 바로 처리한다고 가정하지 않습니다.
 
 아래는 변경 전 복구 기록이며, 새 개발용 데이터 준비 절차가 아닙니다.
 
