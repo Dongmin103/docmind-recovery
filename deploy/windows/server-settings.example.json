@@ -1,0 +1,12 @@
+{
+  "JinaApiKeyFile": "C:\\DocMindHost\\secrets\\jina.key",
+  "AnswerBaseUrl": "http://your-llm-server:13434/v1",
+  "UEncryptorPath": "C:\\Program Files\\Vendor\\uEncryptor2.exe",
+  "WorkRoot": "C:\\DocMindHost\\temporary-plaintext",
+  "BackupExclusionAcknowledged": false,
+  "WebPort": 18080,
+  "ApiPort": 19380,
+  "Sources": [
+    {"source_id": "company-docs", "display_name": "회사 문서", "root": "E:\\회사자료"}
+  ]
+}

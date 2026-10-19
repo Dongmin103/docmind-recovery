@@ -1,0 +1,229 @@
+name: ${COMPOSE_PROJECT_NAME:-docmind}
+services:
+  mysql:
+    image: mysql:8.0.40
+    pull_policy: never
+    command: [--max-allowed-packet=1073741824, --max-connections=100]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?Initialize DOCMIND first}
+      MYSQL_DATABASE: docmind
+    volumes: [mysql:/var/lib/mysql]
+    networks: [backend]
+    mem_limit: 512m
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h localhost -p"$$MYSQL_ROOT_PASSWORD" --silent']
+      interval: 10s
+      timeout: 5s
+      retries: 60
+  es:
+    image: elasticsearch:8.11.3
+    pull_policy: never
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'true'
+      xpack.security.http.ssl.enabled: 'false'
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Initialize DOCMIND first}
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      bootstrap.memory_lock: 'false'
+    volumes: [es:/usr/share/elasticsearch/data]
+    networks: [backend]
+    mem_limit: 1536m
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS -u "elastic:$$ELASTIC_PASSWORD" http://localhost:9200/_cluster/health >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 60
+  redis:
+    image: valkey/valkey:8
+    pull_policy: never
+    command: [valkey-server, --requirepass, '${REDIS_PASSWORD:?Initialize DOCMIND first}', --maxmemory, 64mb, --maxmemory-policy, volatile-lru]
+    volumes: [redis:/data]
+    networks: [backend]
+    mem_limit: 128m
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, 'valkey-cli -a "${REDIS_PASSWORD}" ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  minio:
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z
+    pull_policy: never
+    command: [server, /data]
+    environment:
+      MINIO_ROOT_USER: docmind
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:?Initialize DOCMIND first}
+    volumes: [minio:/data]
+    networks: [backend]
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:9000/minio/health/live]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  embedding:
+    image: docmind-embedding:2026.10.19-${DOCMIND_VARIANT:?Initialize DOCMIND first}
+    pull_policy: never
+    volumes: [./.local/secrets/embedding-key:/run/secrets/embedding-key:ro]
+    tmpfs: ['/tmp:rw,size=134217728']
+    networks: [backend]
+    cpus: 4
+    mem_limit: 3g
+    restart: unless-stopped
+  parser:
+    image: docmind-kordoc-parser:2026.10.19
+    pull_policy: never
+    environment:
+      KORDOC_OFFLINE: '1'
+      KORDOC_WORKERS: '1'
+      KORDOC_OCR_ENABLED: '0'
+      KORDOC_REQUIRE_OCR: '0'
+      KORDOC_MAX_PDF_PAGES: '2000'
+      KORDOC_CONVERSION_TIMEOUT_MS: '180000'
+    tmpfs: ['/tmp:rw,size=268435456']
+    networks: [parser]
+    mem_limit: 1g
+    cpus: 2
+    restart: unless-stopped
+  preview:
+    image: docmind-preview:2026.10.19
+    pull_policy: never
+    environment:
+      DOCMIND_PREVIEW_ROOT: /run/docmind-previews
+      HOME: /run/docmind-previews/processor-home
+      TMPDIR: /run/docmind-previews/processor-tmp
+      XDG_CACHE_HOME: /run/docmind-previews/processor-cache
+    volumes: [preview:/run/docmind-previews]
+    networks: [parser]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 64
+    restart: unless-stopped
+  ocr:
+    profiles: [ocr]
+    image: docmind-ocr:2026.10.19-${DOCMIND_VARIANT:?Initialize DOCMIND first}
+    pull_policy: never
+    init: true
+    environment:
+      SURYA_EXECUTION_DEVICE: ${DOCMIND_DEVICE:?Initialize DOCMIND first}
+      SURYA_GGUF_LOCAL_MODEL_PATH: /models/surya-2.gguf
+      SURYA_GGUF_LOCAL_MMPROJ_PATH: /models/surya-2-mmproj.gguf
+      SURYA_INFERENCE_BACKEND: llamacpp
+      LLAMA_CPP_BINARY: /opt/llama/bin/llama-server
+      LLAMA_CPP_NGL: '0'
+      LLAMA_CPP_EXTRA_ARGS: --threads 4 -lv 4
+      SURYA_INFERENCE_CTX_SIZE: '16384'
+      SURYA_INFERENCE_CTX_PER_SLOT: '16384'
+      SURYA_INFERENCE_PARALLEL: '1'
+      SURYA_INFERENCE_AUTOSTART: '1'
+      SURYA_INFERENCE_STARTUP_TIMEOUT: '900'
+      SURYA_SERVICE_REQUEST_TIMEOUT_SECONDS: '1100'
+      SURYA_SERVICE_PAGE_TIMEOUT_SECONDS: '600'
+      SURYA_SERVICE_PORT: '8091'
+      SURYA_SERVICE_HOST: 0.0.0.0
+    tmpfs: ['/tmp:rw,size=268435456', '/home/parser/.cache:rw,size=268435456,uid=10001,gid=10001']
+    networks: [parser]
+    read_only: true
+    mem_limit: 6g
+    cpus: 4
+    pids_limit: 128
+    restart: unless-stopped
+  docmind:
+    image: docmind:2026.10.19
+    pull_policy: never
+    depends_on:
+      mysql: {condition: service_healthy}
+      es: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      embedding: {condition: service_healthy}
+      parser: {condition: service_healthy}
+    environment:
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Initialize DOCMIND first}
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Initialize DOCMIND first}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Initialize DOCMIND first}
+      MINIO_PASSWORD: ${MINIO_PASSWORD:?Initialize DOCMIND first}
+      DOC_ENGINE: elasticsearch
+      STORAGE_IMPL: MINIO
+      API_PROXY_SCHEME: python
+      DOCMIND_SHARED_WORKSPACE_ENABLED: '1'
+      DOCMIND_SHARED_USER_EMAIL: docmind@internal.invalid
+      DOCMIND_CATALOG_DB_PRIMARY_ENABLED: '1'
+      DOCMIND_CATALOG_SHADOW_ENABLED: '0'
+      DOCMIND_GENERATIONLESS_E2E_ENABLED: '1'
+      DOCMIND_HOST_WORKER_KEY_ID: docmind-runtime-host
+      DOCMIND_HOST_WORKER_HMAC_SECRET_FILE: /run/secrets/worker-key
+      JINA_API_KEY_FILE: /run/secrets/jina-key
+      DOCMIND_RERANK_ID: jina-reranker-v3.5@jina@Jina
+      DOCMIND_ANSWER_ENABLED: '1'
+      DOCMIND_ANSWER_PIPELINE: reviewed_v1
+      DOCMIND_ANSWER_PROVIDER: openai
+      DOCMIND_ANSWER_MODEL: qwen3.8-flash-next
+      DOCMIND_ANSWER_CONTEXT_TOKENS: '32768'
+      DOCMIND_ANSWER_OUTPUT_TOKENS: '4096'
+      DOCMIND_ANSWER_BASE_URL: ${DOCMIND_ANSWER_BASE_URL:?Configure the existing Qwen server endpoint}
+      DOCMIND_REVIEWED_ALLOWED_BASE_URL: ${DOCMIND_ANSWER_BASE_URL:?Configure the existing Qwen server endpoint}
+      DOCMIND_EPHEMERAL_PARSER_ROOT: /run/docmind-ephemeral-parser
+      DOCMIND_PREVIEW_ENABLED: '1'
+      DOCMIND_PREVIEW_ROOT: /run/docmind-previews
+      DOCMIND_PREVIEW_PROCESSOR_URL: http://preview:8090
+      PARSER_PLATFORM_ENABLED: '1'
+      TE_RUN_MODE: '0'
+      PARSER_PLATFORM_INTEGRATION_READY: '1'
+      PARSER_PLATFORM_KORDOC_URL: http://parser:8095
+      PARSER_PLATFORM_PPTX_NATIVE_ENABLED: '1'
+      PARSER_PLATFORM_ARTIFACT_ROOT: /ragflow/parser-platform-artifacts
+      PARSER_PLATFORM_SURYA_URL: http://ocr:8091
+      PARSER_PLATFORM_SURYA_DEVICE: ${DOCMIND_DEVICE:?Initialize DOCMIND first}
+      KORDOC_CLIENT_CONCURRENCY: '1'
+      DOCMIND_INGESTION_DOCUMENT_CONCURRENCY: '1'
+      EMBEDDING_BATCH_SIZE: '4'
+      EMBEDDING_BATCH_CONCURRENCY: '1'
+      MAX_CONCURRENT_EMBEDDING_REQUESTS: '1'
+      DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS: '600'
+      DOCMIND_STORAGE_AUDIT_ROOT: /run/docmind-storage-audit
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      TZ: Asia/Seoul
+    ports:
+      - 127.0.0.1:${DOCMIND_WEB_PORT:-18080}:80
+      - 127.0.0.1:${DOCMIND_API_PORT:-19380}:9380
+    volumes:
+      - config:/ragflow/conf
+      - logs:/ragflow/logs
+      - parser-artifacts:/ragflow/parser-platform-artifacts
+      - preview:/run/docmind-previews
+      - ./.local/secrets:/run/secrets:ro
+      - ./.local/installation:/run/installation:ro
+    tmpfs: ['/run/docmind-ephemeral-parser:rw,noexec,nosuid,nodev,size=536870912,mode=0700', '/run/docmind-storage-audit:rw,noexec,nosuid,nodev,size=67108864,mode=0700']
+    networks: [frontend, backend, parser]
+    mem_limit: 2560m
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, /ragflow/.venv/bin/python, -c, 'import urllib.request; urllib.request.urlopen("http://localhost:9380/api/v1/system/healthz",timeout=5).read()']
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 30
+networks:
+  frontend: {}
+  backend: {internal: true}
+  parser: {internal: true}
+volumes:
+  mysql: {}
+  es: {}
+  redis: {}
+  minio: {}
+  config: {}
+  logs: {}
+  parser-artifacts: {}
+  preview:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=134217728,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev

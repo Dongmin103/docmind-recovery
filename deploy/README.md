@@ -1,5 +1,15 @@
 # DOCMIND 배포 패키지
 
+사전 빌드된 Windows 실행 패키지는 [windows/README.md](windows/README.md)를
+따른다. CPU와 NVIDIA GPU ZIP을 별도로 제공하며 Docker 이미지·로컬 모델·
+서버 설정 예제·호스트 실행 스크립트가 들어 있다. Jina API·기존 Qwen 서버와 서버에 설치된
+uEncryptor2는 대상 환경에서 연결한다. 실제 키·문서·DB·색인은 포함하지 않는다.
+
+릴리스 머신에서는 검증한 이미지와 모델·라이선스를 준비한 뒤
+`tools/build_docmind_runtime.py --variant both --output <새 출력 폴더>
+--surya-models <모델 폴더> --licenses <라이선스 폴더>`로 생성한다.
+이미지별 ID, 파일별 SHA-256, 소스 커밋을 기록한다. 다음 내용은 소스 ZIP 안내다.
+
 `python tools/package_docmind.py --output .local/packages/docmind.zip`으로
 현재 커밋의 DOCMIND 소스 배포 패키지를 만든다. ZIP을 풀고 루트 README의
 서버 설정·이미지 빌드·원본 등록·색인 실행 절차를 따른다.

@@ -1,0 +1,9 @@
+{
+  "model_path": "/opt/docmind/model",
+  "code_revision": "40ced75c3017eb27626c9d4ea981bde21a2662f4",
+  "api_key_file": "/run/secrets/embedding-key",
+  "device": "cpu",
+  "bind": "0.0.0.0",
+  "port": 8080,
+  "threads": 4
+}

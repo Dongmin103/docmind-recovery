@@ -1,0 +1,39 @@
+services:
+  mysql:
+    mem_limit: 1g
+  es:
+    mem_limit: 2g
+  docmind:
+    mem_limit: 4g
+    environment:
+      KORDOC_CLIENT_CONCURRENCY: '2'
+      EMBEDDING_BATCH_SIZE: '32'
+      EMBEDDING_BATCH_CONCURRENCY: '2'
+      MAX_CONCURRENT_EMBEDDING_REQUESTS: '2'
+      DOCMIND_INGESTION_DOCUMENT_CONCURRENCY: '4'
+      DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS: '120'
+      PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION: disabled-for-dept2-reindex
+  parser:
+    mem_limit: 3g
+    cpus: 4
+    environment:
+      KORDOC_WORKERS: '2'
+      KORDOC_OCR_MODEL_REVISION: disabled-for-dept2-reindex
+  embedding:
+    gpus: all
+    cpus: 6
+    depends_on:
+      ocr: {condition: service_healthy}
+  ocr:
+    gpus: all
+    environment:
+      LLAMA_CPP_NGL: '99'
+      LLAMA_CPP_EXTRA_ARGS: --threads 8 -lv 4
+      LLAMA_CPP_BINARY: /opt/llama/llama-server
+      SURYA_INFERENCE_CTX_SIZE: '16384'
+      SURYA_INFERENCE_CTX_PER_SLOT: '16384'
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    mem_limit: 8g
+    pids_limit: 256
+    cpus: 8

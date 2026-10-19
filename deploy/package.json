@@ -4,15 +4,15 @@
     "app/api", "app/common", "app/conf", "app/deepdoc", "app/rag",
     "app/parser_services", "app/ragflow_deps", "app/web", "app/docker",
     "app/docs", "app/scripts", "app/tools/scripts",
-    "tools/windows", "tools/local_embedding"
+    "tools/windows", "tools/local_embedding", "deploy/windows", "deploy/embedding"
   ],
   "files": [
     "README.md", "PRD.md", "WINDOWS_DEVELOPMENT.md", "deploy/README.md",
     "deploy/package.json", "app/README.md", "app/LICENSE",
     "app/THIRD_PARTY_NOTICES.md", "app/pyproject.toml", "app/uv.lock",
     "app/Dockerfile", "app/.dockerignore", "app/Dockerfile_deepdoc_oss",
-    "tools/package_docmind.py", "tools/backfill_docmind_search_fields.py",
-    "docs/SERVER-DEPLOYMENT-2026-10-19.md"
+    "tools/package_docmind.py", "tools/backfill_docmind_search_fields.py", "tools/build_docmind_runtime.py",
+    "docs/SERVER-DEPLOYMENT-2026-10-19.md", "docs/PORTABLE-RUNTIME-2026-10-19.md"
   ],
   "exclude": [
     "*/test/*", "*/tests/*", "*/__tests__/*", "*/test_*.py", "*/conftest.py", "*.test.*", "*.spec.*",

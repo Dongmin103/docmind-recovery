@@ -1,6 +1,7 @@
 [CmdletBinding()]
-param([string]$ConfigPath=$env:DOCMIND_HOST_WORKER_CONFIG,[switch]$Once,[string]$SourceId,[switch]$SkipStartupScan,[ValidateRange(1,60)][int]$PollSeconds=2)
+param([string]$ConfigPath=$env:DOCMIND_HOST_WORKER_CONFIG,[switch]$Once,[string]$SourceId,[switch]$SkipStartupScan,[ValidateRange(1,60)][int]$PollSeconds=2,[string]$StopFile='')
 $ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'DocMindUEncryptorHostWorker.Common.ps1')
 Add-Type -Path @((Join-Path $PSScriptRoot 'DocMindSyncQueue.cs'),(Join-Path $PSScriptRoot 'DocMindUnicodeCaseFold.cs'),(Join-Path $PSScriptRoot 'DocMindSyncCollector.cs'))
@@ -215,6 +216,7 @@ try {
     }
     $lastMidnight=''
     do {
+        if($StopFile -and (Test-Path -LiteralPath $StopFile)){break}
         $progress=$false
         foreach($id in @($roots.Keys)){
             if($sourceRetryAt.ContainsKey($id) -and [DateTimeOffset]::UtcNow -lt $sourceRetryAt[$id]){continue}
