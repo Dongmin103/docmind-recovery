@@ -7,13 +7,14 @@ from typing import Any
 # Selected on the calibration split; see SEARCH-QUALITY-2026-10-19.md.
 MIN_RELEVANCE = 0.25
 LOW_RELEVANCE = 0.50
-DOCUMENT_LIMIT = 5
+DOCUMENT_LIMIT = 32
+NARROW_SCOPE_DOCUMENT_LIMIT = 5
 EVIDENCE_LIMIT = 5
 
 
 def refill_candidates(document_count: int, *, answer_mode: bool = False) -> bool:
     """Spend spare capacity on deeper evidence only for a narrow search scope."""
-    return answer_mode or document_count <= DOCUMENT_LIMIT
+    return answer_mode or document_count <= NARROW_SCOPE_DOCUMENT_LIMIT
 
 
 def exact_title_match(question: str, name: str) -> bool:

@@ -360,7 +360,7 @@ C는 BM25와 dense를 독립 실행하고 RRF로 합친 뒤 Jina API로 재순�
 | 후보 제한 | 문서당 8청크 우선 확보, 일반 검색 범위가 5개 이하 문서이면 남은 후보 보충, 전체 최대 128청크 |
 | rerank 입력 | 각 청크 앞 최대 2,400자, `window_mode=prefix` |
 | reranker | hosted Jina API `jina-reranker-v3.5` |
-| 최종 결과 | 최대 5문서, 문서별 대표 1개와 추가 위치 최대 4개 |
+| 최종 결과 | 최대 32문서, 화면에서 8개씩 더 보기, 문서별 대표 1개와 추가 위치 최대 4개 |
 | 질문 분해 | `atomic_decomposition=false` |
 
 - tenant·범위·권한·활성 버전 조건은 두 lane 후보 생성 전에 동일하게 적용한다. 전역 Top K 뒤 필터링하지 않는다.

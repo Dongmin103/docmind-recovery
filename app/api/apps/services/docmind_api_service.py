@@ -12,7 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from api.apps.services import dataset_api_service, docmind_source_projection_service
-from api.apps.services.docmind_search_selection import refill_candidates, select_document_groups
+from api.apps.services.docmind_search_selection import DOCUMENT_LIMIT, refill_candidates, select_document_groups
 from api.db.joint_services.tenant_model_service import get_model_config_from_provider_instance
 from api.db.services import docmind_catalog_service
 from api.db.services.docmind_document_path_service import document_relative_paths
@@ -29,7 +29,7 @@ _RRF_K = 60
 _DOCUMENT_CANDIDATE_LIMIT = 8
 _RERANK_CANDIDATE_LIMIT = 128
 _RERANK_TEXT_LIMIT = 2400
-_FINAL_RESULT_LIMIT = 5
+_FINAL_RESULT_LIMIT = DOCUMENT_LIMIT
 _ANSWER_RESULT_LIMIT = 16
 _RERANK_DOCUMENT_NAME_LIMIT = 256
 _DENSE_K = 2048

@@ -1,0 +1,28 @@
+{
+  "comparison": "Same candidates and raw rerank scores; document limit 5 versus 32",
+  "limitations": "Additional returned documents are not exhaustively relevance-labeled; this replay does not measure live latency or full-corpus precision.",
+  "cases": 92,
+  "positive_cases": 56,
+  "negative_cases": 36,
+  "expanded_cases": 11,
+  "previous_top_five_changed": 0,
+  "relevance_status_changed": 1,
+  "max_documents": 32,
+  "status_transitions": {
+    "low -> matched": 1
+  },
+  "limits": {
+    "5": {
+      "documents": 136,
+      "positive_hits": 55,
+      "gold_documents": 72,
+      "negative_returns": 3
+    },
+    "32": {
+      "documents": 210,
+      "positive_hits": 56,
+      "gold_documents": 73,
+      "negative_returns": 3
+    }
+  }
+}

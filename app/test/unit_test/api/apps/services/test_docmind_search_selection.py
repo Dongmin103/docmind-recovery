@@ -21,7 +21,7 @@ def test_document_grouping_collapses_duplicates_and_preserves_distinct_numbers(m
     assert [[c.chunk['content_with_weight'] for c, _ in g] for g in groups] == [['port 8123', 'port 9456'], ['port 8123']]
 
 
-def test_relevance_filter_does_not_fill_five_with_irrelevant_docs(monkeypatch):
+def test_relevance_filter_does_not_fill_limit_with_irrelevant_docs(monkeypatch):
     monkeypatch.setattr(selection, 'MIN_RELEVANCE', .2)
     monkeypatch.setattr(selection, 'LOW_RELEVANCE', .4)
     groups, info = selection.select_document_groups([candidate('a', 'body', .3), candidate('b', 'other', .1)], 'query')
@@ -40,13 +40,13 @@ def test_exact_filename_lookup_survives_body_only_low_score(monkeypatch):
     assert not selection.exact_title_match('설치 방법 가격', '설치 방법.pdf')
 
 
-def test_five_documents_and_five_distinct_evidence_each(monkeypatch):
+def test_thirty_two_documents_and_five_distinct_evidence_each(monkeypatch):
     monkeypatch.setattr(selection, 'MIN_RELEVANCE', 0)
     scored = [candidate(str(d), f'evidence {i}', 1 - d * .01 - i * .0001)
-              for d in range(8) for i in range(12)]
+              for d in range(40) for i in range(12)]
     groups, _ = selection.select_document_groups(scored, 'query')
-    assert len(groups) == 5 and all(len(g) == 5 for g in groups)
-    assert [g[0][0].chunk['doc_id'] for g in groups] == list('01234')
+    assert len(groups) == 32 and all(len(g) == 5 for g in groups)
+    assert [g[0][0].chunk['doc_id'] for g in groups] == [str(d) for d in range(32)]
 
 
 def test_dedup_uses_full_content_not_only_identical_prefix(monkeypatch):

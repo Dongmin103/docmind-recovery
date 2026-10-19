@@ -51,7 +51,7 @@ import ScopeFolderPicker from './scope-folder-picker';
 import SearchResultContent from './search-result-content';
 import './index.less';
 
-const RESULTS_PER_PAGE = 10;
+const RESULTS_PER_PAGE = 8;
 const DocMindKeys = {
   folders: () => ['docmind-folders'] as const,
   hierarchy: SourceHierarchyKeys.hierarchy,

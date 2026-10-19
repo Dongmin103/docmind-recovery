@@ -400,6 +400,33 @@ describe('DocMind search scopes', () => {
     expect(mockRefetch).toHaveBeenCalledTimes(3);
   });
 
+  it('shows 32 document results eight at a time', () => {
+    mockDocumentOptions = Array.from({ length: 32 }, (_, index) => ({
+      id: `document-${index + 1}`,
+      name: `result-${index + 1}.pdf`,
+    }));
+    mockSearchVariables = { projectId: 'project-1', scope: { mode: 'all' } };
+    mockSearchResult = {
+      dataset_id: 'dataset-1',
+      candidate_count: 128,
+      ranked_chunks: mockDocumentOptions.map((document) => ({
+        doc_id: document.id,
+        doc_name: document.name,
+        content_with_weight: `Evidence for ${document.id}`,
+      })),
+    };
+    renderDocMind();
+    const results = within(screen.getByRole('region', { name: '검색 결과' }));
+    expect(results.getByRole('status')).toHaveTextContent('문서 32개 · 검색 후보 128개');
+    for (const count of [8, 16, 24, 32]) {
+      expect(results.getAllByText(/^Evidence for document-/)).toHaveLength(count);
+      if (count < 32) {
+        fireEvent.click(results.getByRole('button', { name: '결과 더 보기' }));
+      }
+    }
+    expect(results.queryByRole('button', { name: '결과 더 보기' })).not.toBeInTheDocument();
+  });
+
   it('hides results from a previous scope after the selection changes', () => {
     mockSearchVariables = {
       projectId: 'project-1',

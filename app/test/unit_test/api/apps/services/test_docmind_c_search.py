@@ -294,7 +294,7 @@ def test_answer_only_search_uses_sixteen_named_rerank_without_changing_public_se
     public = asyncio.run(service.search("tenant-1", "question", scope={"mode": "all"}))
     assert len(public["chunks"]) == 1
     assert len(public["chunks"][0]["supporting_chunks"]) == 4
-    assert public["caps"] == {"lane": 128, "candidates": 128, "per_document_first_pass": 8, "documents": 5}
+    assert public["caps"] == {"lane": 128, "candidates": 128, "per_document_first_pass": 8, "documents": 32}
     assert reranker.calls[-1][1] == [f"body {index}" for index in range(6)]
     assert reranker.normalizations[-1] is False
     assert all("use_kg" not in request for _, request, _ in calls)
@@ -307,6 +307,23 @@ def test_answer_only_search_uses_sixteen_named_rerank_without_changing_public_se
     assert reranker.calls[-1][1] == [f"Document: guide.pdf\nbody {index}" for index in range(6)]
     assert reranker.normalizations[-1] is True
     assert all(request["use_kg"] is False for _, request, _ in calls)
+
+
+def test_search_returns_thirty_two_distinct_documents_from_forty_candidates(monkeypatch):
+    doc_ids = tuple(f"doc-{i:02}" for i in range(40))
+    chunks = [{"chunk_id": f"chunk-{i:02}", "doc_id": doc_id,
+               "kb_id": "dataset-1", "content": f"body {i}"}
+              for i, doc_id in enumerate(doc_ids)]
+    reranker = _Reranker([.9] * 40)
+    _wire_search(monkeypatch, {"bm25": chunks, "dense": []}, reranker)
+    catalog = service.Catalog(dataset_id="dataset-1", root_uri="source://docmind",
+                              source="database", version_id="version-1",
+                              folders={"root": doc_ids}, folder_tree=())
+    monkeypatch.setattr(service, "_load_catalog", lambda: catalog)
+    result = asyncio.run(service.search("tenant-1", "question", scope={"mode": "all"}))
+    assert result["candidate_count"] == 40
+    assert result["caps"]["documents"] == 32
+    assert [chunk["doc_id"] for chunk in result["chunks"]] == list(doc_ids[:32])
 
 
 def test_empty_folder_skips_both_retrieval_and_reranker(monkeypatch):

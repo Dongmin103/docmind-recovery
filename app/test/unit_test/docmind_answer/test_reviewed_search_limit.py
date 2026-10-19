@@ -35,7 +35,7 @@ def staged_search():
     env = {
         "select_document_groups": selection.select_document_groups,
         "refill_candidates": selection.refill_candidates,
-        "Any": Any, "_FINAL_RESULT_LIMIT": 5, "_ANSWER_RESULT_LIMIT": 16, "_LANE_LIMIT": 128,
+        "Any": Any, "_FINAL_RESULT_LIMIT": 32, "_ANSWER_RESULT_LIMIT": 16, "_LANE_LIMIT": 128,
         "_RERANK_CANDIDATE_LIMIT": 128, "_DOCUMENT_CANDIDATE_LIMIT": 8,
         "_RECALL_TIMEOUT_SECONDS": 5, "_RERANK_TIMEOUT_SECONDS": 5,
         "_load_serving_catalog": lambda _: catalog,
@@ -118,12 +118,12 @@ def test_answer_rerank_prefix_keeps_candidate_name_and_body_bytes():
     assert env["_answer_rerank_input"](candidate).startswith("Document: " + "n" * 256 + "\n")
 
 
-def test_public_default_five_answer_internal_sixteen_and_caps():
+def test_public_thirty_two_documents_answer_internal_sixteen_and_caps():
     search = staged_search()
     public = asyncio.run(search("tenant", "q", scope={"mode": "all"}))
     answer = asyncio.run(search("tenant", "q", scope={"mode": "all"}, answer_mode=True))
     assert len(public["chunks"]) == 1
-    assert public["caps"]["documents"] == 5
+    assert public["caps"]["documents"] == 32
     assert len(public["chunks"][0]["supporting_chunks"]) == 4
     assert len(answer["chunks"]) == answer["caps"]["results"] == 16
     assert public["chunks"][0]["chunk_id"] == answer["chunks"][0]["chunk_id"]
