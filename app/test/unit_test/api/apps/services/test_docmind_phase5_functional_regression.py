@@ -305,9 +305,9 @@ def _load_search_service(monkeypatch: pytest.MonkeyPatch, environment):
 
     dataset_api_service.search_datasets = search_datasets
     apps = types.ModuleType("api.apps")
-    apps.__path__ = []
+    apps.__path__ = [str(APP_ROOT / "api/apps")]
     services = types.ModuleType("api.apps.services")
-    services.__path__ = []
+    services.__path__ = [str(APP_ROOT / "api/apps/services")]
     services.dataset_api_service = dataset_api_service
     services.docmind_source_projection_service = SimpleNamespace()
     db_services = types.ModuleType("api.db.services")
@@ -370,7 +370,7 @@ def _load_search_service(monkeypatch: pytest.MonkeyPatch, environment):
         def __init__(self):
             self.inputs = []
 
-        def similarity(self, question, texts):
+        def similarity(self, question, texts, *, normalize=True):
             self.inputs.append((question, list(texts)))
             return [1.0 for _ in texts], 0
 
@@ -438,7 +438,7 @@ def test_phase5_synthetic_full_scan_ingest_update_scoped_search_and_delete(phase
     assert search_service._LANE_LIMIT == 128
     assert search_service._RERANK_CANDIDATE_LIMIT == 128
     assert search_service._RRF_K == 60
-    assert search_service._FINAL_RESULT_LIMIT == 5
+    assert search_service._FINAL_RESULT_LIMIT == 32
     assert search_service._DEFAULT_RERANK_ID == "jina-reranker-v3.5@jina@Jina"
 
     updated = _scan_document(digest="b" * 64, size=456, mtime_ns=789)

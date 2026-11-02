@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from api.apps.services import dataset_api_service, docmind_source_projection_service
+from api.apps.services.docmind_search_selection import DOCUMENT_LIMIT, exact_title_match, refill_candidates, select_document_groups
 from api.db.joint_services.tenant_model_service import get_model_config_from_provider_instance
 from api.db.services import docmind_catalog_service
 from api.db.services.docmind_document_path_service import document_relative_paths
@@ -28,7 +29,7 @@ _RRF_K = 60
 _DOCUMENT_CANDIDATE_LIMIT = 8
 _RERANK_CANDIDATE_LIMIT = 128
 _RERANK_TEXT_LIMIT = 2400
-_FINAL_RESULT_LIMIT = 5
+_FINAL_RESULT_LIMIT = DOCUMENT_LIMIT
 _ANSWER_RESULT_LIMIT = 16
 _RERANK_DOCUMENT_NAME_LIMIT = 256
 _DENSE_K = 2048
@@ -541,6 +542,36 @@ def _rrf_candidates(
     return result
 
 
+async def _include_missing_title_candidates(
+    candidates: list[Candidate], tenant_id: str, question: str, catalog: Catalog, scope: ResolvedScope,
+) -> list[Candidate]:
+    names = catalog.document_names or {}
+    exact = {doc for doc in scope.document_ids if exact_title_match(question, names.get(doc, ""))}
+    present = {c.chunk["doc_id"] for c in candidates} & exact
+    missing = tuple(sorted(exact - present))
+    if not missing or len(present) >= DOCUMENT_LIMIT:
+        return candidates
+
+    # Only fetch real, searchable chunks from matching documents in the authorized scope.
+    focused_scope = ResolvedScope(scope.mode, scope.folder_ids, missing)
+    focused = await _lane_candidates(tenant_id, question, catalog, focused_scope, candidate_mode="dense")
+    extra: list[Candidate] = []
+    for candidate in focused:
+        doc_id = candidate.chunk["doc_id"]
+        if doc_id not in present:
+            extra.append(candidate)
+            present.add(doc_id)
+            if len(present) == DOCUMENT_LIMIT:
+                break
+    if not extra:
+        return candidates
+    # Reserve one representative per exact document before spending the remaining C128 slots.
+    reserved = {c.chunk["doc_id"]: c for c in reversed(candidates) if c.chunk["doc_id"] in exact}
+    keep = {c.chunk.get("chunk_id") or c.chunk.get("id") for c in reserved.values()}
+    ordinary = [c for c in candidates if (c.chunk.get("chunk_id") or c.chunk.get("id")) not in keep]
+    return [*reserved.values(), *extra, *ordinary][:_RERANK_CANDIDATE_LIMIT]
+
+
 def _rerank_model(catalog: Catalog) -> LLMBundle:
     exists, knowledgebase = KnowledgebaseService.get_by_id(catalog.dataset_id)
     if not exists:
@@ -591,6 +622,7 @@ def _generationless_jina_api_key() -> str:
 
 def _empty_result(catalog: Catalog, resolved_scope: ResolvedScope, trace_id: str, started_at: float, *, answer_mode: bool = False) -> dict[str, Any]:
     return {
+        **({} if answer_mode else {"relevance": {"status": "no_match", "filtered_chunks": 0}}),
         "dataset_id": catalog.dataset_id,
         "project_id": catalog.dataset_id,
         "catalog_source": catalog.source,
@@ -608,7 +640,7 @@ def _empty_result(catalog: Catalog, resolved_scope: ResolvedScope, trace_id: str
         "trace_id": trace_id,
         "timings_ms": {"recall": 0.0, "rerank": 0.0, "total": round((time.monotonic() - started_at) * 1000, 2)},
         "caps": ({"lane": _LANE_LIMIT, "candidates": _RERANK_CANDIDATE_LIMIT, "per_document_first_pass": _DOCUMENT_CANDIDATE_LIMIT, "results": _ANSWER_RESULT_LIMIT}
-                 if answer_mode else {"lane": _LANE_LIMIT, "candidates": _RERANK_CANDIDATE_LIMIT, "per_document": _DOCUMENT_CANDIDATE_LIMIT, "results": _FINAL_RESULT_LIMIT}),
+                 if answer_mode else {"lane": _LANE_LIMIT, "candidates": _RERANK_CANDIDATE_LIMIT, "per_document_first_pass": _DOCUMENT_CANDIDATE_LIMIT, "documents": _FINAL_RESULT_LIMIT}),
     }
 
 
@@ -639,17 +671,20 @@ async def search(
 
     recall_started_at = time.monotonic()
     try:
-        bm25_candidates, dense_candidates = await asyncio.wait_for(
-            asyncio.gather(
+        async with asyncio.timeout(_RECALL_TIMEOUT_SECONDS):
+            bm25_candidates, dense_candidates = await asyncio.gather(
                 _lane_candidates(tenant_id, question, catalog, resolved_scope, candidate_mode="bm25", answer_mode=answer_mode),
                 _lane_candidates(tenant_id, question, catalog, resolved_scope, candidate_mode="dense", answer_mode=answer_mode),
-            ),
-            timeout=_RECALL_TIMEOUT_SECONDS,
-        )
+            )
+            candidates = _rrf_candidates(
+                bm25_candidates, dense_candidates,
+                refill=refill_candidates(len(resolved_scope.document_ids), answer_mode=answer_mode),
+            )
+            if not answer_mode:
+                candidates = await _include_missing_title_candidates(candidates, tenant_id, question, catalog, resolved_scope)
     except TimeoutError as error:
         raise RuntimeError("DOCMIND_RECALL_TIMEOUT") from error
     recalled_at = time.monotonic()
-    candidates = _rrf_candidates(bm25_candidates, dense_candidates, refill=answer_mode)
     if not candidates:
         result = _empty_result(catalog, resolved_scope, trace_id, started_at, answer_mode=answer_mode)
         result["lane_counts"] = {"bm25": len(bm25_candidates), "dense": len(dense_candidates)}
@@ -666,7 +701,7 @@ async def search(
     reranker = _rerank_model(catalog)
     try:
         scores, used_tokens = await asyncio.wait_for(
-            asyncio.to_thread(reranker.similarity, question, [_answer_rerank_input(candidate) for candidate in rerank_candidates] if answer_mode else [candidate.rerank_text for candidate in rerank_candidates]),
+            asyncio.to_thread(reranker.similarity, question, [_answer_rerank_input(candidate) for candidate in rerank_candidates] if answer_mode else [candidate.rerank_text for candidate in rerank_candidates], normalize=answer_mode),
             timeout=_RERANK_TIMEOUT_SECONDS,
         )
     except TimeoutError as error:
@@ -692,16 +727,28 @@ async def search(
             str(item[0].chunk.get("chunk_id") or item[0].chunk.get("id")),
         )
     )
+    groups, relevance = (
+        ([[item] for item in scored[:_ANSWER_RESULT_LIMIT]], {})
+        if answer_mode else select_document_groups(scored, question, document_names=catalog.document_names)
+    )
+    all_evidence: list[dict[str, Any]] = []
     ranked_chunks: list[dict[str, Any]] = []
-    for candidate, score in scored[:_ANSWER_RESULT_LIMIT if answer_mode else _FINAL_RESULT_LIMIT]:
-        chunk = _enrich_parser_platform_chunk(dict(candidate.chunk))
-        chunk["similarity"] = score
-        chunk["rerank_score"] = score
-        chunk["rrf_score"] = candidate.rrf_score
-        chunk["bm25_rank"] = candidate.bm25_rank
-        chunk["dense_rank"] = candidate.dense_rank
-        chunk["folder_id"] = candidate.folder_id
-        ranked_chunks.append(chunk)
+    for group in groups:
+        evidence = []
+        for candidate, score in group:
+            chunk = _enrich_parser_platform_chunk(dict(candidate.chunk))
+            chunk["similarity"] = score
+            chunk["rerank_score"] = score
+            chunk["rrf_score"] = candidate.rrf_score
+            chunk["bm25_rank"] = candidate.bm25_rank
+            chunk["dense_rank"] = candidate.dense_rank
+            chunk["folder_id"] = candidate.folder_id
+            evidence.append(chunk)
+        all_evidence.extend(evidence)
+        representative = evidence[0]
+        if not answer_mode:
+            representative["supporting_chunks"] = evidence[1:]
+        ranked_chunks.append(representative)
 
     _validate_source_candidates(tenant_id, catalog, rerank_candidates)
 
@@ -711,10 +758,10 @@ async def search(
         else await asyncio.to_thread(
             document_relative_paths,
             catalog.dataset_id,
-            {chunk["doc_id"] for chunk in ranked_chunks},
+            {chunk["doc_id"] for chunk in all_evidence},
         )
     )
-    for chunk in ranked_chunks:
+    for chunk in all_evidence:
         chunk.pop("document_relative_path", None)
         if relative_path := relative_paths.get(chunk["doc_id"]):
             chunk["document_relative_path"] = relative_path
@@ -757,6 +804,7 @@ async def search(
         "trace_id": trace_id,
         "timings_ms": timings_ms,
         "rerank_used_tokens": used_tokens,
+        **({} if answer_mode else {"relevance": relevance}),
         "caps": ({"lane": _LANE_LIMIT, "candidates": _RERANK_CANDIDATE_LIMIT, "per_document_first_pass": _DOCUMENT_CANDIDATE_LIMIT, "results": _ANSWER_RESULT_LIMIT}
-                 if answer_mode else {"lane": _LANE_LIMIT, "candidates": _RERANK_CANDIDATE_LIMIT, "per_document": _DOCUMENT_CANDIDATE_LIMIT, "results": _FINAL_RESULT_LIMIT}),
+                 if answer_mode else {"lane": _LANE_LIMIT, "candidates": _RERANK_CANDIDATE_LIMIT, "per_document_first_pass": _DOCUMENT_CANDIDATE_LIMIT, "documents": _FINAL_RESULT_LIMIT}),
     }

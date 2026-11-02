@@ -94,6 +94,15 @@ def test_normalization_preserves_ordering():
     assert list(np.argsort(rank)) == list(np.argsort(raw))
 
 
+def test_relevance_gate_can_preserve_negative_provider_scores():
+    provider = _RawRerank([-9.0, -3.0, -7.0])
+    raw, _ = provider.similarity("absent question", ["a", "b", "c"], normalize=False)
+    normalized, _ = provider.similarity("absent question", ["a", "b", "c"])
+    assert list(raw) == [-9.0, -3.0, -7.0]
+    assert max(normalized) == 1.0
+    assert list(np.argsort(raw)) == list(np.argsort(normalized))
+
+
 @pytest.mark.parametrize(
     "raw, expected",
     [

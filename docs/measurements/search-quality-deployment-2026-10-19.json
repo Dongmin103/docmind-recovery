@@ -1,0 +1,60 @@
+{
+  "source_commit": "fc882ae1b0b68acea1a6dd2b99e09e6b43a21ee8",
+  "image_tag": "docmind-ragflow:search-quality-verified-20261019",
+  "image_id": "sha256:5811c809bc721b45e02d8f88e429bbd7f5a3cf7e2fc270f4a274e305e73c1799",
+  "public_url": "https://temporary-speedy-tuba-bfs78eb.vercel.app",
+  "changed_python_files": 4,
+  "unchanged_python_files": 286,
+  "backend_tests": 73,
+  "frontend_tests": 45,
+  "comparison_questions": 92,
+  "typecheck": "42 output lines identical to baseline; no DocMind errors",
+  "deployment": {
+    "health": {
+      "db": "ok",
+      "doc_engine": "ok",
+      "redis": "ok",
+      "status": "ok",
+      "storage": "ok"
+    },
+    "image_id": "sha256:5811c809bc721b45e02d8f88e429bbd7f5a3cf7e2fc270f4a274e305e73c1799",
+    "configuration_preserved": true,
+    "document_versions_and_counts_preserved": true,
+    "host_tasks_preserved": true
+  },
+  "public_assets": {
+    "local": {
+      "index_and_entry_match": true,
+      "api_ready": true
+    },
+    "public": {
+      "index_and_entry_match": true,
+      "api_ready": true
+    }
+  },
+  "http_smoke": {
+    "local": {
+      "session_ready": true,
+      "search_passed": true,
+      "documents": 5,
+      "candidates": 128,
+      "relevance": "matched"
+    },
+    "public": {
+      "session_ready": true,
+      "search_passed": true,
+      "documents": 1,
+      "candidates": 36,
+      "relevance": "matched"
+    }
+  },
+  "evaluation_indices_removed": true,
+  "gte_model_and_config_preserved": true,
+  "gte_launcher_recovered": true,
+  "expired_public_tunnel_replaced": true,
+  "database_documents_with_active_chunk_set": 246,
+  "database_chunk_num_sum": 12595,
+  "searchable_documents": 242,
+  "available_chunks_in_serving_scope": 12553,
+  "available_filter": "must_not available_int < 1, matching es_conn.py"
+}

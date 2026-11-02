@@ -201,9 +201,11 @@ class _Reranker:
         self.scores = scores
         self.error = error
         self.calls = []
+        self.normalizations = []
 
-    def similarity(self, question, texts):
+    def similarity(self, question, texts, *, normalize=True):
         self.calls.append((question, list(texts)))
+        self.normalizations.append(normalize)
         if self.error:
             raise self.error
         return self.scores, 11
@@ -238,7 +240,7 @@ def test_search_runs_independent_lanes_with_identical_scope_and_deterministic_re
             {"chunk_id": "a", "doc_id": "doc-2", "kb_id": "dataset-1", "content": long_korean},
         ],
     }
-    reranker = _Reranker([0.1, 0.9, 0.9])
+    reranker = _Reranker([0.4, 0.9, 0.9])
     calls = _wire_search(monkeypatch, lane_chunks, reranker)
 
     result = asyncio.run(
@@ -268,6 +270,18 @@ def test_search_runs_independent_lanes_with_identical_scope_and_deterministic_re
     assert result["chunks"][2]["dense_rank"] == 2
 
 
+@pytest.mark.parametrize("score,expected_status,expected_count", [
+    (0.10, "no_match", 0), (0.30, "low", 1), (0.75, "matched", 1),
+])
+def test_search_applies_calibrated_relevance_without_padding_results(monkeypatch, score, expected_status, expected_count):
+    lanes = {"bm25": [{"chunk_id": "c", "doc_id": "doc-1", "kb_id": "dataset-1", "content": "body"}], "dense": []}
+    _wire_search(monkeypatch, lanes, _Reranker([score]))
+    result = asyncio.run(service.search("tenant-1", "question", scope={"mode": "all"}))
+    assert result["relevance"]["status"] == expected_status
+    assert len(result["chunks"]) == expected_count
+    assert result["candidate_count"] == 1
+
+
 def test_answer_only_search_uses_sixteen_named_rerank_without_changing_public_search(monkeypatch):
     lane_chunks = {"bm25": [
         {"chunk_id": f"c-{index}", "doc_id": "doc-1", "kb_id": "dataset-1",
@@ -278,9 +292,11 @@ def test_answer_only_search_uses_sixteen_named_rerank_without_changing_public_se
     calls = _wire_search(monkeypatch, lane_chunks, reranker)
 
     public = asyncio.run(service.search("tenant-1", "question", scope={"mode": "all"}))
-    assert len(public["chunks"]) == 5
-    assert public["caps"] == {"lane": 128, "candidates": 128, "per_document": 8, "results": 5}
+    assert len(public["chunks"]) == 1
+    assert len(public["chunks"][0]["supporting_chunks"]) == 4
+    assert public["caps"] == {"lane": 128, "candidates": 128, "per_document_first_pass": 8, "documents": 32}
     assert reranker.calls[-1][1] == [f"body {index}" for index in range(6)]
+    assert reranker.normalizations[-1] is False
     assert all("use_kg" not in request for _, request, _ in calls)
 
     reranker.calls.clear()
@@ -289,7 +305,47 @@ def test_answer_only_search_uses_sixteen_named_rerank_without_changing_public_se
     assert len(answer["chunks"]) == 6
     assert answer["caps"] == {"lane": 128, "candidates": 128, "per_document_first_pass": 8, "results": 16}
     assert reranker.calls[-1][1] == [f"Document: guide.pdf\nbody {index}" for index in range(6)]
+    assert reranker.normalizations[-1] is True
     assert all(request["use_kg"] is False for _, request, _ in calls)
+
+
+def test_search_returns_thirty_two_distinct_documents_from_forty_candidates(monkeypatch):
+    doc_ids = tuple(f"doc-{i:02}" for i in range(40))
+    chunks = [{"chunk_id": f"chunk-{i:02}", "doc_id": doc_id,
+               "kb_id": "dataset-1", "content": f"body {i}"}
+              for i, doc_id in enumerate(doc_ids)]
+    reranker = _Reranker([.9] * 40)
+    _wire_search(monkeypatch, {"bm25": chunks, "dense": []}, reranker)
+    catalog = service.Catalog(dataset_id="dataset-1", root_uri="source://docmind",
+                              source="database", version_id="version-1",
+                              folders={"root": doc_ids}, folder_tree=())
+    monkeypatch.setattr(service, "_load_catalog", lambda: catalog)
+    result = asyncio.run(service.search("tenant-1", "question", scope={"mode": "all"}))
+    assert result["candidate_count"] == 40
+    assert result["caps"]["documents"] == 32
+    assert [chunk["doc_id"] for chunk in result["chunks"]] == list(doc_ids[:32])
+
+
+def test_exact_candidate_recovery_is_scoped_and_stays_inside_c128(monkeypatch):
+    names = {"present": "찾기.pdf", "missing": "찾 기.docx", "outside": "찾기.pdf"}
+    scope = service.ResolvedScope("folders", ("folder",), ("present", "missing", "other"))
+    catalog = SimpleNamespace(document_names=names)
+    pool = [_candidate(str(i), "other") for i in range(127)] + [_candidate("last", "present")]
+    recovered = _candidate("recovered", "missing")
+    calls = []
+
+    async def scoped_lane(tenant, question, actual_catalog, actual_scope, *, candidate_mode):
+        assert (tenant, actual_catalog, actual_scope.document_ids, candidate_mode) == ("tenant", catalog, ("missing",), "dense")
+        calls.append(question)
+        return [recovered]
+
+    monkeypatch.setattr(service, "_lane_candidates", scoped_lane)
+    run = lambda q: asyncio.run(service._include_missing_title_candidates(pool, "tenant", q, catalog, scope))
+    assert run("찾기 절차") is pool
+    changed = run("찾기")
+    assert calls == ["찾기"]
+    assert len(changed) == 128 and pool[-1] in changed and recovered in changed
+    assert [c for c in changed if c.chunk["doc_id"] == "other"] == pool[:126]
 
 
 def test_empty_folder_skips_both_retrieval_and_reranker(monkeypatch):
@@ -301,6 +357,19 @@ def test_empty_folder_skips_both_retrieval_and_reranker(monkeypatch):
     assert result["chunks"] == []
     assert calls == []
     assert reranker.calls == []
+
+
+def test_single_document_reranks_thirty_candidates_and_finds_late_answer(monkeypatch):
+    chunks = [{"chunk_id": f"c-{i:02}", "doc_id": "doc-1", "kb_id": "dataset-1",
+               "content": f"section {i}", "docnm_kwd": "guide.pdf"} for i in range(30)]
+    reranker = _Reranker([0.01] * 29 + [0.95])
+    _wire_search(monkeypatch, {"bm25": chunks, "dense": []}, reranker)
+    result = asyncio.run(service.search("tenant-1", "question", scope={"mode": "documents", "document_ids": ["doc-1"]}))
+    assert result["candidate_count"] == 30
+    assert len(reranker.calls[0][1]) == 30
+    assert len(result["chunks"]) == 1
+    assert result["chunks"][0]["chunk_id"] == "c-29"
+    assert all(c["doc_id"] == "doc-1" for c in result["chunks"][0]["supporting_chunks"])
 
 
 def test_candidate_scope_escape_is_rejected_before_rerank(monkeypatch):
@@ -335,6 +404,7 @@ def test_required_reranker_version_rejects_v3(monkeypatch):
 
 def test_generationless_e2e_reranker_uses_process_only_jina_key(monkeypatch):
     captured = {}
+    monkeypatch.delenv("JINA_API_KEY_FILE", raising=False)
     monkeypatch.setenv("DOCMIND_GENERATIONLESS_E2E_ENABLED", "1")
     monkeypatch.setenv("JINA_API_KEY", "test-only-jina-key")
     monkeypatch.setattr(
