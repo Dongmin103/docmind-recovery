@@ -348,6 +348,41 @@ def test_exact_candidate_recovery_is_scoped_and_stays_inside_c128(monkeypatch):
     assert [c for c in changed if c.chunk["doc_id"] == "other"] == pool[:126]
 
 
+def test_partial_title_retrieves_topic_only_in_matching_authorized_documents(monkeypatch):
+    catalog = SimpleNamespace(document_names={"in": "생산 설계서.pdf", "out": "생산설계서.pdf", "other": "회의록.pdf"})
+    scope = service.ResolvedScope("folders", ("selected",), ("in", "other"))
+    existing = [_candidate(str(i), "other") for i in range(128)]
+    calls = []
+
+    async def lane(_tenant, question, _catalog, focused, *, candidate_mode):
+        assert focused.document_ids == ("in",) and focused.folder_ids == scope.folder_ids
+        assert question == "입고 수량 확인 절차는?"
+        calls.append(candidate_mode)
+        return [_candidate("found", "in")]
+
+    monkeypatch.setattr(service, "_lane_candidates", lane)
+    monkeypatch.setenv("DOCMIND_RERANK_ID", service._DEFAULT_RERANK_ID)
+    assert asyncio.run(service._include_missing_title_candidates(existing, "t", "생산설계서에서 입고 수량 확인 절차는?", catalog, scope)) is existing
+    monkeypatch.setenv("DOCMIND_RERANK_ID", service._KURE_RERANK_ID)
+    result = asyncio.run(service._include_missing_title_candidates(existing, "t", "생산설계서에서 입고 수량 확인 절차는?", catalog, scope))
+    assert calls == ["bm25", "dense"]
+    assert len(result) == 128 and result[:-1] == existing[:-1] and result[-1].chunk["chunk_id"] == "found"
+
+
+def test_sparse_body_search_fills_only_spare_slots_and_deduplicates(monkeypatch):
+    scope = service.ResolvedScope("documents", (), ("in",))
+    pool = [_candidate(str(i), "in") for i in range(126)]
+
+    async def lane(_tenant, _question, _catalog, actual_scope, *, candidate_mode, body_terms):
+        assert actual_scope is scope and candidate_mode == "bm25" and body_terms == "작업지시 품목 수량"
+        return [pool[0], _candidate("a", "in"), _candidate("b", "in"), _candidate("c", "in")]
+
+    monkeypatch.setattr(service, "_lane_candidates", lane)
+    monkeypatch.setenv("DOCMIND_RERANK_ID", service._KURE_RERANK_ID)
+    result = asyncio.run(service._include_missing_title_candidates(pool, "t", "작업지시를 품목과 수량은 어디에서 확인하나요?", SimpleNamespace(document_names={}), scope))
+    assert result[:126] == pool and [c.chunk["chunk_id"] for c in result[126:]] == ["a", "b"]
+
+
 def test_empty_folder_skips_both_retrieval_and_reranker(monkeypatch):
     reranker = _Reranker([])
     calls = _wire_search(monkeypatch, {"bm25": [], "dense": []}, reranker)

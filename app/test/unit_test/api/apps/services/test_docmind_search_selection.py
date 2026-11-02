@@ -40,6 +40,16 @@ def test_exact_filename_lookup_survives_body_only_low_score(monkeypatch):
     assert not selection.exact_title_match('설치 방법 가격', '설치 방법.pdf')
 
 
+def test_extra_recall_does_not_add_documents_when_all_results_are_weak():
+    extra, _ = candidate('extra', 'new evidence', .49)
+    extra.supplemental = True
+    original = candidate('existing', 'original evidence', .32)
+    groups, relevance = selection.select_document_groups([(extra, .49), original], 'query')
+    assert [g[0][0].chunk['doc_id'] for g in groups] == ['existing'] and relevance['status'] == 'low'
+    groups, relevance = selection.select_document_groups([(extra, .50), original], 'query')
+    assert [g[0][0].chunk['doc_id'] for g in groups] == ['extra', 'existing'] and relevance['status'] == 'matched'
+
+
 def test_thirty_two_documents_and_five_distinct_evidence_each(monkeypatch):
     monkeypatch.setattr(selection, 'MIN_RELEVANCE', 0)
     scored = [candidate(str(d), f'evidence {i}', 1 - d * .01 - i * .0001)

@@ -6,13 +6,13 @@ import math
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from api.apps.services import dataset_api_service, docmind_source_projection_service
-from api.apps.services.docmind_search_selection import DOCUMENT_LIMIT, exact_title_match, refill_candidates, select_document_groups
+from api.apps.services.docmind_search_selection import DOCUMENT_LIMIT, exact_title_match, korean_body_terms, refill_candidates, select_document_groups, title_topic
 from api.db.joint_services.tenant_model_service import get_model_config_from_provider_instance
 from api.db.services import docmind_catalog_service
 from api.db.services.docmind_document_path_service import document_relative_paths
@@ -72,6 +72,7 @@ class Candidate:
     rrf_score: float = 0.0
     bm25_rank: int | None = None
     dense_rank: int | None = None
+    supplemental: bool = False
 
 
 @dataclass(frozen=True)
@@ -428,6 +429,7 @@ async def _lane_candidates(
     *,
     candidate_mode: str,
     answer_mode: bool = False,
+    body_terms: str = "",
 ) -> list[Candidate]:
     request = {
         "dataset_ids": [catalog.dataset_id],
@@ -448,6 +450,7 @@ async def _lane_candidates(
         tenant_id,
         request,
         candidate_mode=candidate_mode,
+        **({"body_terms": body_terms} if body_terms else {}),
     )
     if not success:
         raise RuntimeError(f"DOCMIND_{candidate_mode.upper()}_RECALL_FAILED: {result}")
@@ -543,11 +546,47 @@ def _rrf_candidates(
     return result
 
 
+def _with_extra_candidates(candidates: list[Candidate], extra: list[Candidate], slots: int) -> list[Candidate]:
+    def chunk_id(candidate: Candidate) -> str:
+        return str(candidate.chunk.get("chunk_id") or candidate.chunk["id"])
+
+    present = {chunk_id(candidate) for candidate in candidates}
+    additions = [candidate for candidate in extra if chunk_id(candidate) not in present][:slots]
+    return candidates[:_RERANK_CANDIDATE_LIMIT - len(additions)] + [replace(c, supplemental=True) for c in additions]
+
+
+async def _fill_body_slots(
+    candidates: list[Candidate], tenant_id: str, question: str, catalog: Catalog, scope: ResolvedScope,
+) -> list[Candidate]:
+    slots = min(12, _RERANK_CANDIDATE_LIMIT - len(candidates))
+    terms = korean_body_terms(question)
+    if slots <= 0 or not terms:
+        return candidates
+    extra = await _lane_candidates(tenant_id, question, catalog, scope, candidate_mode="bm25", body_terms=terms)
+    return _with_extra_candidates(candidates, extra, slots)
+
+
 async def _include_missing_title_candidates(
     candidates: list[Candidate], tenant_id: str, question: str, catalog: Catalog, scope: ResolvedScope,
 ) -> list[Candidate]:
     names = catalog.document_names or {}
     exact = {doc for doc in scope.document_ids if exact_title_match(question, names.get(doc, ""))}
+    if not exact:
+        if os.environ.get("DOCMIND_RERANK_ID", _DEFAULT_RERANK_ID) != _KURE_RERANK_ID:
+            return candidates
+        reference = title_topic(question, names, scope.document_ids)
+        if not reference:
+            if sum(c.bm25_rank is not None for c in candidates) > 8:
+                return candidates
+            return await _fill_body_slots(candidates, tenant_id, question, catalog, scope)
+        topic, documents = reference
+        focused_scope = ResolvedScope(scope.mode, scope.folder_ids, documents)
+        bm25, dense = await asyncio.gather(*(
+            _lane_candidates(tenant_id, topic, catalog, focused_scope, candidate_mode=mode) for mode in ("bm25", "dense")
+        ))
+        focused = _rrf_candidates(bm25, dense, refill=True)
+        expanded = _with_extra_candidates(candidates, focused, 24)
+        return await _fill_body_slots(expanded, tenant_id, topic, catalog, focused_scope)
     present = {c.chunk["doc_id"] for c in candidates} & exact
     missing = tuple(sorted(exact - present))
     if not missing or len(present) >= DOCUMENT_LIMIT:

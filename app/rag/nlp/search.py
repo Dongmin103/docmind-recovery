@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from rag.nlp import rag_tokenizer, query
 import numpy as np
-from common.doc_store.doc_store_base import MatchDenseExpr, FusionExpr, OrderByExpr, DocStoreConnection
+from common.doc_store.doc_store_base import MatchDenseExpr, MatchTextExpr, FusionExpr, OrderByExpr, DocStoreConnection
 from common.string_utils import remove_redundant_spaces
 from common.float_utils import get_float
 from common.constants import PAGERANK_FLD, TAG_FLD
@@ -228,7 +228,11 @@ class Dealer:
             if candidate_mode == "bm25":
                 from rag.nlp.docmind_lexical import supplement_expression
 
-                matchText = supplement_expression(matchText, qst)
+                if terms := req.get("body_terms"):
+                    clause = {"match": {"lexical_content_ko_ltks": {"query": terms}}}
+                    matchText = MatchTextExpr(["lexical_content_ko_ltks"], "", 128, {"lexical_alternatives": [clause]})
+                else:
+                    matchText = supplement_expression(matchText, qst)
             if candidate_mode == "bm25" and not matchText:
                 # A non-empty question which produces no lexical expression
                 # is an empty BM25 lane, not permission to run a filter-only
@@ -657,6 +661,7 @@ class Dealer:
         *,
         candidate_mode: str = "hybrid",
         candidate_vector_similarity_weight: float = 0.95,
+        body_terms: str = "",
     ):
         """
         Pagination is neither efficient nor reliable for this retrieval when rerank is enabled because the system must:
@@ -706,6 +711,7 @@ class Dealer:
             "knn_num_candidates": knn_num_candidates,
             "candidate_mode": candidate_mode,
             "candidate_vector_similarity_weight": candidate_vector_similarity_weight,
+            "body_terms": body_terms,
         }
         req["must_not"] = must_not or {"exists": "compile_kwd"}
         logging.debug(f"[Search] page={page}, page_size={page_size}, candidate_window={candidate_window}")

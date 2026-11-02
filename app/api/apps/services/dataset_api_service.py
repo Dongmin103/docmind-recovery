@@ -1014,7 +1014,7 @@ def check_embedding(dataset_id: str, tenant_id: str, req: dict):
     }
 
 
-async def search_datasets(tenant_id: str, req: dict, *, candidate_mode: str = "hybrid"):
+async def search_datasets(tenant_id: str, req: dict, *, candidate_mode: str = "hybrid", body_terms: str = ""):
     """
     Search (retrieval test) across multiple datasets.
 
@@ -1155,6 +1155,7 @@ async def search_datasets(tenant_id: str, req: dict, *, candidate_mode: str = "h
         rerank_candidates_count=rerank_candidates_count,
         candidate_mode=candidate_mode,
         candidate_vector_similarity_weight=candidate_vector_similarity_weight,
+        **({"body_terms": body_terms} if body_terms else {}),
     )
 
     if candidate_mode == "hybrid":
