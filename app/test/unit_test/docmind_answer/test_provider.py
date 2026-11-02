@@ -303,6 +303,24 @@ def test_multiple_declared_references_are_validated_as_a_set(service):
     assert (result.status, result.answer, result.references) == ("answered", "합성 사실 [1] [2] [1]", (2, 1))
 
 
+def test_reviewed_draft_completes_a_missing_index_entry_before_review(service):
+    config = service.AnswerConfig("http://local", "synthetic", 8192, 2048, "openai", pipeline="reviewed_v1")
+    answer = "첫 사실 [6] [7]. 다음 사실 [11]."
+    content = generated("partial", answer, [6, 7])
+    result = call(service, config, lambda _: httpx.Response(200, json=completion(content)), citation_count=11)
+    assert (result.status, result.answer, result.references) == ("partial", answer, (6, 7, 11))
+    with pytest.raises(service.AnswerError, match="CITATIONS_INVALID"):
+        service._validate_generated_answer(content, 11)  # Final review is strict.
+
+
+@pytest.mark.parametrize(("inline", "listed"), [
+    ("[1] [3]", [1]), ("[1]", [1, 2]), ("[1] [2]", [1, 1]), ("[1] [2]", []),
+])
+def test_reviewed_draft_rejects_invalid_or_ambiguous_references(service, inline, listed):
+    with pytest.raises(service.AnswerError, match="CITATIONS_INVALID"):
+        service._validate_generated_answer(generated(answer=inline, citations=listed), 2, complete_draft_citations=True)
+
+
 @pytest.mark.parametrize("provider", ["ollama", "openrouter", "openai"])
 def test_deeply_nested_json_is_a_sanitized_format_error(service, provider):
     config = service.AnswerConfig("http://local:11434", "synthetic", 8192, 1024, provider)

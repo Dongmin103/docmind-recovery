@@ -194,7 +194,7 @@ def _invalid_json_constant(_value):
     raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
 
 
-def _validate_generated_answer(content, citation_count):
+def _validate_generated_answer(content, citation_count, *, complete_draft_citations=False):
     result = json.loads(content, object_pairs_hook=_unique_object, parse_constant=_invalid_json_constant)
     if not isinstance(result, dict) or set(result) != {"status", "answer", "citations"}:
         raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
@@ -217,8 +217,14 @@ def _validate_generated_answer(content, citation_count):
     if not answer_text:
         raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
     inline_references = {int(value) for value in re.findall(r"\[(\d+)\]", answer_text)}
-    if not references or len(set(references)) != len(references) or any(not 1 <= value <= citation_count for value in references) or inline_references != set(references):
+    listed = set(references)
+    if not references or len(listed) != len(references) or not listed <= inline_references or any(not 1 <= value <= citation_count for value in inline_references):
         raise AnswerError("DOCMIND_LLM_CITATIONS_INVALID")
+    if missing := inline_references - listed:
+        if not complete_draft_citations:
+            raise AnswerError("DOCMIND_LLM_CITATIONS_INVALID")
+        # Only complete the index of a draft that will still undergo evidence review.
+        references.extend(sorted(missing))
     return _GeneratedAnswer(status, answer_text, tuple(references))
 
 
@@ -342,7 +348,7 @@ async def generate(config, messages, citation_count, *, client=None, timeout_sec
         content = message.get("content", "")
         if not isinstance(content, str) or not content.strip():
             raise AnswerError("DOCMIND_LLM_RESPONSE_INVALID")
-        return _validate_generated_answer(content, citation_count)
+        return _validate_generated_answer(content, citation_count, complete_draft_citations=config.pipeline == "reviewed_v1")
 
     try:
         async with asyncio.timeout(timeout_seconds):
