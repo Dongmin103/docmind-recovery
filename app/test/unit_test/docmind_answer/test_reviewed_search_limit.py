@@ -21,11 +21,13 @@ def staged_search():
     chunk = lambda i: {"chunk_id": f"c{i}", "doc_id": "doc", "content_with_weight": f"synthetic {i}", "docnm_kwd": "synthetic"}
     candidates = [types.SimpleNamespace(chunk=chunk(i), rerank_text=f"synthetic {i}", folder_id="folder",
                                         rrf_score=1 / (i + 1), bm25_rank=i, dense_rank=i) for i in range(20)]
-    catalog = types.SimpleNamespace(dataset_id="kb", source="sources", document_paths={},
+    catalog = types.SimpleNamespace(dataset_id="kb", source="sources", document_paths={}, document_names={},
                                     document_version_ids={"doc": "v"}, document_chunk_set_ids={"doc": "set"})
     scope = types.SimpleNamespace(document_ids=["doc"], folder_ids=["folder"], mode="all")
     async def lane(*_args, **_kwargs):
         return candidates
+    async def include_titles(existing, *_args):
+        return existing
     class Reranker:
         def similarity(self, question, inputs, *, normalize=True):
             return [20 - i for i in range(len(inputs))], 1
@@ -34,6 +36,7 @@ def staged_search():
     selection_spec.loader.exec_module(selection)
     env = {
         "select_document_groups": selection.select_document_groups,
+        "_include_missing_title_candidates": include_titles,
         "refill_candidates": selection.refill_candidates,
         "Any": Any, "_FINAL_RESULT_LIMIT": 32, "_ANSWER_RESULT_LIMIT": 16, "_LANE_LIMIT": 128,
         "_RERANK_CANDIDATE_LIMIT": 128, "_DOCUMENT_CANDIDATE_LIMIT": 8,

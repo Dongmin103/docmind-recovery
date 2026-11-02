@@ -326,6 +326,28 @@ def test_search_returns_thirty_two_distinct_documents_from_forty_candidates(monk
     assert [chunk["doc_id"] for chunk in result["chunks"]] == list(doc_ids[:32])
 
 
+def test_exact_candidate_recovery_is_scoped_and_stays_inside_c128(monkeypatch):
+    names = {"present": "찾기.pdf", "missing": "찾 기.docx", "outside": "찾기.pdf"}
+    scope = service.ResolvedScope("folders", ("folder",), ("present", "missing", "other"))
+    catalog = SimpleNamespace(document_names=names)
+    pool = [_candidate(str(i), "other") for i in range(127)] + [_candidate("last", "present")]
+    recovered = _candidate("recovered", "missing")
+    calls = []
+
+    async def scoped_lane(tenant, question, actual_catalog, actual_scope, *, candidate_mode):
+        assert (tenant, actual_catalog, actual_scope.document_ids, candidate_mode) == ("tenant", catalog, ("missing",), "dense")
+        calls.append(question)
+        return [recovered]
+
+    monkeypatch.setattr(service, "_lane_candidates", scoped_lane)
+    run = lambda q: asyncio.run(service._include_missing_title_candidates(pool, "tenant", q, catalog, scope))
+    assert run("찾기 절차") is pool
+    changed = run("찾기")
+    assert calls == ["찾기"]
+    assert len(changed) == 128 and pool[-1] in changed and recovered in changed
+    assert [c for c in changed if c.chunk["doc_id"] == "other"] == pool[:126]
+
+
 def test_empty_folder_skips_both_retrieval_and_reranker(monkeypatch):
     reranker = _Reranker([])
     calls = _wire_search(monkeypatch, {"bm25": [], "dense": []}, reranker)

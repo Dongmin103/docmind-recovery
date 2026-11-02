@@ -12,7 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from api.apps.services import dataset_api_service, docmind_source_projection_service
-from api.apps.services.docmind_search_selection import DOCUMENT_LIMIT, refill_candidates, select_document_groups
+from api.apps.services.docmind_search_selection import DOCUMENT_LIMIT, exact_title_match, refill_candidates, select_document_groups
 from api.db.joint_services.tenant_model_service import get_model_config_from_provider_instance
 from api.db.services import docmind_catalog_service
 from api.db.services.docmind_document_path_service import document_relative_paths
@@ -542,6 +542,36 @@ def _rrf_candidates(
     return result
 
 
+async def _include_missing_title_candidates(
+    candidates: list[Candidate], tenant_id: str, question: str, catalog: Catalog, scope: ResolvedScope,
+) -> list[Candidate]:
+    names = catalog.document_names or {}
+    exact = {doc for doc in scope.document_ids if exact_title_match(question, names.get(doc, ""))}
+    present = {c.chunk["doc_id"] for c in candidates} & exact
+    missing = tuple(sorted(exact - present))
+    if not missing or len(present) >= DOCUMENT_LIMIT:
+        return candidates
+
+    # Only fetch real, searchable chunks from matching documents in the authorized scope.
+    focused_scope = ResolvedScope(scope.mode, scope.folder_ids, missing)
+    focused = await _lane_candidates(tenant_id, question, catalog, focused_scope, candidate_mode="dense")
+    extra: list[Candidate] = []
+    for candidate in focused:
+        doc_id = candidate.chunk["doc_id"]
+        if doc_id not in present:
+            extra.append(candidate)
+            present.add(doc_id)
+            if len(present) == DOCUMENT_LIMIT:
+                break
+    if not extra:
+        return candidates
+    # Reserve one representative per exact document before spending the remaining C128 slots.
+    reserved = {c.chunk["doc_id"]: c for c in reversed(candidates) if c.chunk["doc_id"] in exact}
+    keep = {c.chunk.get("chunk_id") or c.chunk.get("id") for c in reserved.values()}
+    ordinary = [c for c in candidates if (c.chunk.get("chunk_id") or c.chunk.get("id")) not in keep]
+    return [*reserved.values(), *extra, *ordinary][:_RERANK_CANDIDATE_LIMIT]
+
+
 def _rerank_model(catalog: Catalog) -> LLMBundle:
     exists, knowledgebase = KnowledgebaseService.get_by_id(catalog.dataset_id)
     if not exists:
@@ -641,20 +671,20 @@ async def search(
 
     recall_started_at = time.monotonic()
     try:
-        bm25_candidates, dense_candidates = await asyncio.wait_for(
-            asyncio.gather(
+        async with asyncio.timeout(_RECALL_TIMEOUT_SECONDS):
+            bm25_candidates, dense_candidates = await asyncio.gather(
                 _lane_candidates(tenant_id, question, catalog, resolved_scope, candidate_mode="bm25", answer_mode=answer_mode),
                 _lane_candidates(tenant_id, question, catalog, resolved_scope, candidate_mode="dense", answer_mode=answer_mode),
-            ),
-            timeout=_RECALL_TIMEOUT_SECONDS,
-        )
+            )
+            candidates = _rrf_candidates(
+                bm25_candidates, dense_candidates,
+                refill=refill_candidates(len(resolved_scope.document_ids), answer_mode=answer_mode),
+            )
+            if not answer_mode:
+                candidates = await _include_missing_title_candidates(candidates, tenant_id, question, catalog, resolved_scope)
     except TimeoutError as error:
         raise RuntimeError("DOCMIND_RECALL_TIMEOUT") from error
     recalled_at = time.monotonic()
-    candidates = _rrf_candidates(
-        bm25_candidates, dense_candidates,
-        refill=refill_candidates(len(resolved_scope.document_ids), answer_mode=answer_mode),
-    )
     if not candidates:
         result = _empty_result(catalog, resolved_scope, trace_id, started_at, answer_mode=answer_mode)
         result["lane_counts"] = {"bm25": len(bm25_candidates), "dense": len(dense_candidates)}
@@ -699,7 +729,7 @@ async def search(
     )
     groups, relevance = (
         ([[item] for item in scored[:_ANSWER_RESULT_LIMIT]], {})
-        if answer_mode else select_document_groups(scored, question)
+        if answer_mode else select_document_groups(scored, question, document_names=catalog.document_names)
     )
     all_evidence: list[dict[str, Any]] = []
     ranked_chunks: list[dict[str, Any]] = []

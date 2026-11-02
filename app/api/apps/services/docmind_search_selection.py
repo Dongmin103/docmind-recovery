@@ -19,16 +19,15 @@ def refill_candidates(document_count: int, *, answer_mode: bool = False) -> bool
 
 def exact_title_match(question: str, name: str) -> bool:
     def normalized(value: str) -> str:
-        value = unicodedata.normalize("NFKC", value).casefold().strip()
-        value = re.sub(r"\.(?:pdf|docx?|pptx?|xlsx?|hwpx?|txt|md)$", "", value)
-        return re.sub(r"\s+", "", value)
+        value = re.sub(r"\s+", "", unicodedata.normalize("NFKC", value).casefold())
+        return re.sub(r"\.(?:pdf|docx?|pptx?|xlsx?|hwpx?|txt|md|csv|html?)$", "", value)
 
     query = normalized(question)
-    return len(query) >= 2 and query == normalized(name)
+    return bool(query) and query == normalized(name)
 
 
 def select_document_groups(
-    scored: list[tuple[Any, float]], question: str,
+    scored: list[tuple[Any, float]], question: str, *, document_names: dict[str, str] | None = None,
 ) -> tuple[list[list[tuple[Any, float]]], dict[str, Any]]:
     """Input is already sorted by Jina score, RRF, then chunk ID.
 
@@ -38,17 +37,19 @@ def select_document_groups(
     """
     groups: dict[str, list[tuple[Any, float]]] = {}
     seen: dict[str, set[str]] = {}
+    exact: set[str] = set()
+    names = document_names or {}
     filtered = 0
     for candidate, score in scored:
         chunk = candidate.chunk
-        title_match = exact_title_match(question, str(chunk.get("docnm_kwd") or chunk.get("doc_name") or ""))
+        doc_id = chunk["doc_id"]
+        title_match = exact_title_match(question, str(names.get(doc_id) or chunk.get("docnm_kwd") or chunk.get("doc_name") or ""))
+        if title_match:
+            exact.add(doc_id)
         if score < MIN_RELEVANCE and not title_match:
             filtered += 1
             continue
-        doc_id = chunk["doc_id"]
         if doc_id not in groups:
-            if len(groups) >= DOCUMENT_LIMIT:
-                continue
             groups[doc_id] = []
             seen[doc_id] = set()
         content = re.sub(r"\s+", " ", str(chunk.get("content_with_weight") or candidate.rerank_text)).strip()
@@ -56,10 +57,8 @@ def select_document_groups(
             continue
         seen[doc_id].add(content)
         groups[doc_id].append((candidate, score))
-    selected = list(groups.values())
-    title_lookup = any(
-        exact_title_match(question, str(group[0][0].chunk.get("docnm_kwd") or group[0][0].chunk.get("doc_name") or ""))
-        for group in selected
-    )
-    status = "no_match" if not selected else "low" if selected[0][0][1] < LOW_RELEVANCE and not title_lookup else "matched"
+    # Stable partition before the cap; retain original document and evidence order within each tier.
+    ordered = sorted(groups, key=lambda doc_id: doc_id not in exact)
+    selected = [groups[doc_id] for doc_id in ordered[:DOCUMENT_LIMIT]]
+    status = "no_match" if not selected else "low" if selected[0][0][1] < LOW_RELEVANCE and not exact else "matched"
     return selected, {"status": status, "filtered_chunks": filtered}

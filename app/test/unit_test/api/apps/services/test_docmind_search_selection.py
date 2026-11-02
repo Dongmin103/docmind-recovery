@@ -49,6 +49,27 @@ def test_thirty_two_documents_and_five_distinct_evidence_each(monkeypatch):
     assert [g[0][0].chunk['doc_id'] for g in groups] == [str(d) for d in range(32)]
 
 
+def test_exact_titles_precede_cap_and_keep_ties_and_evidence_in_score_order():
+    scored = [candidate(str(i), str(i), .99 - i * .001, f'other {i}.pdf') for i in range(33)]
+    scored += [candidate('b', 'best', .20, '설 치.방법.pdf'), candidate('a', 'first', .15, '설치.방법.docx'),
+               candidate('b', 'second', .10, '설 치.방법.pdf')]
+    groups, relevance = selection.select_document_groups(scored, '설치.방 법.PDF')
+    assert [g[0][0].chunk['doc_id'] for g in groups] == ['b', 'a', *map(str, range(30))]
+    assert [c.chunk['chunk_id'] for c, _ in groups[0]] == ['best', 'second']
+    assert groups[0][0][1] == .20 and relevance['status'] == 'matched'
+    for question in ['설치', '설치.방법 알려줘', '자료에 없는 질문']:
+        ordinary, _ = selection.select_document_groups(scored, question)
+        assert [g[0][0].chunk['doc_id'] for g in ordinary] == list(map(str, range(32)))
+    assert selection.exact_title_match(' Q ', 'Q.pdf')
+    assert not selection.exact_title_match(' .pdf ', '.pdf')
+
+
+def test_authoritative_catalog_name_takes_precedence_over_chunk_label():
+    scored = [candidate('old', 'old', .9, 'Exact.pdf'), candidate('current', 'new', .1, 'stale.pdf')]
+    groups, _ = selection.select_document_groups(scored, 'exact', document_names={'old':'renamed.pdf','current':'Exact.pdf'})
+    assert [g[0][0].chunk['doc_id'] for g in groups] == ['current', 'old']
+
+
 def test_dedup_uses_full_content_not_only_identical_prefix(monkeypatch):
     monkeypatch.setattr(selection, 'MIN_RELEVANCE', 0)
     prefix = 'x' * 2400
