@@ -15,6 +15,7 @@
 #
 import logging
 import math
+import time
 from abc import ABC
 from typing import Tuple, List
 
@@ -133,3 +134,57 @@ class JinaRerank(Base):
             seen.add(index)
             rank[index] = relevance_score
         return rank, total_token_count_from_response(res)
+
+
+class KURERerank(Base):
+    """Score all candidates, preserving absolute scores across API batches."""
+
+    MODEL = "kure-reranker-nano-20261016"
+    URL = "https://kure.kullm.ai/api/v1/rerank"
+    BATCH_SIZE = 64
+    DEADLINE_SECONDS = 45
+
+    def __init__(self, key, model_name=MODEL, base_url=None, **kwargs):
+        if model_name != self.MODEL or (base_url and base_url.rstrip("/") != self.URL):
+            raise ValueError("KURE requires its pinned snapshot and official rerank endpoint")
+        if not key:
+            raise ValueError("Missing KURE API credential")
+        self.headers = {"Authorization": f"Bearer {key}", "User-Agent": "DocMind-KURE/1.0", "Accept": "application/json"}
+
+    def _compute_rank(self, query, texts):
+        deadline = time.monotonic() + self.DEADLINE_SECONDS
+        rank = np.zeros(len(texts), dtype=float)
+        tokens = 0
+        for offset in range(0, len(texts), self.BATCH_SIZE):
+            batch = texts[offset:offset + self.BATCH_SIZE]
+            data = {"model": self.MODEL, "query": query, "documents": batch, "top_n": len(batch), "return_documents": False}
+            for attempt in range(2):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("KURE reranking deadline exceeded")
+                resp = requests.post(self.URL, headers=self.headers, json=data, timeout=min(30, remaining), allow_redirects=False)
+                if resp.status_code == 200:
+                    break
+                delay = resp.headers.get("Retry-After", "")
+                if attempt == 0 and resp.status_code in (429, 503) and delay.isdigit() and int(delay) + 1 < deadline - time.monotonic():
+                    time.sleep(max(1, int(delay)))
+                    continue
+                raise RuntimeError(f"KURE rerank HTTP {resp.status_code}")
+            payload = resp.json()
+            results = payload.get("results")
+            if payload.get("model") != self.MODEL or not isinstance(results, list) or len(results) != len(batch):
+                raise ValueError("Unexpected KURE model or result count")
+            seen = set()
+            for item in results:
+                index, score = item["index"], item["relevance_score"]
+                if type(index) is not int or not 0 <= index < len(batch) or index in seen:
+                    raise ValueError("Invalid KURE result index")
+                if type(score) not in (int, float) or not 0 <= score <= 1:
+                    raise ValueError("Invalid KURE relevance score")
+                rank[offset + index] = score
+                seen.add(index)
+            usage = payload.get("usage", {}).get("total_tokens")
+            if type(usage) is not int or usage < 0:
+                raise ValueError("Invalid KURE token count")
+            tokens += usage
+        return rank, tokens

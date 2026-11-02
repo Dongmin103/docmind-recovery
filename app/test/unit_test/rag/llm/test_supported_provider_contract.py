@@ -8,7 +8,7 @@ def test_only_supported_provider_transport_registrations():
     assert set(llm.ChatModel) == {'OpenAI', 'OpenAI-API-Compatible'}
     assert set(llm.EmbeddingModel) == {'OpenAI', 'OpenAI-API-Compatible'}
     assert set(llm.CvModel) == {'OpenAI', 'OpenAI-API-Compatible'}
-    assert set(llm.RerankModel) == {'Jina'}
+    assert set(llm.RerankModel) == {'Jina', 'KURE'}
     assert set(llm.ModelMeta) == {'OpenAI-API-Compatible'}
 
 

@@ -36,6 +36,7 @@ _DENSE_K = 2048
 _DENSE_NUM_CANDIDATES = 4096
 _DENSE_SIMILARITY = 0.0
 _DEFAULT_RERANK_ID = "jina-reranker-v3.5@jina@Jina"
+_KURE_RERANK_ID = "kure-reranker-nano-20261016@kure@KURE"
 _RECALL_TIMEOUT_SECONDS = 60
 _RERANK_TIMEOUT_SECONDS = 45
 _HEX32_PATTERN = re.compile(r"^[a-f0-9]{32}$")
@@ -371,8 +372,8 @@ def _bounded_text(value: object) -> str:
     return str(value or "")[:_RERANK_TEXT_LIMIT]
 
 
-def _answer_rerank_input(candidate: Candidate) -> str:
-    name = str(candidate.chunk.get("docnm_kwd") or "")[:_RERANK_DOCUMENT_NAME_LIMIT]
+def _named_rerank_input(candidate: Candidate, current_name: str | None = None) -> str:
+    name = str(current_name or candidate.chunk.get("docnm_kwd") or "")[:_RERANK_DOCUMENT_NAME_LIMIT]
     return f"Document: {name}\n{candidate.rerank_text}" if name else candidate.rerank_text
 
 
@@ -577,10 +578,18 @@ def _rerank_model(catalog: Catalog) -> LLMBundle:
     if not exists:
         raise RuntimeError("DocMind catalog dataset is unavailable")
     rerank_id = os.environ.get("DOCMIND_RERANK_ID", _DEFAULT_RERANK_ID)
-    if rerank_id.split("@", 1)[0] != "jina-reranker-v3.5":
-        raise RuntimeError("DOCMIND_RERANK_MODEL_INVALID: jina-reranker-v3.5 is required")
+    if rerank_id == _KURE_RERANK_ID:
+        key = _rerank_api_key("KURE")
+        if not key or not key.startswith("kure-") or any(c.isspace() for c in key):
+            raise RuntimeError("DOCMIND_RERANK_CREDENTIAL_UNAVAILABLE")
+        return LLMBundle(knowledgebase.tenant_id, {
+            "llm_factory": "KURE", "llm_name": rerank_id.split("@", 1)[0], "model_type": LLMType.RERANK.value,
+            "api_base": "https://kure.kullm.ai/api/v1/rerank", "api_key": key, "max_tokens": 8192,
+        })
+    if rerank_id != _DEFAULT_RERANK_ID:
+        raise RuntimeError(f"DOCMIND_RERANK_MODEL_INVALID: expected {_KURE_RERANK_ID} or {_DEFAULT_RERANK_ID}")
     if os.environ.get("DOCMIND_GENERATIONLESS_E2E_ENABLED") == "1":
-        api_key = _generationless_jina_api_key()
+        api_key = _rerank_api_key("JINA")
         if len(api_key) < 12 or any(marker in api_key for marker in ("CHANGE_ME", "PLACEHOLDER", "GENERATED_LOCALLY")):
             raise RuntimeError("DOCMIND_RERANK_CREDENTIAL_UNAVAILABLE")
         # The isolated generationless overlay keeps the credential process-only:
@@ -598,10 +607,10 @@ def _rerank_model(catalog: Catalog) -> LLMBundle:
     return LLMBundle(knowledgebase.tenant_id, model_config)
 
 
-def _generationless_jina_api_key() -> str:
-    secret_file = os.environ.get("JINA_API_KEY_FILE", "").strip()
+def _rerank_api_key(provider: str) -> str:
+    secret_file = os.environ.get(f"{provider}_API_KEY_FILE", "").strip()
     if not secret_file:
-        return os.environ.get("JINA_API_KEY", "")
+        return os.environ.get(f"{provider}_API_KEY", "")
 
     try:
         path = Path(secret_file)
@@ -699,9 +708,13 @@ async def search(
         key=lambda candidate: str(candidate.chunk.get("chunk_id") or candidate.chunk.get("id")),
     )
     reranker = _rerank_model(catalog)
+    kure = getattr(reranker, "model_config", {}).get("llm_factory") == "KURE"
+    names = catalog.document_names or {}
+    texts = [_named_rerank_input(c, names.get(c.chunk["doc_id"]) if kure else None) if kure or answer_mode
+             else c.rerank_text for c in rerank_candidates]
     try:
         scores, used_tokens = await asyncio.wait_for(
-            asyncio.to_thread(reranker.similarity, question, [_answer_rerank_input(candidate) for candidate in rerank_candidates] if answer_mode else [candidate.rerank_text for candidate in rerank_candidates], normalize=answer_mode),
+            asyncio.to_thread(reranker.similarity, question, texts, normalize=answer_mode),
             timeout=_RERANK_TIMEOUT_SECONDS,
         )
     except TimeoutError as error:

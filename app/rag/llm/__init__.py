@@ -29,19 +29,20 @@ LITELLM_PROVIDER_PREFIX = {SupportedLiteLLMProvider.OpenAI: "openai/"}
 from .chat_model import LiteLLMBase, OpenAI_APIChat
 from .cv_model import GptV4, OpenAI_APICV
 from .embedding_model import OpenAIEmbed, OpenAI_APIEmbed
-from .rerank_model import JinaRerank
+from .rerank_model import JinaRerank, KURERerank
 from .model_meta import OpenAIAPICompatible
 
 ChatModel = {"OpenAI": LiteLLMBase, "OpenAI-API-Compatible": OpenAI_APIChat}
 CvModel = {"OpenAI": GptV4, "OpenAI-API-Compatible": OpenAI_APICV}
 EmbeddingModel = {"OpenAI": OpenAIEmbed, "OpenAI-API-Compatible": OpenAI_APIEmbed}
-RerankModel = {"Jina": JinaRerank}
+RerankModel = {"Jina": JinaRerank, "KURE": KURERerank}
 ModelMeta = {"OpenAI-API-Compatible": OpenAIAPICompatible}
 
 SUPPORTED_MODEL_TYPES = {
     "OpenAI": frozenset({"chat", "embedding", "vision"}),
     "OpenAI-API-Compatible": frozenset({"chat", "embedding", "vision"}),
     "Jina": frozenset({"rerank"}),
+    "KURE": frozenset({"rerank"}),
 }
 
 

@@ -1,0 +1,13 @@
+# Opt-in for an existing non-commercial research installation; use an image with the KURE adapter.
+services:
+  ragflow-cpu:
+    environment:
+      DOCMIND_RERANK_ID: kure-reranker-nano-20261016@kure@KURE
+      KURE_API_KEY_FILE: /run/secrets/kure-research-key
+    volumes:
+      - type: bind
+        source: ${DOCMIND_KURE_SECRET_FILE:?Set the private host file path for this research installation}
+        target: /run/secrets/kure-research-key
+        read_only: true
+        bind:
+          create_host_path: false

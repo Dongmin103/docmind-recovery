@@ -402,6 +402,37 @@ def test_required_reranker_version_rejects_v3(monkeypatch):
         service._rerank_model(_catalog())
 
 
+def test_kure_profile_uses_its_own_secret_and_never_falls_back(monkeypatch, tmp_path):
+    captured = {}
+    keyfile = tmp_path / "key"
+    keyfile.write_text("kure-example-test-key")
+    monkeypatch.setenv("DOCMIND_RERANK_ID", service._KURE_RERANK_ID)
+    monkeypatch.setenv("KURE_API_KEY_FILE", str(keyfile))
+    monkeypatch.setenv("KURE_API_KEY", "kure-ignore-environment")
+    monkeypatch.setattr(service.KnowledgebaseService, "get_by_id", lambda _id: (True, SimpleNamespace(tenant_id="owner")))
+    monkeypatch.setattr(service, "LLMBundle", lambda tenant, conf: captured.update(conf) or "kure")
+    assert service._rerank_model(_catalog()) == "kure"
+    assert (captured["llm_factory"], captured["llm_name"], captured["api_key"]) == ("KURE", "kure-reranker-nano-20261016", "kure-example-test-key")
+    keyfile.unlink()
+    with pytest.raises(RuntimeError, match="CREDENTIAL_UNAVAILABLE"):
+        service._rerank_model(_catalog())
+
+
+def test_kure_search_sends_current_filename_outside_body_prefix(monkeypatch):
+    from dataclasses import replace
+
+    chunks = [{"chunk_id": "c", "doc_id": "doc-1", "kb_id": "dataset-1",
+               "docnm_kwd": "old.pdf", "content": "가" * 2500}]
+    reranker = _Reranker([.8])
+    reranker.model_config = {"llm_factory": "KURE"}
+    _wire_search(monkeypatch, {"bm25": chunks, "dense": []}, reranker)
+    catalog = replace(_catalog(), document_names={"doc-1": "현재.pdf"})
+    monkeypatch.setattr(service, "_load_catalog", lambda: catalog)
+    asyncio.run(service.search("tenant-1", "업무 질문", scope={"mode": "all"}))
+    assert reranker.calls[0][1] == ["Document: 현재.pdf\n" + "가" * 2400]
+    assert reranker.normalizations == [False]
+
+
 def test_generationless_e2e_reranker_uses_process_only_jina_key(monkeypatch):
     captured = {}
     monkeypatch.delenv("JINA_API_KEY_FILE", raising=False)

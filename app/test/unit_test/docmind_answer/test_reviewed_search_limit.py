@@ -48,7 +48,7 @@ def staged_search():
         "_lane_candidates": lane, "_rrf_candidates": lambda *_, **__: candidates,
         "_validate_source_candidates": lambda *_: None,
         "_rerank_model": lambda *_: Reranker(),
-        "_answer_rerank_input": lambda c: c.rerank_text,
+        "_named_rerank_input": lambda c, current_name=None: c.rerank_text,
         "_enrich_parser_platform_chunk": lambda c: c,
         "_empty_result": lambda *_args: {"chunks": [], "caps": {"results": _args[-1]}},
         "uuid4": lambda: "trace", "time": time, "asyncio": asyncio, "math": math,
@@ -112,13 +112,13 @@ def test_answer_only_dense_recall_disables_kg_without_mutating_public_request():
 
 def test_answer_rerank_prefix_keeps_candidate_name_and_body_bytes():
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
-    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_answer_rerank_input")
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_named_rerank_input")
     env = {"Candidate": Any, "_RERANK_DOCUMENT_NAME_LIMIT": 256}
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(SOURCE), "exec"), env)  # noqa: S102 -- production AST only
     candidate = types.SimpleNamespace(chunk={"docnm_kwd": "  문서"}, rerank_text="가" * 2400)
-    assert env["_answer_rerank_input"](candidate) == "Document:   문서\n" + "가" * 2400
+    assert env["_named_rerank_input"](candidate) == "Document:   문서\n" + "가" * 2400
     candidate.chunk["docnm_kwd"] = "n" * 300
-    assert env["_answer_rerank_input"](candidate).startswith("Document: " + "n" * 256 + "\n")
+    assert env["_named_rerank_input"](candidate).startswith("Document: " + "n" * 256 + "\n")
 
 
 def test_public_thirty_two_documents_answer_internal_sixteen_and_caps():
