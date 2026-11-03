@@ -32,19 +32,19 @@ def main():
         raise RuntimeError('Shared installation identity was not created')
     definitions = [
         ('OpenAI-API-Compatible', 'GTE', 'gte-multilingual-base', 2, 'http://embedding:8080/v1', 'embedding-key', 8192),
-        ('Jina', 'jina', 'jina-reranker-v3.5', 16, '', 'jina-key', 8192),
+        ('KURE', 'kure', 'kure-reranker-nano-20261016', 16, 'https://kure.kullm.ai/api/v1/rerank', None, 8192),
     ]
     with DB.atomic():
         for provider_name, instance_name, model_name, model_type, base_url, key_file, max_tokens in definitions:
             provider, _ = TenantModelProvider.get_or_create(id=stable(user_id, provider_name), defaults={'provider_name': provider_name, 'tenant_id': user_id})
             if provider.tenant_id != user_id or provider.provider_name != provider_name:
                 raise ValueError('Provider ownership mismatch')
-            instance, _ = TenantModelInstance.get_or_create(id=stable(provider.id, instance_name), defaults={'provider_id': provider.id, 'instance_name': instance_name, 'api_key': (secrets/key_file).read_text().strip(), 'extra': json.dumps({'base_url': base_url})})
+            instance, _ = TenantModelInstance.get_or_create(id=stable(provider.id, instance_name), defaults={'provider_id': provider.id, 'instance_name': instance_name, 'api_key': (secrets/key_file).read_text().strip() if key_file else '', 'extra': json.dumps({'base_url': base_url})})
             if instance.provider_id != provider.id or instance.instance_name != instance_name:
                 raise ValueError('Model instance ownership mismatch')
             TenantModel.get_or_create(id=stable(instance.id, model_name), defaults={'provider_id': provider.id, 'instance_id': instance.id, 'model_name': model_name, 'model_type': model_type, 'extra': json.dumps({'max_tokens': max_tokens})})
         embedding = 'gte-multilingual-base@GTE@OpenAI-API-Compatible'
-        Tenant.update(embd_id=embedding, rerank_id='jina-reranker-v3.5@jina@Jina').where(Tenant.id == user_id).execute()
+        Tenant.update(embd_id=embedding, rerank_id='kure-reranker-nano-20261016@kure@KURE').where(Tenant.id == user_id).execute()
     # Service methods manage their own connection contexts; call them after the
     # registry transaction has closed rather than nesting those contexts in it.
     workspace = bootstrap_shared_workspace(user_id)

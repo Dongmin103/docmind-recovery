@@ -4,6 +4,10 @@ Docker 이미지·GTE 모델·파서·OCR 모델·실행 스크립트를 포함�
 대상 서버에서 Git clone, npm/pip 설치나 이미지 빌드는 필요하지 않습니다.
 문서와 DB, 현재 서버의 인증 키는 포함하지 않습니다.
 
+이 안내는 현재 소스로 새로 만드는 패키지 기준입니다. 기존 10월 19일 ZIP은 Jina v3.5를 사용합니다.
+KURE는 검색어와 후보 문서의 파일명·본문 일부를 외부 API로 전송합니다.
+연구용 키의 사용 범위는 [KURE 안내](https://github.com/Dongmin103/docmind-recovery/blob/01f1fb31606e8d34ed177c560353513bc88cedd8/docs/KURE-RESEARCH-RERANK-2026-11-02.md)를 확인하세요.
+
 ## 필요한 서버 환경
 
 - Windows 10/11 또는 호환되는 Windows 서버 환경에서 WSL2 Linux 컨테이너를
@@ -20,8 +24,8 @@ Docker 이미지·GTE 모델·파서·OCR 모델·실행 스크립트를 포함�
   현재 배포본의 문서 슬롯 4·파서 2·임베딩 배치 32/요청 동시성 2를 유지합니다.
 - 암호화 원본을 처리하려면 서버에 설치된, 서명이 검증되는 uEncryptor2를 사용합니다.
   임시 평문 작업 볼륨의 BitLocker와 백업 제외 조건은 호스트 워커가 검사합니다.
-- Jina v3.5 리랭커 API와 기존 Qwen 답변·검토 서버를 연결합니다.
-  Jina 키 파일과 Qwen 서버의 `AnswerBaseUrl`이 필요합니다. 답변은 현재와 같은
+- KURE Nano 리랭커 API와 기존 Qwen 답변·검토 서버를 연결합니다.
+  KURE 키 파일과 Qwen 서버의 `AnswerBaseUrl`이 필요합니다. 답변은 현재와 같은
   `reviewed_v1`, qwen3.8-flash-next, 문맥 32768/출력 4096 설정을 유지합니다.
   답변 서버 연결이 필요합니다. 이미지·로컬 임베딩·파서 자원은 추가 다운로드 없이 로드합니다.
 
@@ -35,7 +39,7 @@ Docker 이미지·GTE 모델·파서·OCR 모델·실행 스크립트를 포함�
    GPU는 파일명의 `cpu`를 `gpu`로 바꿉니다. 함께 제공된 `.sha256`으로 ZIP 해시를
    확인할 수 있습니다. 실행 스크립트도 이미지와 모델 파일의 해시를 확인합니다.
 2. `server-settings.example.json`을 Git 밖의 실제 서버 설정 파일로 복사합니다.
-   Jina API 키 파일, 기존 Qwen 서버 주소, 이미 설치된 uEncryptor2, 임시 작업 폴더와 원본 루트를
+   KURE API 키 파일(`KureApiKeyFile`), 기존 Qwen 서버 주소, 이미 설치된 uEncryptor2, 임시 작업 폴더와 원본 루트를
    지정합니다. 다른 문서 집합에는 새 `source_id`를 사용합니다. API 키 파일에는
    키 한 줄만 저장하며, 설정 JSON에 키 자체를 적지 않습니다.
 3. 이 패키지 폴더의 PowerShell에서 실행합니다.
@@ -77,5 +81,5 @@ CPU OCR의 속도는 GPU와 같지 않습니다. 긴 페이지는 기존 요청 
 다른 서버의 설정으로 복제하지 마세요. 중지 명령은 Docker 볼륨을 삭제하지 않습니다.
 
 배포 파일 구성·이미지 ID·소스 커밋은 `runtime-manifest.json`, 라이선스와 모델
-고지는 `licenses/`에 있습니다. 검색은 C128·문서당 8·본문 prefix2400·Jina v3.5·Top5,
+고지는 `licenses/`에 있습니다. 검색은 C128·문서당 8·본문 prefix2400·KURE Nano·Top5,
 임베딩은 GTE multilingual base 768차원 계약을 유지합니다.

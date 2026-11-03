@@ -9,7 +9,7 @@ $manifest=Get-Content -LiteralPath (Join-Path $root 'runtime-manifest.json') -Ra
 if ($manifest.variant -notin @('cpu','gpu')) { throw 'Unsupported package variant.' }
 $local=Join-Path $root '.local'
 if (Test-Path -LiteralPath (Join-Path $local 'runtime.env')) { throw 'An installation already exists. Existing keys and data were preserved.' }
-foreach ($item in @('Sources','JinaApiKeyFile','AnswerBaseUrl','WebPort','ApiPort')) {
+foreach ($item in @('Sources','KureApiKeyFile','AnswerBaseUrl','WebPort','ApiPort')) {
     if ($settings.PSObject.Properties.Name -notcontains $item) { throw "Missing setting: $item" }
 }
 $answerUri=[Uri]::new([string]$settings.AnswerBaseUrl)
@@ -40,6 +40,8 @@ if (@($settings.Sources).Count -gt 0) {
     $signature=Get-AuthenticodeSignature -LiteralPath ([string]$settings.UEncryptorPath)
     if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) { throw 'The installed uEncryptor2 signature could not be verified.' }
 }
+$kureKey=[IO.File]::ReadAllText([IO.Path]::GetFullPath([string]$settings.KureApiKeyFile)).Trim()
+if ($kureKey -cnotmatch '^kure-\S+$') { throw 'KureApiKeyFile must contain one KURE API key.' }
 $utf8=[Text.UTF8Encoding]::new($false)
 [void](New-Item -ItemType Directory -Force -Path $local,(Join-Path $local 'secrets'),(Join-Path $local 'installation'))
 $acl=Get-Acl -LiteralPath $local
@@ -57,11 +59,7 @@ function New-SecretHex {
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     return ([BitConverter]::ToString($bytes)).Replace('-','').ToLowerInvariant()
 }
-foreach ($name in @('jina-key')) {
-    $value=[IO.File]::ReadAllText([IO.Path]::GetFullPath([string]$settings.JinaApiKeyFile)).Trim()
-    if ($value.Length -lt 12 -or $value.Contains("`r") -or $value.Contains("`n")) { throw 'An external model key is empty or malformed.' }
-    [IO.File]::WriteAllText((Join-Path $local "secrets/$name"),$value,$utf8)
-}
+[IO.File]::WriteAllText((Join-Path $local 'secrets/kure-key'),$kureKey,$utf8)
 foreach ($name in @('embedding-key','session-key')) { [IO.File]::WriteAllText((Join-Path $local "secrets/$name"),(New-SecretHex),$utf8) }
 # The host protocol consumes a hex-encoded 32-byte HMAC secret.
 [IO.File]::WriteAllText((Join-Path $local 'secrets/worker-key'),(New-SecretHex),$utf8)

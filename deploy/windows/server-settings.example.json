@@ -1,5 +1,5 @@
 {
-  "JinaApiKeyFile": "C:\\DocMindHost\\secrets\\jina.key",
+  "KureApiKeyFile": "C:\\DocMindHost\\secrets\\kure.key",
   "AnswerBaseUrl": "http://your-llm-server:13434/v1",
   "UEncryptorPath": "C:\\Program Files\\Vendor\\uEncryptor2.exe",
   "WorkRoot": "C:\\DocMindHost\\temporary-plaintext",

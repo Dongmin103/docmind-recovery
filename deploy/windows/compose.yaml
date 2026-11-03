@@ -134,7 +134,7 @@ services:
     pids_limit: 128
     restart: unless-stopped
   docmind:
-    image: docmind:2026.10.19
+    image: docmind:2026.11.03-kure
     pull_policy: never
     depends_on:
       mysql: {condition: service_healthy}
@@ -158,8 +158,8 @@ services:
       DOCMIND_GENERATIONLESS_E2E_ENABLED: '1'
       DOCMIND_HOST_WORKER_KEY_ID: docmind-runtime-host
       DOCMIND_HOST_WORKER_HMAC_SECRET_FILE: /run/secrets/worker-key
-      JINA_API_KEY_FILE: /run/secrets/jina-key
-      DOCMIND_RERANK_ID: jina-reranker-v3.5@jina@Jina
+      KURE_API_KEY_FILE: /run/secrets/kure-key
+      DOCMIND_RERANK_ID: kure-reranker-nano-20261016@kure@KURE
       DOCMIND_ANSWER_ENABLED: '1'
       DOCMIND_ANSWER_PIPELINE: reviewed_v1
       DOCMIND_ANSWER_PROVIDER: openai

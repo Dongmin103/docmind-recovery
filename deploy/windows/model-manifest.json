@@ -27,7 +27,7 @@
     "endpoint": "server setting AnswerBaseUrl; no local weights included"
   },
   "reranker": {
-    "model": "jina-reranker-v3.5",
-    "endpoint": "https://api.jina.ai/v1/rerank"
+    "model": "kure-reranker-nano-20261016",
+    "endpoint": "https://kure.kullm.ai/api/v1/rerank"
   }
 }

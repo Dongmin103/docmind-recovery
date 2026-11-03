@@ -17,7 +17,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMON_IMAGES = ['docmind:2026.10.19', 'docmind-kordoc-parser:2026.10.19', 'docmind-preview:2026.10.19', 'mysql:8.0.40', 'elasticsearch:8.11.3', 'valkey/valkey:8', 'pgsty/silo:RELEASE.2026-08-06T00-00-00Z']
+COMMON_IMAGES = ['docmind:2026.11.03-kure', 'docmind-kordoc-parser:2026.10.19', 'docmind-preview:2026.10.19', 'mysql:8.0.40', 'elasticsearch:8.11.3', 'valkey/valkey:8', 'pgsty/silo:RELEASE.2026-08-06T00-00-00Z']
 
 
 def digest(path):
