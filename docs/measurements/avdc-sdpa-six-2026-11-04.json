@@ -1,0 +1,675 @@
+{
+  "date": "2026-11-04",
+  "experiment": "AVDC six-document SDPA-only indexing trial",
+  "runs": {
+    "baseline": "existing successful eager run reused",
+    "candidate": "one SDPA indexing run; no repeated indexing"
+  },
+  "configuration": {
+    "vm_vcpus": 36,
+    "vm_maximum_percent": 100,
+    "document_slots": 4,
+    "continuous_refill": true,
+    "parser_cpu_quota": 4,
+    "embedding_workers": 4,
+    "threads_per_worker": 4,
+    "embedding_cpu_quota": 16,
+    "short_batch_size": 16,
+    "dtype": "float32",
+    "ocr": false,
+    "document_registration_order_changed": false,
+    "concurrent_search_during_load_measurement": false,
+    "only_runtime_change": "attn_implementation eager -> sdpa"
+  },
+  "completion": {
+    "documents": 6,
+    "pages": 496,
+    "active_chunks": 2026,
+    "failed_documents": 0,
+    "reused_chunks": 0,
+    "source_hashes_match": true,
+    "content_tokens_positions_match": true,
+    "host_plaintext_files_remaining": 0,
+    "temporary_worker_key_file_remaining": false,
+    "temporary_worker_access_expiry_restored": true,
+    "oom_events": 0
+  },
+  "performance": {
+    "baseline_seconds": 89.40100002288818,
+    "candidate_seconds": 81.75399994850159,
+    "elapsed_change_pct": -8.553595678380365,
+    "baseline_chunks_per_hour": 81582.98003526486,
+    "candidate_chunks_per_hour": 89213.9834698532,
+    "baseline_load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 12,
+        "start": "2026-11-04T04:40:52.8356158+00:00",
+        "last": "2026-11-04T04:41:59.2772718+00:00",
+        "http_200": 12,
+        "HttpSeconds": [
+          14.73,
+          14.94,
+          19.79,
+          19.79
+        ],
+        "HostCPU": [
+          4.25,
+          3.5,
+          13.0,
+          13.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.5,
+          0.5,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          60428.08,
+          60428.5,
+          60434.0,
+          60434.0
+        ],
+        "Read_ms_per_op": 0.099,
+        "Write_ms_per_op": 0.05
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 16,
+        "start": "2026-11-04T04:42:05.2348200+00:00",
+        "last": "2026-11-04T04:43:37.1618562+00:00",
+        "http_200": 16,
+        "HttpSeconds": [
+          15.25,
+          16.64,
+          24.2,
+          24.2
+        ],
+        "HostCPU": [
+          16.38,
+          18.5,
+          26.0,
+          26.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.12,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          60095.12,
+          60059.0,
+          60356.0,
+          60356.0
+        ],
+        "Read_ms_per_op": 0.184,
+        "Write_ms_per_op": 0.068
+      },
+      "after": {
+        "phase": "after",
+        "samples": 1,
+        "start": "2026-11-04T04:43:43.1511695+00:00",
+        "last": "2026-11-04T04:43:43.1511695+00:00",
+        "http_200": 1,
+        "HttpSeconds": [
+          18.76,
+          18.76,
+          18.76,
+          18.76
+        ],
+        "HostCPU": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          60337.0,
+          60337.0,
+          60337.0,
+          60337.0
+        ]
+      }
+    },
+    "candidate_load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 12,
+        "start": "2026-11-04T05:36:22.1645937+00:00",
+        "last": "2026-11-04T05:37:28.4445191+00:00",
+        "http_200": 12,
+        "HttpSeconds": [
+          15.46,
+          15.51,
+          29.36,
+          29.36
+        ],
+        "HostCPU": [
+          4.33,
+          3.5,
+          15.0,
+          15.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          60374.33,
+          60377.5,
+          60385.0,
+          60385.0
+        ],
+        "Read_ms_per_op": 0.101,
+        "Write_ms_per_op": 0.047
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 15,
+        "start": "2026-11-04T05:37:34.4544391+00:00",
+        "last": "2026-11-04T05:38:58.3945590+00:00",
+        "http_200": 15,
+        "HttpSeconds": [
+          16.09,
+          15.82,
+          32.34,
+          32.34
+        ],
+        "HostCPU": [
+          14.27,
+          15.0,
+          26.0,
+          26.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.13,
+          0.0,
+          2.0,
+          2.0
+        ],
+        "FreeMiB": [
+          60065.53,
+          60044.0,
+          60331.0,
+          60331.0
+        ],
+        "Read_ms_per_op": 0.111,
+        "Write_ms_per_op": 0.087
+      },
+      "after": {
+        "phase": "after",
+        "samples": 1,
+        "start": "2026-11-04T05:39:04.4413083+00:00",
+        "last": "2026-11-04T05:39:04.4413083+00:00",
+        "http_200": 1,
+        "HttpSeconds": [
+          11.95,
+          11.95,
+          11.95,
+          11.95
+        ],
+        "HostCPU": [
+          10.0,
+          10.0,
+          10.0,
+          10.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          60328.0,
+          60328.0,
+          60328.0,
+          60328.0
+        ]
+      }
+    },
+    "baseline_cpu": {
+      "embedding": 10.520942126109068,
+      "other": 1.1857775786736333,
+      "parser": 0.5021383454076777
+    },
+    "candidate_cpu": {
+      "embedding": 10.283787643166987,
+      "other": 1.2477982268121193,
+      "parser": 0.5434752308781561
+    },
+    "baseline_memory": {
+      "embedding_mem": 8110530560,
+      "parser_mem": 628797440,
+      "app_mem": 1294209024,
+      "total_mem": 12327931904,
+      "min_available_kib": 12115524
+    },
+    "candidate_memory": {
+      "embedding_mem": 7706718208,
+      "parser_mem": 591478784,
+      "app_mem": 1040367616,
+      "total_mem": 11499311104,
+      "min_available_kib": 12848112
+    }
+  },
+  "performance_units": {
+    "load.HttpSeconds": "milliseconds despite legacy field name; arrays are mean, median, p95, max",
+    "load.HostCPU": "percent of whole physical server logical-processor capacity; includes groupware",
+    "load.GroupWareCPU": "rounded Hyper-V CPUUsage percent",
+    "cpu": "average logical CPU equivalents consumed",
+    "memory": "bytes"
+  },
+  "embedding_activity": {
+    "eager": {
+      "embedding_requests": 135,
+      "embedding_max_parallel": 4,
+      "embedding_busy_wall_seconds": 72.27023148536682,
+      "embedding_worker_seconds": 271.7822799682617
+    },
+    "sdpa": {
+      "embedding_requests": 135,
+      "embedding_max_parallel": 4,
+      "embedding_busy_wall_seconds": 64.9509630203247,
+      "embedding_worker_seconds": 240.05684733390808
+    }
+  },
+  "vector_validation": {
+    "documents": [
+      {
+        "chunks": 555,
+        "min_cosine": 0.9999999999996181,
+        "max_abs_error": 1.2777745723308032e-07
+      },
+      {
+        "chunks": 180,
+        "min_cosine": 0.9999999999974621,
+        "max_abs_error": 3.05986031889742e-07
+      },
+      {
+        "chunks": 360,
+        "min_cosine": 0.9999999999995083,
+        "max_abs_error": 1.3969838619232178e-07
+      },
+      {
+        "chunks": 794,
+        "min_cosine": 0.9999999999983514,
+        "max_abs_error": 2.642162144194521e-07
+      },
+      {
+        "chunks": 95,
+        "min_cosine": 0.9999999999996895,
+        "max_abs_error": 1.1865049600635891e-07
+      },
+      {
+        "chunks": 42,
+        "min_cosine": 0.9999999999996265,
+        "max_abs_error": 1.2014061212539673e-07
+      }
+    ],
+    "all_2026_vectors_pass": true
+  },
+  "retrieval_validation": {
+    "lanes-after-old.jsonl": {
+      "bm25": {
+        "top8_order_equal_queries": 12,
+        "top8_set_equal_queries": 12,
+        "min_top128_overlap": 1.0
+      },
+      "dense": {
+        "top8_order_equal_queries": 9,
+        "top8_set_equal_queries": 11,
+        "min_top128_overlap": 1.0
+      },
+      "rrf": {
+        "top8_order_equal_queries": 10,
+        "top8_set_equal_queries": 11,
+        "min_top128_overlap": 0.984375
+      }
+    },
+    "lanes-after-new.jsonl": {
+      "bm25": {
+        "top8_order_equal_queries": 2,
+        "top8_set_equal_queries": 7,
+        "min_top128_overlap": 0.6328125
+      },
+      "dense": {
+        "top8_order_equal_queries": 6,
+        "top8_set_equal_queries": 9,
+        "min_top128_overlap": 0.9609375
+      },
+      "rrf": {
+        "top8_order_equal_queries": 3,
+        "top8_set_equal_queries": 7,
+        "min_top128_overlap": 0.8515625
+      }
+    }
+  },
+  "final_search_validation": {
+    "completed_searches": 24,
+    "complete_pairs": 12,
+    "document_order_equal": 12,
+    "document_set_equal": 12,
+    "primary_evidence_equal": 10,
+    "supporting_evidence_equal": 9,
+    "relevance_equal": 11,
+    "pairs": [
+      {
+        "query": 0,
+        "old_count": 1,
+        "new_count": 1,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 20,
+        "after_candidates": 20
+      },
+      {
+        "query": 1,
+        "old_count": 1,
+        "new_count": 1,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 16,
+        "after_candidates": 16
+      },
+      {
+        "query": 2,
+        "old_count": 4,
+        "new_count": 4,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": false,
+        "relevance_equal": true,
+        "before_candidates": 45,
+        "after_candidates": 45
+      },
+      {
+        "query": 3,
+        "old_count": 3,
+        "new_count": 3,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 41,
+        "after_candidates": 41
+      },
+      {
+        "query": 4,
+        "old_count": 3,
+        "new_count": 3,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": false,
+        "supporting_evidence_equal": false,
+        "relevance_equal": true,
+        "before_candidates": 51,
+        "after_candidates": 51
+      },
+      {
+        "query": 5,
+        "old_count": 4,
+        "new_count": 4,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": false,
+        "relevance_equal": false,
+        "before_candidates": 44,
+        "after_candidates": 40
+      },
+      {
+        "query": 6,
+        "old_count": 4,
+        "new_count": 4,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": false,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 35,
+        "after_candidates": 35
+      },
+      {
+        "query": 7,
+        "old_count": 2,
+        "new_count": 2,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 16,
+        "after_candidates": 16
+      },
+      {
+        "query": 8,
+        "old_count": 1,
+        "new_count": 1,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 22,
+        "after_candidates": 22
+      },
+      {
+        "query": 9,
+        "old_count": 3,
+        "new_count": 3,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 39,
+        "after_candidates": 39
+      },
+      {
+        "query": 10,
+        "old_count": 3,
+        "new_count": 3,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 41,
+        "after_candidates": 41
+      },
+      {
+        "query": 11,
+        "old_count": 3,
+        "new_count": 3,
+        "document_order_equal": true,
+        "document_set_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_equal": true,
+        "before_candidates": 44,
+        "after_candidates": 44
+      }
+    ]
+  },
+  "same_index_query_encoder_control": {
+    "queries": 12,
+    "document_order_equal": 12,
+    "primary_evidence_equal": 12,
+    "supporting_evidence_equal": 12,
+    "relevance_status_equal": 12,
+    "candidate_count_equal": 12,
+    "details": [
+      {
+        "query": 0,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 1,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 2,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 3,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 4,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 5,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 6,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 7,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 8,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 9,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 10,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      },
+      {
+        "query": 11,
+        "document_order_equal": true,
+        "primary_evidence_equal": true,
+        "supporting_evidence_equal": true,
+        "relevance_status_equal": true,
+        "candidate_count_equal": true
+      }
+    ]
+  },
+  "interpretation": {
+    "speed": "Observed 8.55% elapsed reduction with unchanged document registration order and resource configuration; a single-run estimate",
+    "query_attention_control": "On the identical old index, all 12 questions returned identical final document order, primary evidence, supporting evidence, candidate counts, and relevance status under eager vs SDPA query encoding",
+    "fresh_index": "All 12 final document orders matched old vs new index; primary evidence differed on two and supporting evidence on three. New chunk identities/shard effects versus the tiny stored-vector numerical differences were not independently isolated. Do not describe fresh-index evidence ordering as identical or claim labeled answer accuracy."
+  },
+  "search_validation_method": "Actual AVDC api.search candidate selection and final document/evidence grouping. KURE calls relayed in memory through the local PC authorized research API credential, using the same pinned KURE model and existing KURERerank implementation. No key added to AVDC persistent configuration. Both old and new corpora queried with SDPA. Separately switched only query encoder attention to eager and repeated the same 12 queries against the unchanged old index, including final KURE ranking; no additional indexing.",
+  "limitations": [
+    "One run per condition; parser arrival order varied naturally under the unchanged concurrent document registration order. The elapsed difference is observed, not a statistically isolated estimate.",
+    "Groupware measurements are unauthenticated landing-page HTTP probes, not real login/business transaction workload. CPUUsage is rounded and displayed zero, not proof of zero CPU work.",
+    "Indexing HTTP sample counts are 16 eager and 15 SDPA; baseline counts are 12 each. p95 is noisy with these small samples.",
+    "Newly indexed chunks have different identities and may have different tie-breaking/shard scoring. Exact new-index candidate order was not preserved even though text/tokens/positions were identical.",
+    "The 12 search questions are regression probes, not a labeled relevance or answer-correctness evaluation.",
+    "AVDC standard search already lacked a KURE credential and external DNS connectivity before this change. Relay validation does not configure or certify the AVDC browser-to-KURE network path."
+  ],
+  "source_change": {
+    "before_sha256": "13112fb763ca74ce7aac390b8b81aa4896f1f98d2a6feea859c8fd196b5ec994",
+    "after_sha256": "c70d42cacea1026c73787195d78bee4baf9a990923be6ee01e6cb33925dda7ea",
+    "change": "eager -> sdpa only"
+  },
+  "runtime_state": "SDPA currently active; no additional indexing run"
+}
