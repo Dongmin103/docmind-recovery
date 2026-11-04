@@ -1,0 +1,474 @@
+{
+  "date": "2026-11-04",
+  "experiment": "Two parser workers sharing the existing 4-CPU limit, with SDPA embeddings and continuous four-document slots",
+  "baseline": "Existing successful sdpa-six-run reused; not rerun",
+  "candidate": "One six-document indexing run, parser2-sdpa-run",
+  "configuration": {
+    "document_registration_order_unchanged": true,
+    "vm_vcpus": 36,
+    "vm_maximum_percent": 100,
+    "parser_workers_before": 1,
+    "parser_workers_after": 2,
+    "app_parser_client_concurrency_before": 1,
+    "app_parser_client_concurrency_after": 2,
+    "parser_total_cpu_quota": 4,
+    "parser_cpuset": "32-35",
+    "parser_memory_bytes": 1073741824,
+    "document_slots": 4,
+    "continuous_refill": true,
+    "embedding_attention": "sdpa",
+    "embedding_workers": 4,
+    "embedding_threads_per_worker": 4,
+    "embedding_total_cpu_quota": 16,
+    "short_embedding_batch": 16,
+    "ocr": false,
+    "concurrent_search_during_indexing": false
+  },
+  "completion": {
+    "documents": 6,
+    "pages": 496,
+    "chunks": 2026,
+    "failed": 0,
+    "reused_pages": 0,
+    "source_and_plaintext_hashes_match_baseline": true,
+    "active_chunk_sets_verified": true,
+    "text_tokens_positions_match_baseline": true,
+    "host_plaintext_files_remaining": 0,
+    "trial_worker_secret_file_remaining": false,
+    "temporary_worker_access_expiry_restored": true
+  },
+  "comparison": {
+    "before_seconds": 81.75399994850159,
+    "after_seconds": 83.95799994468689,
+    "elapsed_change_pct": 2.695892552748047,
+    "before_chunks_per_hour": 89213.9834698532,
+    "after_chunks_per_hour": 86872.00748952049,
+    "before_load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 12,
+        "start": "2026-11-04T05:36:22.1645937+00:00",
+        "last": "2026-11-04T05:37:28.4445191+00:00",
+        "http_200": 12,
+        "HttpSeconds": [
+          15.46,
+          15.51,
+          29.36,
+          29.36
+        ],
+        "HostCPU": [
+          4.33,
+          3.5,
+          15.0,
+          15.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          60374.33,
+          60377.5,
+          60385.0,
+          60385.0
+        ],
+        "Read_ms_per_op": 0.101,
+        "Write_ms_per_op": 0.047
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 15,
+        "start": "2026-11-04T05:37:34.4544391+00:00",
+        "last": "2026-11-04T05:38:58.3945590+00:00",
+        "http_200": 15,
+        "HttpSeconds": [
+          16.09,
+          15.82,
+          32.34,
+          32.34
+        ],
+        "HostCPU": [
+          14.27,
+          15.0,
+          26.0,
+          26.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.13,
+          0.0,
+          2.0,
+          2.0
+        ],
+        "FreeMiB": [
+          60065.53,
+          60044.0,
+          60331.0,
+          60331.0
+        ],
+        "Read_ms_per_op": 0.111,
+        "Write_ms_per_op": 0.087
+      },
+      "after": {
+        "phase": "after",
+        "samples": 1,
+        "start": "2026-11-04T05:39:04.4413083+00:00",
+        "last": "2026-11-04T05:39:04.4413083+00:00",
+        "http_200": 1,
+        "HttpSeconds": [
+          11.95,
+          11.95,
+          11.95,
+          11.95
+        ],
+        "HostCPU": [
+          10.0,
+          10.0,
+          10.0,
+          10.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          60328.0,
+          60328.0,
+          60328.0,
+          60328.0
+        ]
+      }
+    },
+    "after_load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 12,
+        "start": "2026-11-04T06:00:39.0642086+00:00",
+        "last": "2026-11-04T06:01:45.4496965+00:00",
+        "http_200": 12,
+        "HttpSeconds": [
+          15.05,
+          16.34,
+          19.04,
+          19.04
+        ],
+        "HostCPU": [
+          4.25,
+          3.0,
+          12.0,
+          12.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.08,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          60411.33,
+          60413.0,
+          60423.0,
+          60423.0
+        ],
+        "Read_ms_per_op": 0.103,
+        "Write_ms_per_op": 0.047
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 16,
+        "start": "2026-11-04T06:01:51.4354795+00:00",
+        "last": "2026-11-04T06:03:21.2087098+00:00",
+        "http_200": 16,
+        "HttpSeconds": [
+          14.09,
+          14.3,
+          21.35,
+          21.35
+        ],
+        "HostCPU": [
+          15.06,
+          18.0,
+          22.0,
+          22.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.06,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          60110.44,
+          60085.0,
+          60360.0,
+          60360.0
+        ],
+        "Read_ms_per_op": 0.103,
+        "Write_ms_per_op": 0.068
+      },
+      "after": {
+        "phase": "after",
+        "samples": 1,
+        "start": "2026-11-04T06:03:27.2057463+00:00",
+        "last": "2026-11-04T06:03:27.2057463+00:00",
+        "http_200": 1,
+        "HttpSeconds": [
+          19.43,
+          19.43,
+          19.43,
+          19.43
+        ],
+        "HostCPU": [
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          60357.0,
+          60357.0,
+          60357.0,
+          60357.0
+        ]
+      }
+    },
+    "before_cpu": {
+      "embedding": 10.283787643166987,
+      "other": 1.2477982268121193,
+      "parser": 0.5434752308781561
+    },
+    "after_cpu": {
+      "embedding": 10.082141637396123,
+      "other": 1.6118734046282652,
+      "parser": 0.7203188407289778
+    },
+    "before_memory": {
+      "embedding_mem": 7706718208,
+      "parser_mem": 591478784,
+      "app_mem": 1040367616,
+      "total_mem": 11499311104,
+      "min_available_kib": 12848112
+    },
+    "after_memory": {
+      "embedding_mem": 7708991488,
+      "parser_mem": 764694528,
+      "app_mem": 1089908736,
+      "total_mem": 11726491648,
+      "min_available_kib": 12634752
+    },
+    "before_parser": {
+      "peak_inflight_parser_requests": 1,
+      "busy_wall_seconds": 29.70653009414673,
+      "overlapping_requests_seconds": 0,
+      "last_parser_response_seconds": 38.32970905303955,
+      "documents": [
+        {
+          "pages": 98,
+          "parser_request_seconds": 8.630916118621826,
+          "parser_queue_seconds": 4.975916147232056,
+          "activation_seconds": 81.02823638916016
+        },
+        {
+          "pages": 85,
+          "parser_request_seconds": 3.5103745460510254,
+          "parser_queue_seconds": 4.291534423828125e-06,
+          "activation_seconds": 23.068529844284058
+        },
+        {
+          "pages": 48,
+          "parser_request_seconds": 3.0286574363708496,
+          "parser_queue_seconds": 3.0146684646606445,
+          "activation_seconds": 21.771118879318237
+        },
+        {
+          "pages": 92,
+          "parser_request_seconds": 4.0437071323394775,
+          "parser_queue_seconds": 13.202620506286621,
+          "activation_seconds": 41.57258868217468
+        },
+        {
+          "pages": 24,
+          "parser_request_seconds": 1.1232314109802246,
+          "parser_queue_seconds": 6.67572021484375e-06,
+          "activation_seconds": 33.325671911239624
+        },
+        {
+          "pages": 149,
+          "parser_request_seconds": 9.369643449783325,
+          "parser_queue_seconds": 1.7642974853515625e-05,
+          "activation_seconds": 81.94118189811707
+        }
+      ]
+    },
+    "after_parser": {
+      "peak_inflight_parser_requests": 2,
+      "busy_wall_seconds": 28.613099575042725,
+      "overlapping_requests_seconds": 17.599351406097412,
+      "last_parser_response_seconds": 42.062854290008545,
+      "documents": [
+        {
+          "pages": 98,
+          "parser_request_seconds": 14.579617261886597,
+          "parser_queue_seconds": 7.867813110351562e-06,
+          "activation_seconds": 83.21023321151733
+        },
+        {
+          "pages": 85,
+          "parser_request_seconds": 6.428532361984253,
+          "parser_queue_seconds": 3.304868698120117,
+          "activation_seconds": 29.53362798690796
+        },
+        {
+          "pages": 48,
+          "parser_request_seconds": 4.4802539348602295,
+          "parser_queue_seconds": 5.245208740234375e-06,
+          "activation_seconds": 18.2506046295166
+        },
+        {
+          "pages": 92,
+          "parser_request_seconds": 7.487586736679077,
+          "parser_queue_seconds": 9.105021715164185,
+          "activation_seconds": 41.821765184402466
+        },
+        {
+          "pages": 24,
+          "parser_request_seconds": 3.3258588314056396,
+          "parser_queue_seconds": 1.1392593383789062,
+          "activation_seconds": 30.878761291503906
+        },
+        {
+          "pages": 149,
+          "parser_request_seconds": 9.91060185432434,
+          "parser_queue_seconds": 4.76837158203125e-06,
+          "activation_seconds": 84.29719805717468
+        }
+      ]
+    },
+    "embedding": {
+      "before": {
+        "embedding_busy_wall_seconds": 64.9509630203247,
+        "embedding_span_seconds": 75.28589630126953,
+        "embedding_idle_inside_span_seconds": 10.334933280944824,
+        "embedding_worker_seconds": 240.05684733390808,
+        "embedding_average_busy_workers": 3.1886031664321175,
+        "embedding_max_parallel": 4
+      },
+      "after": {
+        "embedding_busy_wall_seconds": 66.59874868392944,
+        "embedding_span_seconds": 75.67589020729065,
+        "embedding_idle_inside_span_seconds": 9.077141523361206,
+        "embedding_worker_seconds": 242.0501425266266,
+        "embedding_average_busy_workers": 3.198510673129913,
+        "embedding_max_parallel": 4
+      }
+    }
+  },
+  "vector_validation": {
+    "documents": [
+      {
+        "chunks": 180,
+        "min_cosine": 0.9999999999999999,
+        "max_abs_error": 0.0
+      },
+      {
+        "chunks": 555,
+        "min_cosine": 0.9999999999999999,
+        "max_abs_error": 0.0
+      },
+      {
+        "chunks": 360,
+        "min_cosine": 0.9999999999999999,
+        "max_abs_error": 0.0
+      },
+      {
+        "chunks": 42,
+        "min_cosine": 0.9999999999999999,
+        "max_abs_error": 0.0
+      },
+      {
+        "chunks": 95,
+        "min_cosine": 0.9999999999999999,
+        "max_abs_error": 0.0
+      },
+      {
+        "chunks": 794,
+        "min_cosine": 0.9999999999999999,
+        "max_abs_error": 0.0
+      }
+    ],
+    "all_2026_vectors_pass": true
+  },
+  "units": {
+    "load.HttpSeconds": "milliseconds; mean,median,p95,max",
+    "load.HostCPU": "percent of whole physical host; includes groupware",
+    "cpu": "average logical CPU equivalents",
+    "memory": "bytes",
+    "parser_request_intervals": "HTTP transport intervals, including transfer; not isolated process CPU time"
+  },
+  "limitations": [
+    "Single successful run per condition; concurrent arrival scheduling may differ despite unchanged document registration order.",
+    "Parser and app restarted to apply the capacity change. Two simultaneous synthetic PDF parses succeeded before baseline measurement; embedding service was not restarted.",
+    "Groupware HTTP probes cover the landing page, not authenticated business transactions. Small sample p95 and rounded VM CPUUsage do not establish long-term load safety.",
+    "No new relevance evaluation was performed for this parser concurrency change; active content, tokens, positions and embedding vectors were compared with the same six-document baseline."
+  ],
+  "final_parser_workers": 1,
+  "interpretation": {
+    "outcome": "No speed gain observed; restored one parser and client concurrency one while retaining SDPA.",
+    "observed_chain": {
+      "parser_request_overlap_seconds": 17.599351406097412,
+      "embedding_all_workers_idle_before_seconds": 10.334933280944824,
+      "embedding_all_workers_idle_after_seconds": 9.077141523361206,
+      "last_149_page_document_embedding_start_before_seconds": 41.85403227806091,
+      "last_149_page_document_embedding_start_after_seconds": 44.22676157951355,
+      "last_149_page_document_embedding_duration_before_seconds": 38.759849309921265,
+      "last_149_page_document_embedding_duration_after_seconds": 38.17863202095032
+    },
+    "confirmed": "Parallel parser requests occurred, but most individual parser request durations increased; all-workers-idle embedding time fell by only 1.26 seconds. The final 149-page document reached embedding 2.37 seconds later even though its embedding duration was slightly shorter.",
+    "not_isolated": "Resource contention within the unchanged shared CPU affinity, process/cache warm-up after parser/app restart, and naturally varying request arrival order were not independently isolated. A 2.7% single-run slowdown does not prove that two parsers are universally slower."
+  }
+}
