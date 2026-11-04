@@ -16,6 +16,7 @@ from api.apps.services import (
     docmind_bootstrap_service,
     docmind_catalog_admin_service,
     docmind_hierarchy_service,
+    docmind_ingestion_executor,
     docmind_ingestion_service,
     docmind_preview_service,
     docmind_registration_service,
@@ -332,7 +333,7 @@ async def upload_cloud_sync_artifact(job_id: str):
         except ValueError as error:
             raise docmind_ingestion_service.DocmindIngestionError("DOCMIND_INGESTION_REQUEST_INVALID") from error
         adapter, runner, activator = docmind_ingestion_service.ingestion_runtime()
-        result = await asyncio.to_thread(
+        result = await docmind_ingestion_executor.run(
             docmind_ingestion_service.process_decrypted_artifact,
             job_id,
             worker_id=worker_id,
@@ -347,6 +348,8 @@ async def upload_cloud_sync_artifact(job_id: str):
             activator=activator,
         )
         return _signed_worker_response(result, key_id)
+    except docmind_ingestion_executor.IngestionBusy:
+        return _signed_worker_response({"error": "DOCMIND_INGESTION_BUSY"}, key_id, 503)
     except docmind_worker_auth.WorkerAuthenticationError:
         return Response(b'{"error":"WORKER_AUTH_FAILED"}', status=401, content_type="application/json")
     except docmind_ingestion_service.DocmindIngestionError as error:
