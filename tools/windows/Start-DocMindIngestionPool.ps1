@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$ConfigPath,
-    [ValidateSet(1,2,3,4)][int]$Concurrency = 1,
+    [ValidateRange(1,12)][int]$Concurrency = 1,
     [Parameter(Mandatory=$true)][string]$StopFile,
     [string]$ClaimSourceId = '', [switch]$SkipRetries, [switch]$Once,
     [string]$TimingRoot = '')

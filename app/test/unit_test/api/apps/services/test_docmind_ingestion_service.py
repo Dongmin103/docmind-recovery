@@ -192,18 +192,19 @@ def _pool_document(number, *, ocr=False):
     return result['job_id']
 
 
-def test_four_slots_hold_failed_cleanup_and_reject_fifth(ingestion_db, monkeypatch):
-    monkeypatch.setenv('DOCMIND_INGESTION_DOCUMENT_CONCURRENCY', '4')
-    ids = [_pool_document(n) for n in range(5)]
-    claimed = [service.claim_next(f'pool-{n}', ingestion_pool_size=4) for n in range(4)]
-    assert len({job.job_id for job in claimed}) == 4
+@pytest.mark.parametrize('capacity', [4, 8, 12])
+def test_pool_holds_failed_cleanup_at_capacity(ingestion_db, monkeypatch, capacity):
+    monkeypatch.setenv('DOCMIND_INGESTION_DOCUMENT_CONCURRENCY', str(capacity))
+    ids = [_pool_document(n) for n in range(capacity + 1)]
+    claimed = [service.claim_next(f'pool-{n}', ingestion_pool_size=capacity) for n in range(capacity)]
+    assert len({job.job_id for job in claimed}) == capacity
     assert service.claim_next('standalone-worker') is None
     DocmindIngestionJob.update(lifecycle_state='FAILED', host_cleanup_state='PENDING').where(DocmindIngestionJob.id == ids[0]).execute()
-    assert service.claim_next('pool-0', ingestion_pool_size=4) is None
+    assert service.claim_next('pool-0', ingestion_pool_size=capacity) is None
     DocmindIngestionJob.update(host_cleanup_state='COMPLETE').where(DocmindIngestionJob.id == ids[0]).execute()
-    assert service.claim_next('pool-0', ingestion_pool_size=4).job_id == ids[4]
+    assert service.claim_next('pool-0', ingestion_pool_size=capacity).job_id == ids[capacity]
     with pytest.raises(service.DocmindIngestionError, match='DOCMIND_INGESTION_REQUEST_INVALID'):
-        service.claim_next('invalid', ingestion_pool_size=5)
+        service.claim_next('invalid', ingestion_pool_size=13)
 
 
 def test_pool_caps_active_documents_and_requires_enabled_server(ingestion_db, monkeypatch):
@@ -244,33 +245,34 @@ def test_pool_holds_slot_until_host_cleanup(ingestion_db, monkeypatch):
     assert service.claim_next('pool-0', ingestion_pool_size=3) is not None
 
 
-def test_concurrent_claim_threads_never_exceed_pool_capacity(ingestion_db, monkeypatch, tmp_path):
+@pytest.mark.parametrize('capacity', [3, 12])
+def test_concurrent_claim_threads_never_exceed_pool_capacity(ingestion_db, monkeypatch, tmp_path, capacity):
     import sqlite3
     import threading
     from contextlib import closing
     from concurrent.futures import ThreadPoolExecutor
-    monkeypatch.setenv('DOCMIND_INGESTION_DOCUMENT_CONCURRENCY', '3')
-    for n in range(4): _pool_document(n)
+    monkeypatch.setenv('DOCMIND_INGESTION_DOCUMENT_CONCURRENCY', str(capacity))
+    for n in range(capacity + 1): _pool_document(n)
     path = str(tmp_path / 'claims.sqlite')
     with closing(sqlite3.connect(path)) as target:
         ingestion_db.connection().backup(target)
     database = SqliteDatabase(path, timeout=5)
-    barrier = threading.Barrier(4)
+    barrier = threading.Barrier(capacity + 1)
     def claim(n):
         barrier.wait(timeout=5)
         with database.connection_context():
-            result = service.claim_next(f'pool-{n}', ingestion_pool_size=3)
+            result = service.claim_next(f'pool-{n}', ingestion_pool_size=capacity)
             return result.job_id if result else None
     with database.bind_ctx(MODELS):
-        with ThreadPoolExecutor(4) as pool:
-            ids = list(pool.map(claim, range(4)))
-        assert len([value for value in ids if value]) == 3
-        assert len(set(value for value in ids if value)) == 3
+        with ThreadPoolExecutor(capacity + 1) as pool:
+            ids = list(pool.map(claim, range(capacity + 1)))
+        assert len([value for value in ids if value]) == capacity
+        assert len(set(value for value in ids if value)) == capacity
         with database.connection_context():
-            assert DocmindIngestionJob.select().where(DocmindIngestionJob.lifecycle_state == 'DECRYPTING').count() == 3
+            assert DocmindIngestionJob.select().where(DocmindIngestionJob.lifecycle_state == 'DECRYPTING').count() == capacity
 
 
-@pytest.mark.parametrize('capacity,ocr', [(1, False), (2, False), (3, False), (4, False), (1, True), (2, True), (3, True), (4, True)])
+@pytest.mark.parametrize('capacity,ocr', [(1, False), (2, False), (3, False), (4, False), (12, False), (1, True), (2, True), (3, True), (4, True), (12, True)])
 def test_pool_reclaims_lost_claim_response_after_lease_expiry(ingestion_db, monkeypatch, capacity, ocr):
     monkeypatch.setenv('DOCMIND_INGESTION_DOCUMENT_CONCURRENCY', str(capacity))
     job_id = _pool_document(1, ocr=ocr)

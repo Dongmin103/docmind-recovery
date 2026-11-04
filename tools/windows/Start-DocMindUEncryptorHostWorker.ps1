@@ -6,8 +6,8 @@ param(
     [string]$ClaimSourceId = '',
     [string]$ClaimJobId = '',
     [ValidateSet('ingest', 'preview')][string]$Purpose = 'ingest',
-    [ValidateRange(-1,3)][int]$IngestionSlot = -1,
-    [ValidateSet(1,2,3,4)][int]$PoolSize = 1,
+    [ValidateRange(-1,11)][int]$IngestionSlot = -1,
+    [ValidateRange(1,12)][int]$PoolSize = 1,
     [int]$ParentProcessId = 0,
     [string]$ParentStartedUtc = '',
     [string]$StopFile = '',
@@ -28,6 +28,7 @@ Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsof
 . (Join-Path $PSScriptRoot 'DocMindUEncryptorHostWorker.Common.ps1')
 . (Join-Path $PSScriptRoot 'DocMindDecryptGate.ps1')
 . (Join-Path $PSScriptRoot 'DocMindIngestionPool.ps1')
+if ($IngestionSlot -ge $PoolSize) { throw 'POOL_SLOT_OUT_OF_RANGE' }
 if ($IngestionSlot -ge 0 -and ($Purpose -ne 'ingest' -or -not $StopFile -or
     -not (Test-DocMindPoolParent -ParentProcessId $ParentProcessId -ParentStartedUtc $ParentStartedUtc))) { throw 'POOL_PARENT_REQUIRED' }
 

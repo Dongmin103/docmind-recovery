@@ -257,7 +257,7 @@ async def claim_cloud_sync_job():
         pool_args = ()
         if 'ingestion_pool_size' in req:
             size = req['ingestion_pool_size']
-            if type(size) is not int or size not in (1, 2, 3, 4):
+            if type(size) is not int or not 1 <= size <= 12:
                 raise docmind_ingestion_service.DocmindIngestionError('DOCMIND_INGESTION_REQUEST_INVALID')
             pool_args = (size,)
         job = await asyncio.to_thread(

@@ -1081,10 +1081,10 @@ def claim_next(worker_id: str, *, lease_seconds: int = 300, allowed_formats: lis
                skip_retries: bool = False, claim_source_id: str | None = None,
                claim_job_id: str | None = None, ingestion_pool_size: int | None = None) -> WorkerDecryptRequest | None:
     limit = int(os.environ.get('DOCMIND_INGESTION_DOCUMENT_CONCURRENCY', '1'))
-    if limit not in (1, 2, 3, 4):
+    if not 1 <= limit <= 12:
         raise DocmindIngestionError('DOCMIND_INGESTION_POOL_CONFIG_INVALID')
     if ingestion_pool_size is not None:
-        if type(ingestion_pool_size) is not int or ingestion_pool_size not in (1, 2, 3, 4):
+        if type(ingestion_pool_size) is not int or not 1 <= ingestion_pool_size <= 12:
             raise DocmindIngestionError('DOCMIND_INGESTION_REQUEST_INVALID')
         if ingestion_pool_size > limit:
             raise DocmindIngestionError('DOCMIND_INGESTION_POOL_NOT_ENABLED')

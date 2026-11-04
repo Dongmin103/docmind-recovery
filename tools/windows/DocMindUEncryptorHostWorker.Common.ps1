@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.Net.Http
 
 function Get-DocMindWorkerRolePaths {
-    param($Config, [ValidateSet('ingest', 'preview')][string]$Purpose, [ValidateRange(-1,3)][int]$IngestionSlot = -1)
+    param($Config, [ValidateSet('ingest', 'preview')][string]$Purpose, [ValidateRange(-1,11)][int]$IngestionSlot = -1)
     $work = [IO.Path]::GetFullPath([string]$Config.work_root)
     $receipts = if ($Config.PSObject.Properties.Name -contains 'cleanup_receipt_root') { [IO.Path]::GetFullPath([string]$Config.cleanup_receipt_root) } else { $work + '-cleanup-receipts' }
     $control = if ($Config.PSObject.Properties.Name -contains 'decrypt_control_root') { [IO.Path]::GetFullPath([string]$Config.decrypt_control_root) } else { Join-Path (Split-Path $work -Parent) 'decrypt-control' }
@@ -22,7 +22,7 @@ function Get-DocMindWorkerRolePaths {
 }
 
 function Enter-DocMindWorkerSingleton {
-    param([ValidateSet('ingest', 'preview')][string]$Purpose, [ValidateRange(-1,3)][int]$IngestionSlot = -1)
+    param([ValidateSet('ingest', 'preview')][string]$Purpose, [ValidateRange(-1,11)][int]$IngestionSlot = -1)
     if ($IngestionSlot -ge 0 -and $Purpose -ne 'ingest') { throw 'SLOT_REQUIRES_INGEST' }
     $suffix = if ($IngestionSlot -ge 0) { '-slot-' + $IngestionSlot } else { '' }
     $mutex = [Threading.Mutex]::new($false, ('Global\DocMind-HostWorker-' + $Purpose.ToLowerInvariant() + $suffix))

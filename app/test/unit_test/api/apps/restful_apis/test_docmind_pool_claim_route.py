@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 
-@pytest.mark.parametrize('size, status', [(2, 200), (1, 200), (True, 409), (0, 409), (3, 200), (4, 200), (5, 409), ('2', 409)])
+@pytest.mark.parametrize('size, status', [(2, 200), (1, 200), (True, 409), (0, 409), (3, 200), (4, 200), (8, 200), (12, 200), (13, 409), (-1, 409), (12.0, 409), ('2', 409)])
 def test_signed_pool_claim_size(size, status):
     path = Path(__file__).resolve().parents[5] / 'api/apps/restful_apis/docmind_api.py'
     node = next(n for n in ast.parse(path.read_text()).body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'claim_cloud_sync_job')

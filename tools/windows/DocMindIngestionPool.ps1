@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 
 function Invoke-DocMindPool {
     param([string]$Executable, [string[]]$Arguments, [string]$StopFile, [switch]$Once)
-    if ($Arguments.Count -lt 1 -or $Arguments.Count -gt 4) { throw 'POOL_SIZE_INVALID' }
+    if ($Arguments.Count -lt 1 -or $Arguments.Count -gt 12) { throw 'POOL_SIZE_INVALID' }
     $children = @{}; $nextStart = @{}; $completedSlots = @{}
     $started = 0; $completed = 0; $peak = 0
     try {
