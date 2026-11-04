@@ -1,0 +1,730 @@
+{
+  "date": "2026-11-04",
+  "experiment": "AVDC 48 logical-CPU embedding quota, 12 workers, 12 continuous document slots",
+  "inputs": {
+    "documents": 24,
+    "input_MiB": 41.36656665802002,
+    "selection": "First 24 PDFs from the previously authorized 154-document manifest, retaining original order",
+    "searchable_documents": 22,
+    "searchable_pages": 242,
+    "chunks": 1359,
+    "textless_PDFs_excluded": 2,
+    "OCR_enabled": false,
+    "concurrent_search": false,
+    "original_ciphertext_hashes_unchanged": true
+  },
+  "baseline": {
+    "mode": "scale48-base24",
+    "documents": 24,
+    "successful_documents": 22,
+    "ocr_required_documents": 2,
+    "pages": [
+      1,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      85,
+      98
+    ],
+    "chunks": [
+      2,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      23,
+      360,
+      794
+    ],
+    "elapsed": 92.13000011444092,
+    "chunks_per_hour": 53103.22363967023,
+    "parse_embedding_overlap_stage": 21.269282579421997,
+    "parse_embedding_overlap_actual_requests": 21.202110290527344,
+    "load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 13,
+        "start": "2026-11-04T07:11:39.9880253+00:00",
+        "last": "2026-11-04T07:12:52.5156398+00:00",
+        "http_200": 13,
+        "HttpSeconds": [
+          17.38,
+          13.51,
+          37.75,
+          37.75
+        ],
+        "HostCPU": [
+          4.69,
+          4.0,
+          11.0,
+          11.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.23,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          60233.0,
+          60233.0,
+          60251.0,
+          60251.0
+        ],
+        "Read_ms_per_op": 0.11,
+        "Write_ms_per_op": 0.051
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 15,
+        "start": "2026-11-04T07:12:58.4851582+00:00",
+        "last": "2026-11-04T07:14:22.2836628+00:00",
+        "http_200": 15,
+        "HttpSeconds": [
+          16.22,
+          12.64,
+          29.44,
+          29.44
+        ],
+        "HostCPU": [
+          16.33,
+          19.0,
+          24.0,
+          24.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.2,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          59963.93,
+          59964.0,
+          59995.0,
+          59995.0
+        ],
+        "Read_ms_per_op": 0.128,
+        "Write_ms_per_op": 0.063
+      }
+    },
+    "cpu": {
+      "embedding": 9.33404024543254,
+      "other": 1.418463366324272,
+      "parser": 0.6813419410600847
+    },
+    "memory": {
+      "embedding_mem": 7989903360,
+      "parser_mem": 650883072,
+      "app_mem": 1002536960,
+      "total_mem": 11683373056,
+      "min_available_kib": 12744368
+    },
+    "embedding_requests": 118,
+    "embedding_max_parallel": 4,
+    "embedding_busy_wall_seconds": 75.8021035194397,
+    "embedding_span_seconds": 84.77161645889282,
+    "embedding_idle_inside_span_seconds": 8.969512939453125,
+    "embedding_worker_seconds": 241.15085911750793,
+    "embedding_average_busy_workers": 2.8447122892182435
+  },
+  "initial_expansion_not_a_valid_speed_comparison": {
+    "mode": "scale48-wide24",
+    "documents": 24,
+    "successful_documents": 21,
+    "unexpected_failures": 1,
+    "failure_codes": [
+      "PARSER_PDF_NO_SEARCHABLE_TEXT",
+      "PARSER_PDF_NO_SEARCHABLE_TEXT",
+      "API_REQUEST_TIMEOUT"
+    ],
+    "ocr_required_documents": 2,
+    "pages": [
+      1,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      85,
+      98
+    ],
+    "chunks": [
+      2,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      23,
+      360,
+      794
+    ],
+    "elapsed": 74.90400004386902,
+    "chunks_per_hour": 64834.98874767373,
+    "parse_embedding_overlap_stage": 19.673481225967407,
+    "parse_embedding_overlap_actual_requests": 19.409854412078857,
+    "load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 13,
+        "start": "2026-11-04T07:23:15.7971064+00:00",
+        "last": "2026-11-04T07:24:28.1517474+00:00",
+        "http_200": 13,
+        "HttpSeconds": [
+          15.27,
+          14.44,
+          24.01,
+          24.01
+        ],
+        "HostCPU": [
+          6.0,
+          5.0,
+          13.0,
+          13.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.31,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          35673.23,
+          35649.0,
+          35818.0,
+          35818.0
+        ],
+        "Read_ms_per_op": 0.127,
+        "Write_ms_per_op": 0.062
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 12,
+        "start": "2026-11-04T07:24:34.2234907+00:00",
+        "last": "2026-11-04T07:25:40.5537467+00:00",
+        "http_200": 12,
+        "HttpSeconds": [
+          16.34,
+          17.24,
+          26.46,
+          26.46
+        ],
+        "HostCPU": [
+          22.33,
+          18.0,
+          47.0,
+          47.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.33,
+          0.0,
+          2.0,
+          2.0
+        ],
+        "FreeMiB": [
+          35093.92,
+          35066.5,
+          35348.0,
+          35348.0
+        ],
+        "Read_ms_per_op": 0.197,
+        "Write_ms_per_op": 0.062
+      }
+    },
+    "cpu": {
+      "embedding": 15.861647940373258,
+      "other": 1.8828285869889907,
+      "parser": 0.7962938593826764
+    },
+    "memory": {
+      "embedding_mem": 22947270656,
+      "parser_mem": 650575872,
+      "app_mem": 1111187456,
+      "total_mem": 26133225472,
+      "min_available_kib": 21658336
+    },
+    "embedding_requests": 116,
+    "embedding_max_parallel": 12,
+    "embedding_busy_wall_seconds": 48.10991454124451,
+    "embedding_span_seconds": 61.71935439109802,
+    "embedding_idle_inside_span_seconds": 13.609439849853516,
+    "embedding_worker_seconds": 338.6426012516022,
+    "embedding_average_busy_workers": 5.486813732783402
+  },
+  "fixed_expansion": {
+    "mode": "scale48-fixed24",
+    "documents": 24,
+    "successful_documents": 22,
+    "unexpected_failures": 0,
+    "failure_codes": [
+      "PARSER_PDF_NO_SEARCHABLE_TEXT",
+      "PARSER_PDF_NO_SEARCHABLE_TEXT"
+    ],
+    "ocr_required_documents": 2,
+    "pages": [
+      1,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      85,
+      98
+    ],
+    "chunks": [
+      2,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      23,
+      360,
+      794
+    ],
+    "elapsed": 71.21900010108948,
+    "chunks_per_hour": 68695.15147721315,
+    "parse_embedding_overlap_stage": 20.94809103012085,
+    "parse_embedding_overlap_actual_requests": 20.986076593399048,
+    "load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 13,
+        "start": "2026-11-04T07:37:35.3165282+00:00",
+        "last": "2026-11-04T07:38:47.6504453+00:00",
+        "http_200": 13,
+        "HttpSeconds": [
+          13.81,
+          13.53,
+          18.23,
+          18.23
+        ],
+        "HostCPU": [
+          5.69,
+          5.0,
+          12.0,
+          12.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "FreeMiB": [
+          35790.62,
+          35793.0,
+          35805.0,
+          35805.0
+        ],
+        "Read_ms_per_op": 0.12,
+        "Write_ms_per_op": 0.049
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 11,
+        "start": "2026-11-04T07:38:53.6698011+00:00",
+        "last": "2026-11-04T07:39:53.8481837+00:00",
+        "http_200": 11,
+        "HttpSeconds": [
+          16.68,
+          17.56,
+          30.29,
+          30.29
+        ],
+        "HostCPU": [
+          28.55,
+          27.0,
+          48.0,
+          48.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.18,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          35134.18,
+          35163.0,
+          35424.0,
+          35424.0
+        ],
+        "Read_ms_per_op": 0.12,
+        "Write_ms_per_op": 0.05
+      }
+    },
+    "cpu": {
+      "embedding": 17.186502361598407,
+      "other": 1.9317489924193123,
+      "parser": 0.8155485259640085
+    },
+    "memory": {
+      "embedding_mem": 23185952768,
+      "parser_mem": 605507584,
+      "app_mem": 1104887808,
+      "total_mem": 26288893952,
+      "min_available_kib": 21401632
+    },
+    "embedding_requests": 118,
+    "embedding_max_parallel": 12,
+    "embedding_busy_wall_seconds": 44.11477518081665,
+    "embedding_span_seconds": 54.868889570236206,
+    "embedding_idle_inside_span_seconds": 10.754114389419556,
+    "embedding_worker_seconds": 350.7466697692871,
+    "embedding_average_busy_workers": 6.392450667701333
+  },
+  "comparison": {
+    "elapsed_reduction_percent": 22.697275575139987,
+    "throughput_ratio": 1.2936154675531812,
+    "same_successful_documents_and_chunks": true,
+    "baseline_reused_for_fix_comparison": true
+  },
+  "configuration": {
+    "baseline": {
+      "vm_vcpus": 36,
+      "vm_cap_percent": 100,
+      "vm_RAM_GiB": 24,
+      "embedding_workers": 4,
+      "threads_per_worker": 4,
+      "embedding_CPU_quota": 16,
+      "document_slots": 4,
+      "parser_CPU_quota": 4,
+      "parser_workers": 1,
+      "other_service_cpuset": "32-35"
+    },
+    "candidate": {
+      "vm_vcpus": 64,
+      "vm_cap_percent": 100,
+      "vm_RAM_GiB": 48,
+      "embedding_workers": 12,
+      "threads_per_worker": 4,
+      "embedding_CPU_quota": 48,
+      "embedding_cpuset": "0-47",
+      "document_slots": 12,
+      "parser_CPU_quota": 4,
+      "parser_workers": 1,
+      "other_service_cpuset": "48-51"
+    },
+    "model_attention": "Unchanged FP32 SDPA",
+    "short_batch": 16,
+    "source_order_unchanged": true,
+    "warmup": "Candidate models received synthetic inputs and parser received a synthetic three-page PDF before measurement; baseline was already warm."
+  },
+  "timeout_diagnosis": {
+    "observed": "One pre-decryption validate request timed out at 10.019206 seconds, before any plaintext delivery or parser run. Eight jobs were observed in PARSING while four were DECRYPTING. No OOM, restarts or embedding quota throttling were observed.",
+    "default_executor_probe": {
+      "python": "3.13.11",
+      "host_visible_cpu_count": 64,
+      "process_cpu_count": 4,
+      "affinity": [
+        48,
+        49,
+        50,
+        51
+      ],
+      "fresh_default_asyncio_executor_workers": 8
+    },
+    "code_evidence": "Artifact processing, authentication and lease validation all used asyncio.to_thread on the default executor. With four app-visible logical CPUs, a fresh Python 3.13 default executor has eight threads.",
+    "synthetic_reproduction": "Eight blocking artifact handlers starved the control request in the original shared-executor variant. Twelve dedicated artifact handlers left signed control requests responsive; the thirteenth artifact was rejected immediately with signed HTTP 503.",
+    "not_captured": "No live thread-stack snapshot of the original timeout; exact production queue/DB scheduling not directly traced.",
+    "after_fix_control_latency": {
+      "requests": 142,
+      "http_200": 142,
+      "mean_ms": 59.421028169014086,
+      "p95_ms": 141.106,
+      "max_ms": 411.943
+    }
+  },
+  "fix": {
+    "commit": "d097348",
+    "description": "Dedicated bounded ingestion executor sized by configured document capacity, retaining the default executor for control requests. Context propagation preserved; HTTP cancellation does not release a still-running job slot.",
+    "capacity_support_commit": "d5b34b7",
+    "capacity_max": 12,
+    "default_capacity": 1
+  },
+  "verification": {
+    "pool_route_and_lease_tests_passed": 53,
+    "executor_and_route_tests_passed": 20,
+    "PowerShell_pool_regression_capacities": [
+      4,
+      12
+    ],
+    "active_content_tokens_positions_match": true,
+    "vectors": {
+      "documents": [
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 23,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 1.0,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 794,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 2,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 1.0,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 360,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        },
+        {
+          "chunks": 10,
+          "min_cosine": 0.9999999999999999,
+          "max_abs_error": 0.0
+        }
+      ],
+      "all_1359_vectors_pass": true
+    },
+    "all_24_host_cleanup_ACKs_complete": true,
+    "host_plaintext_files_remaining": 0,
+    "temporary_trial_key_files_remaining": 0,
+    "trial_SSH_access_expired": true,
+    "failed_trial_source_disabled_to_prevent_automatic_retry": true,
+    "OOM_kills": 0
+  },
+  "final_state": {
+    "resource_limits_restored": true,
+    "vm_vcpus": 36,
+    "vm_cap_percent": 100,
+    "vm_RAM_GiB": 24,
+    "embedding_workers": 4,
+    "embedding_CPU_quota": 16,
+    "document_slots": 4,
+    "parser_CPU_quota": 4,
+    "parser_workers": 1,
+    "executor_fix_retained": true,
+    "active_ingestion": 0,
+    "disabled_failed_trial_retry_wait_jobs": 1
+  },
+  "units": {
+    "elapsed": "seconds from first job registration to last active chunk-set activation, same DB-based definition in both runs",
+    "load.HttpSeconds": "milliseconds despite inherited field name; mean, median, p95, max",
+    "load.HostCPU": "percent of whole Windows physical host, including groupware",
+    "cpu": "average logical CPU equivalents",
+    "memory": "bytes"
+  },
+  "coordinator_notes": {
+    "baseline": "Coordinator expected all 24 to be searchable; two textless PDFs were correctly rejected with OCR disabled. Stopped idle pool after all jobs were terminal. Post-completion wait excluded using job registration/activation timestamps.",
+    "fixed_candidate": "All 22 searchable PDFs activated and 24 jobs cleaned. Coordinator then incorrectly queried active chunks for the two OCR-required exclusions and raised PAIR_NO_ACTIVE_CHUNK. No ingestion failure. Validate searchable documents using DB, active ES sets, full content/vector comparison and original hashes instead.",
+    "success_is_verified_independently_of_coordinator_exit": true
+  },
+  "limitations": [
+    "Single actual indexing run per configuration; initial expansion had one unexpected failure and must not be treated as an equal-success speed comparison.",
+    "This is a short mixed corpus: two long PDFs and many short PDFs, not a sustained TB-scale saturation test.",
+    "VM CPU count, memory, virtual NUMA topology, affinity layout and control-executor isolation differ between baseline and successful candidate; the combined gain is not attributable solely to embedding CPU quota.",
+    "VM reports SMT pairs; 48 logical CPUs are not 48 dedicated physical cores. Baseline VM had one reported NUMA node, expanded VM two.",
+    "Groupware probe measures the landing page, not authenticated business operations; indexing samples were 15 vs 11 and rounded GroupWareCPU readings were zero.",
+    "Initial measurement coordinator mishandled the two expected textless exclusions; final results were independently validated against DB, active index content/vectors and plaintext cleanup. Post-completion coordinator wait was excluded.",
+    "No new live reranker relevance evaluation; active indexed text/tokens/positions and all embedding vectors were identical."
+  ]
+}
