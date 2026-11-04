@@ -1,0 +1,80 @@
+{
+  "experiment": "Cooperative token generation and ephemeral chunk metadata preparation",
+  "date": "2026-11-04",
+  "status": "candidate_not_adopted",
+  "reason": "One matched-input trial showed no end-to-end speed improvement; restore the previous four-slot deployment.",
+  "candidate": [
+    "Yield between complete tokenized chunks after a 5 ms cooperative work budget, preserving the shared tokenizer's thread and per-chunk language reset.",
+    "Prepare ephemeral chunk metadata in input order without creating a task and timeout wrapper per chunk; yield between chunks.",
+    "Record separate search_fields and chunk_metadata stage durations."
+  ],
+  "fixed_configuration": {
+    "vm_vcpu": 36,
+    "vm_cap_percent": 100,
+    "parser_cpu": 4,
+    "parser_concurrency": 1,
+    "embedding_workers": 4,
+    "threads_per_embedding_worker": 4,
+    "embedding_short_batch_size": 16,
+    "document_slots": 4,
+    "continuous_refill": true,
+    "ocr": false,
+    "concurrent_searches": false
+  },
+  "inputs": {
+    "same_manifest_and_registration_order": true,
+    "pages_in_manifest_order": [98, 85, 48, 92, 24, 149],
+    "documents": 6,
+    "total_pages": 496,
+    "total_chunks": 2026
+  },
+  "baseline": {
+    "elapsed_seconds": 89.401,
+    "chunks_per_hour": 81582.98,
+    "host_cpu_baseline_mean_percent": 4.25,
+    "host_cpu_indexing_mean_percent": 16.38,
+    "host_cpu_indexing_max_percent": 26,
+    "groupware_http_baseline_mean_ms": 14.73,
+    "groupware_http_indexing_mean_ms": 15.25,
+    "groupware_http_indexing_p95_ms": 24.20,
+    "baseline_samples": 12,
+    "indexing_samples": 16,
+    "indexing_http_200": 16
+  },
+  "candidate_result": {
+    "elapsed_seconds": 89.892,
+    "elapsed_change_percent": 0.5492,
+    "chunks_per_hour": 81137.36,
+    "host_cpu_baseline_mean_percent": 4,
+    "host_cpu_indexing_mean_percent": 14.76,
+    "host_cpu_indexing_max_percent": 24,
+    "groupware_http_baseline_mean_ms": 15.68,
+    "groupware_http_indexing_mean_ms": 14,
+    "groupware_http_indexing_p95_ms": 19.51,
+    "baseline_samples": 12,
+    "indexing_samples": 17,
+    "indexing_http_200": 17,
+    "groupware_cpu_reported_percent": 0,
+    "completed_documents": 6,
+    "failed_documents": 0,
+    "host_plaintext_files_remaining": 0,
+    "temporary_worker_key_removed": true,
+    "temporary_worker_ssh_access_expired": true,
+    "oom_kills": 0
+  },
+  "validation": [
+    "Four synthetic search-field tests passed, including interleaved languages and cancellation without background mutation.",
+    "Old/new ephemeral metadata equivalence, deterministic IDs, order, source immutability, sanitization and cooperative progress passed.",
+    "Six ciphertext/plaintext hashes and per-document chunk counts matched the baseline.",
+    "Active text, lexical token, position and chunk-order digests matched for all six documents.",
+    "Focused correctness lint and git diff whitespace checks passed. Broad lint retained legacy module warnings; the experimental code was not adopted."
+  ],
+  "limitations": [
+    "Single run per condition; the 0.49-second difference does not establish a performance regression or improvement.",
+    "Manifest and registration order were unchanged, but concurrent workers reached the single parser in different orders. Individual document times are not controlled paired measurements.",
+    "Only the application container was recreated to load the candidate; parser and embedding containers were not restarted.",
+    "Cooperative stage durations include time yielded to other tasks; they are not pure CPU compute time.",
+    "Groupware checks probe its HTTP entry page, not authenticated business transactions. CPUUsage is an integer sample; reported zero is not proof of zero CPU consumption.",
+    "Small HTTP sample counts and other host activity limit causal attribution of the CPU/latency differences."
+  ]
+}
