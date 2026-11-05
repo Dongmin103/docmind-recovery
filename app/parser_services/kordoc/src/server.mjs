@@ -35,7 +35,7 @@ function defaultSpawnWorker() {
 
 export function createServer({ spawnWorker = defaultSpawnWorker, timeoutMs: jobTimeoutMs = timeoutMs,
   jobRoot = defaultJobRoot, workerCount = Number(process.env.KORDOC_WORKERS || 1) } = {}) {
-  if (![1, 2].includes(workerCount) || !Number.isFinite(jobTimeoutMs) || jobTimeoutMs <= 0) {
+  if (![1, 2, 4].includes(workerCount) || !Number.isFinite(jobTimeoutMs) || jobTimeoutMs <= 0) {
     throw new Error('invalid parser capacity or deadline');
   }
   const ownedRoot = resolve(jobRoot);

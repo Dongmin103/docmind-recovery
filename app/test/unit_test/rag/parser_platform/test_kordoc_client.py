@@ -69,8 +69,13 @@ class KordocClientTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'PARSER_CLEANUP_FAILED')
         self.assertEqual(send.call_count, 1)
 
-    def test_capacity_two_admits_two_and_does_not_serialize_queued_source(self):
-        entered = threading.Barrier(3)
+    def test_pool_capacity_admits_workers_and_does_not_serialize_queued_source(self):
+        for capacity in (2, 4):
+            with self.subTest(capacity=capacity):
+                self._check_pool_capacity(capacity)
+
+    def _check_pool_capacity(self, capacity):
+        entered = threading.Barrier(capacity + 1)
         release = threading.Event()
         encoded = []
         original_encode = __import__('base64').b64encode
@@ -82,17 +87,18 @@ class KordocClientTest(unittest.TestCase):
             self.assertTrue(release.wait(3))
             return io.BytesIO(json.dumps({'source_hash': hashlib.sha256(b'synthetic').hexdigest(),
                                          'source_format': 'hwp', 'parser_name': 'kordoc'}).encode())
-        with patch.dict(os.environ, {'KORDOC_CLIENT_CONCURRENCY': '2'}), \
+        service_url = f'http://pool-parser-{capacity}:8095'
+        with patch.dict(os.environ, {'KORDOC_CLIENT_CONCURRENCY': str(capacity)}), \
              patch('rag.parser_platform.kordoc_pilot.urllib.request.urlopen', side_effect=respond), \
              patch('rag.parser_platform.kordoc_pilot.base64.b64encode', side_effect=encode):
-            with ThreadPoolExecutor(2) as pool:
+            with ThreadPoolExecutor(capacity) as pool:
                 futures = [pool.submit(parse_pilot_service, b'synthetic', 'hwp',
-                           service_url='http://pool-parser:8095', timeout=2) for _ in range(2)]
+                           service_url=service_url, timeout=2) for _ in range(capacity)]
                 try:
                     entered.wait(timeout=2)
                     with self.assertRaises(TimeoutError):
-                        parse_pilot_service(b'queued', 'hwp', service_url='http://pool-parser:8095', timeout=.05)
-                    self.assertEqual(encoded, [b'synthetic', b'synthetic'])
+                        parse_pilot_service(b'queued', 'hwp', service_url=service_url, timeout=.05)
+                    self.assertEqual(encoded, [b'synthetic'] * capacity)
                 finally:
                     release.set()
                 self.assertTrue(all(f.result()['parser_name'] == 'kordoc' for f in futures))

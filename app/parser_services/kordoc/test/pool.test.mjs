@@ -34,18 +34,21 @@ async function active(base, count) {
   }
   assert.fail(`never observed ${count} admitted jobs`);
 }
-test('two workers own independent jobs; a third is rejected before upload buffering',async t=>{
-  const {base,root}=await fixture(t);
-  const a=post(base,{marker:'a',delay:500}); const b=post(base,{marker:'b',delay:500});
-  const health=await active(base,2); assert.equal(health.capacity,2);
-  assert.equal((await post(base,{marker:'overflow'})).status,503);
-  const responses=await Promise.all([a,b]); assert.deepEqual(responses.map(r=>r.status),[200,200]);
-  const values=await Promise.all(responses.map(r=>r.json()));
-  assert.deepEqual(values.map(v=>v.marker),['a','b']); assert.notEqual(values[0].pid,values[1].pid);
-  assert.deepEqual(await readdir(root),[]);
-  const reused=await post(base,{marker:'reuse'}).then(r=>r.json());
-  assert.ok(values.some(v=>v.pid===reused.pid));
-});
+for (const workerCount of [2,4]) {
+  test(`${workerCount} workers own independent jobs; overflow is rejected before upload buffering`,async t=>{
+    const {base,root}=await fixture(t,{workerCount});
+    const markers=Array.from({length:workerCount},(_,i)=>String(i));
+    const requests=markers.map(marker=>post(base,{marker,delay:500}));
+    const health=await active(base,workerCount); assert.equal(health.capacity,workerCount);
+    assert.equal((await post(base,{marker:'overflow'})).status,503);
+    const responses=await Promise.all(requests); assert.deepEqual(responses.map(r=>r.status),Array(workerCount).fill(200));
+    const values=await Promise.all(responses.map(r=>r.json()));
+    assert.deepEqual(values.map(v=>v.marker),markers); assert.equal(new Set(values.map(v=>v.pid)).size,workerCount);
+    assert.deepEqual(await readdir(root),[]);
+    const reused=await post(base,{marker:'reuse'}).then(r=>r.json());
+    assert.ok(values.some(v=>v.pid===reused.pid));
+  });
+}
 test('crash in one worker leaves the sibling result and slot intact',async t=>{
   const {base,root}=await fixture(t);
   const sibling=post(base,{marker:'sibling',delay:400}); await active(base,1);

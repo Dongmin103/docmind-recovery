@@ -25,7 +25,7 @@ def _parser_slot(service_url: str, timeout: float, timing_scope):
         raise ValueError("Kordoc timeout must be positive")
     deadline = time.monotonic() + timeout
     capacity = int(os.environ.get("KORDOC_CLIENT_CONCURRENCY", "1"))
-    if capacity not in (1, 2):
+    if capacity not in (1, 2, 4):
         raise ValueError("invalid Kordoc client capacity")
     with _parser_slots_guard:
         configured, slot = _parser_slots.setdefault(service_url.rstrip("/"),
