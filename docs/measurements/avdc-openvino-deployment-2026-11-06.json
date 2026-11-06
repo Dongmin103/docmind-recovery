@@ -1,0 +1,290 @@
+{
+  "applied_kst": "2026-11-06 14:58 KST",
+  "verified_kst": "2026-11-06 15:03 KST",
+  "rechecked_utc": "2026-11-06T06:16:24Z",
+  "backend": "OpenVINO FP32",
+  "versions": {
+    "openvino": "2026.4.1",
+    "openvino-telemetry": "2025.2.0",
+    "torch": "2.8.0+cpu",
+    "transformers": "4.57.1",
+    "numpy": "2.4.6",
+    "tokenizers": "0.22.2"
+  },
+  "source_sha256": {
+    "service.py": "778d77a3622f986fe8de6222ba2168081daa7eb13c4c0e9ce50d527df2371f65",
+    "pool.py": "6e447a289e6b6d8338361c325291e4d9eaa71df40cd74fba5b10147688592953",
+    "export_model.py": "4a3062302a4d519960fe0ec9f01c60e353ff2abcf8aba8b04179c89694124075"
+  },
+  "model_sha256": {
+    "model.xml": "0db4102fb18b2724f91e6d404ae651d5ec39a9ae65dd479c7f7ae0e8079e0c19",
+    "model.bin": "ca07edf92d30bdfc2fc2b423aea7db6481b94b65163a596fb314b17bc3b3ce17"
+  },
+  "containers": {
+    "embedding": {
+      "image": "sha256:5b54a0e50412b36e64bf6f8fcc89472d08d11cb203f0fc42fb744b6b576794b6",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 88.000004096,
+      "cpuset": "0-47,56-95",
+      "memory": 55834574848
+    },
+    "parser": {
+      "image": "sha256:53fc3d95238e2bc0f8dc35676440213b2a36d59a904c7d051bdcf35166475d2d",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 4.0,
+      "cpuset": "48-55",
+      "memory": 1073741824
+    },
+    "docmind": {
+      "image": "sha256:6efabc3403fcd5b37ca6f83ac709fbcb9075cbc7542f4d11ba09db2697189365",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 2684354560
+    },
+    "es": {
+      "image": "sha256:58a3a280935d830215802322e9a0373faaacdfd646477aa7e718939c2f29292a",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 1610612736
+    },
+    "mysql": {
+      "image": "sha256:d58ac93387f644e4e040c636b8f50494e78e5afc27ca0a87348b2f577da2b7ff",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 536870912
+    },
+    "redis": {
+      "image": "sha256:640c5e62cea04b6d6f2084232651d0cc70362d31f4f805e7be94dbed6855e8f2",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 134217728
+    },
+    "minio": {
+      "image": "sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac",
+      "status": "running",
+      "health": "healthy",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 268435456
+    },
+    "preview": {
+      "image": "sha256:9cf6168534fb253c035a46e70f10e15a0e258e65e01311e8fce4045bf2832708",
+      "status": "running",
+      "health": null,
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 268435456
+    }
+  },
+  "persistent_compose_matches": true,
+  "host": {
+    "VMCPU": 96,
+    "Cap": 100,
+    "RAM": 64,
+    "Groupware": "Running",
+    "HTTP": 200
+  },
+  "indexing_runs_during_rollout": 0,
+  "data_before": {
+    "active_jobs": 0,
+    "jobs": 535,
+    "documents": 535,
+    "chunks": 43501
+  },
+  "data_after": {
+    "active_jobs": 0,
+    "jobs": 535,
+    "documents": 535,
+    "chunks": 43501
+  },
+  "query_verification": {
+    "questions": 12,
+    "same_document_order": 12,
+    "same_evidence": 12,
+    "same_relevance": 12,
+    "rows": [
+      {
+        "query": 0,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 20,
+        "candidate_count_after": 20,
+        "relevance_same": true,
+        "seconds_after": 4.526955019988236
+      },
+      {
+        "query": 1,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 16,
+        "candidate_count_after": 16,
+        "relevance_same": true,
+        "seconds_after": 3.479912234994117
+      },
+      {
+        "query": 2,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 25,
+        "candidate_count_after": 25,
+        "relevance_same": true,
+        "seconds_after": 2.841547678995994
+      },
+      {
+        "query": 3,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 24,
+        "candidate_count_after": 24,
+        "relevance_same": true,
+        "seconds_after": 5.038168683007825
+      },
+      {
+        "query": 4,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 16,
+        "candidate_count_after": 16,
+        "relevance_same": true,
+        "seconds_after": 6.197628187001101
+      },
+      {
+        "query": 5,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 18,
+        "candidate_count_after": 18,
+        "relevance_same": true,
+        "seconds_after": 5.992284092993941
+      },
+      {
+        "query": 6,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 19,
+        "candidate_count_after": 19,
+        "relevance_same": true,
+        "seconds_after": 5.184745667007519
+      },
+      {
+        "query": 7,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 1,
+        "count_after": 1,
+        "candidate_count_before": 20,
+        "candidate_count_after": 20,
+        "relevance_same": true,
+        "seconds_after": 4.202879418007797
+      },
+      {
+        "query": 8,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 0,
+        "count_after": 0,
+        "candidate_count_before": 25,
+        "candidate_count_after": 25,
+        "relevance_same": true,
+        "seconds_after": 3.9921540100040147
+      },
+      {
+        "query": 9,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 2,
+        "count_after": 2,
+        "candidate_count_before": 57,
+        "candidate_count_after": 57,
+        "relevance_same": true,
+        "seconds_after": 5.0885061049921205
+      },
+      {
+        "query": 10,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 0,
+        "count_after": 0,
+        "candidate_count_before": 19,
+        "candidate_count_after": 19,
+        "relevance_same": true,
+        "seconds_after": 2.8654034579958534
+      },
+      {
+        "query": 11,
+        "document_order_same": true,
+        "evidence_same": true,
+        "count_before": 0,
+        "count_after": 0,
+        "candidate_count_before": 72,
+        "candidate_count_after": 72,
+        "relevance_same": true,
+        "seconds_after": 11.394690629997058
+      }
+    ]
+  },
+  "runtime": {
+    "scope": "After deployment, near-idle and 12-query search verification; no indexing workload",
+    "VM_samples": 90,
+    "VM_window_seconds": 89.2482078075409,
+    "host_samples": 12,
+    "host_window_seconds": 62.81100010871887,
+    "host_cpu_mean": 6.75,
+    "host_cpu_max": 14,
+    "host_available_min_gib": 24.341796875,
+    "embedding_memory_peak_gib": 21.850505828857422,
+    "total_memory_peak_gib": 25.136699676513672,
+    "VM_available_min_gib": 35.3260498046875,
+    "groupware_cpu_mean": 0,
+    "groupware_cpu_max": 0,
+    "http_mean_ms": 13.075833333333332,
+    "http_p95_ms": 18.226,
+    "cpu_equivalents": {
+      "docmind": 0.5069405438097461,
+      "embedding": 0.02490892595618222,
+      "parser": 0.011277358108640457,
+      "es": 0.027267158184821068,
+      "mysql": 0.16995493100219305,
+      "redis": 0.008764736225144747,
+      "minio": 0.005862224159483834,
+      "preview": 0.00016391365562820796
+    }
+  },
+  "rollback_timer_disabled": true,
+  "benchmark": {
+    "inputs": 24,
+    "successful_documents": 22,
+    "ocr_required_excluded": 2,
+    "pages": 242,
+    "chunks": 1359,
+    "matched_pytorch_seconds": 70.159,
+    "openvino_seconds": 61.697,
+    "gpu_whole_seconds": 39.191,
+    "single_run": true,
+    "gpu_is_different_machine_and_concurrency": true
+  }
+}

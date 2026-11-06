@@ -1,0 +1,17 @@
+# Add LAST to the existing AVDC stack. Not a standalone installation.
+# Actual paths/configuration/secrets remain outside Git.
+services:
+  embedding:
+    image: docmind-gte-openvino:20261106
+    pull_policy: never
+    entrypoint: [python, /opt/docmind/pool.py, --config, /opt/docmind/config.json]
+    cpus: 88
+    cpuset: "0-47,56-95"
+    mem_limit: 52g
+    volumes:
+      - ${AVDC_EMBEDDING_SOURCE:?Set source directory}/service.py:/opt/docmind/service.py:ro
+      - ${AVDC_EMBEDDING_SOURCE:?Set source directory}/pool.py:/opt/docmind/pool.py:ro
+      - ${AVDC_EMBEDDING_CONFIG:?Set restricted config file}:/opt/docmind/config.json:ro
+      - ${AVDC_EMBEDDING_KEY:?Set existing key file}:/run/secrets/embedding-key:ro
+      - ${AVDC_OPENVINO_MODEL:?Set model directory}/model.xml:/opt/docmind/openvino-model/model.xml:ro
+      - ${AVDC_OPENVINO_MODEL:?Set model directory}/model.bin:/opt/docmind/openvino-model/model.bin:ro
