@@ -63,8 +63,8 @@ def _pdf_chunks(items, *, budget=512, delimiter="\n"):
     blocks, sources = [], {}
     for i, (page, kind, text) in enumerate(items):
         block_id = f"{i:032x}"
-        blocks.append(SimpleNamespace(stable_block_id=block_id, block_type=kind,
-                                      provenance=(SimpleNamespace(page=page),)))
+        blocks.append(SimpleNamespace(stable_block_id=block_id, block_type=kind, text=text,
+                                      provenance=(SimpleNamespace(page=page, bbox=(0, i * 12, 200, i * 12 + 10)),)))
         sources[block_id] = {
             "content_with_weight": text,
             "doc_type_kwd": "table" if kind == BlockType.TABLE else "text",
@@ -96,16 +96,30 @@ def test_pdf_short_heading_lines_stay_with_body_and_keep_evidence():
     assert chunks[0]["page_num_int"] == [1]
 
 
-def test_pdf_short_fragments_do_not_cross_pages_or_tables():
+def test_pdf_keeps_pages_separate_and_original_text_grouping_around_atomic_table():
     table = "<table><tr><td>표 원문</td></tr></table>"
     chunks = _pdf_chunks([(1, BlockType.HEADING, "첫 페이지"),
                           (2, BlockType.HEADING, "표 앞"),
                           (2, BlockType.TABLE, table),
-                          (2, BlockType.TEXT, "표 뒤"),
-                          (2, BlockType.HEADING, "다음 설명")])
-    assert [c["content_with_weight"] for c in chunks] == ["첫 페이지", "표 앞", table, "표 뒤\n다음 설명"]
-    assert [c["chunk_order_int"] for c in chunks] == list(range(4))
+                          (2, BlockType.TEXT, "표 뒤")])
+    assert [c["content_with_weight"] for c in chunks] == ["첫 페이지", "표 앞\n표 뒤", table]
+    assert [c["chunk_order_int"] for c in chunks] == list(range(3))
     assert chunks[2]["metadata"]["parser_platform"]["source_item_ids"] == ["block/2"]
+
+
+def test_pdf_glyph_runs_are_not_expanded_into_one_line_per_character():
+    chunks = _pdf_chunks([(1, BlockType.TEXT, text) for text in
+                          ["본문 설명입니다.", "20", "17", "공", "공", "클", "라", "우", "드", "다음 본문입니다."]])
+    assert chunks[0]["content_with_weight"] == "본문 설명입니다.\n2017공공클라우드\n다음 본문입니다."
+
+
+def test_pdf_quoted_title_continuation_does_not_break_after_short_fragment_threshold():
+    first = "“" + "긴 제목 문구 " * 20
+    chunks = _pdf_chunks([(1, BlockType.HEADING, first),
+                          (1, BlockType.HEADING, "두 번째 줄”"),
+                          (1, BlockType.TEXT, "제목에 이어지는 본문입니다.")])
+    assert len(chunks) == 1
+    assert "두 번째 줄”\n제목에 이어지는 본문입니다." in chunks[0]["content_with_weight"]
 
 
 def test_pdf_heading_boundary_respects_small_token_budget():

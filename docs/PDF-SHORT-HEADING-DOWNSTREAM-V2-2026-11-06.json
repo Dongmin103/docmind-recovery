@@ -1,0 +1,50 @@
+{
+  "baseline": {
+    "chunks": 794,
+    "text": 686,
+    "tables": 108,
+    "under48tokens": 533
+  },
+  "first_candidate": {
+    "chunks": 491,
+    "text": 383,
+    "tables": 108,
+    "under48tokens": 79
+  },
+  "second_candidate": {
+    "chunks": 440,
+    "text": 332,
+    "tables": 108,
+    "under48tokens": 44
+  },
+  "scope": "Downstream OfficeChunker only; Kordoc code, settings, output classifications and ordering unchanged.",
+  "changes": [
+    "Restore original text aggregation across atomic tables",
+    "Keep adjacent quoted heading lines together",
+    "Avoid one newline per 1-2-character glyph fragment"
+  ],
+  "checks": {
+    "source_block_ids_equal": true,
+    "page_character_multisets_equal_excluding_whitespace": true,
+    "table_contents_exact": true,
+    "unit_tests_passed": 74
+  },
+  "search": {
+    "second_candidate_verified": false,
+    "reason": "Temporary baseline index primary shard was not allocated: disk high watermark 90%, used 90.2%, available 5.5 GiB below required 5.7 GiB. No cluster settings changed. First candidate 8/8 evidence@1 does not validate second candidate."
+  },
+  "limitations": [
+    "Repeated marginal labels remain",
+    "Kordoc table classifications and reading order remain",
+    "Some page-number and other small chunks remain",
+    "One document comparison does not establish general search quality"
+  ],
+  "cleanup": {
+    "temporary_indices_removed": true,
+    "remote_test_tmpfs_removed": true,
+    "production_active_chunks": 794,
+    "production_active_set_unchanged": true,
+    "cluster_health_after_cleanup": "green"
+  },
+  "deployed": false
+}

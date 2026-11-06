@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from common.token_utils import num_tokens_from_string
@@ -17,6 +18,31 @@ def _unique(values: list[Any]) -> list[Any]:
         if value is not None and value not in output:
             output.append(value)
     return output
+
+
+def _pdf_heading_continuation(previous, current) -> bool:
+    """Keep a quoted title wrapped over nearby PDF lines in one group."""
+    if previous is None or previous.block_type != BlockType.HEADING or current.block_type != BlockType.HEADING:
+        return False
+    first = re.sub(r"<[^>]+>", "", previous.text).strip()
+    second = re.sub(r"<[^>]+>", "", current.text).strip()
+    if not any(opener in first and closer not in first and closer in second
+               for opener, closer in (("“", "”"), ("‘", "’"), ("「", "」"))):
+        return False
+    a, b = previous.provenance[0], current.provenance[0]
+    if a.page != b.page or not a.bbox or not b.bbox:
+        return False
+    height = a.bbox[3] - a.bbox[1]
+    return (0 <= b.bbox[1] - a.bbox[3] <= height * 2
+            and min(a.bbox[2], b.bbox[2]) > max(a.bbox[0], b.bbox[0]))
+
+
+def _pdf_block_separator(previous: str, current: str) -> str:
+    # Preserve short glyph runs (e.g. vertical labels) instead of adding one
+    # newline per glyph. This does not classify or remove parser content.
+    a = re.sub(r"<[^>]+>", "", previous).strip()
+    b = re.sub(r"<[^>]+>", "", current).strip()
+    return "" if 0 < len(a) <= 2 and 0 < len(b) <= 2 else "\n"
 
 
 def _merge_source_chunks(chunks: list[dict], text: str) -> dict:
@@ -160,6 +186,7 @@ class OfficeChunker:
         source_for_index: list[dict] = []
         custom_delimiter = False
         boundary_key: tuple[str, ...] | int | None = None
+        previous_block = None
 
         def flush() -> None:
             nonlocal pending, source_for_index, custom_delimiter, boundary_key
@@ -175,6 +202,11 @@ class OfficeChunker:
             chunk = by_block_id.get(block.stable_block_id)
             if chunk is None:
                 continue
+            continued_heading = by_pdf and _pdf_heading_continuation(previous_block, block)
+            previous_block = block
+            plain_heading = re.sub(r"<[^>]+>", "", block.text).strip() if by_pdf and block.block_type == BlockType.HEADING else ""
+            starts_wrapped_title = any(plain_heading.startswith(opener) and closer not in plain_heading
+                                      for opener, closer in (("“", "”"), ("‘", "’"), ("「", "」")))
             key = (getattr(block.provenance[0], "slide", None) if by_slide else
                    getattr(block.provenance[0], "page", None) if by_pdf else
                    tuple(getattr(block.provenance[0], "heading_path", ())))
@@ -186,8 +218,8 @@ class OfficeChunker:
                 and all(item["ck_type"] == "text" for item in pending)
                 and sum(item["tk_nums"] for item in pending) < min(48, budget)
             )
-            if pending and (key != boundary_key or (
-                not by_slide and block.block_type == BlockType.HEADING and not short_pdf_fragment
+            if pending and (key != boundary_key or starts_wrapped_title or (
+                not by_slide and block.block_type == BlockType.HEADING and not short_pdf_fragment and not continued_heading
             )):
                 flush()
             boundary_key = key
@@ -197,11 +229,6 @@ class OfficeChunker:
             if by_slide:
                 text_types.add(BlockType.CAPTION)
             if block.block_type not in text_types or chunk["doc_type_kwd"] != "text":
-                if by_pdf:
-                    # Never merge text across a table/image or reorder its evidence.
-                    flush()
-                    output.append(_merge_source_chunks([chunk], chunk["content_with_weight"]))
-                    continue
                 pending.append({
                     "text": chunk["content_with_weight"],
                     "ck_type": chunk["doc_type_kwd"] if chunk["doc_type_kwd"] != "text" else "caption",
@@ -212,7 +239,9 @@ class OfficeChunker:
             built, _, _, has_custom = _build_cks([(chunk["content_with_weight"], None, None)], delimiter)
             custom_delimiter = custom_delimiter or has_custom
             if by_pdf and pending and built:
-                built[0]["text"] = "\n" + built[0]["text"]
+                previous_text = next((item["text"] for item in reversed(pending) if item["ck_type"] == "text"), "")
+                separator = _pdf_block_separator(previous_text, built[0]["text"])
+                built[0]["text"] = separator + built[0]["text"]
                 built[0]["tk_nums"] = num_tokens_from_string(built[0]["text"])
             for item in built:
                 item["source_indices"] = [index]
