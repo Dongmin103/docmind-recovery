@@ -1,0 +1,208 @@
+{
+  "old": {
+    "chunks": 794,
+    "text": 686,
+    "tables": 108,
+    "under48tokens": 533,
+    "under80chars": 603
+  },
+  "new": {
+    "chunks": 491,
+    "text": 383,
+    "tables": 108,
+    "under48tokens": 79,
+    "under80chars": 258
+  },
+  "checks": {
+    "live_baseline_exact": true,
+    "source_blocks_equal": true,
+    "page_character_multiset_equal": true,
+    "provenance_equal": true,
+    "tables_exact": true,
+    "single_page_chunks": true,
+    "production_active_set_unchanged": true,
+    "production_chunks_unchanged": true
+  },
+  "parse_and_compare_seconds": 6.852224061993184,
+  "source_blocks": 1829,
+  "short_remaining_followed_by": {
+    "table": 49,
+    "end_of_page": 30
+  },
+  "deployed": false,
+  "scope": "One 98-page PDF; old output reproduced the live index exactly; separate temporary Elasticsearch indexes; same OpenVINO embedding and production scoped-search functions; KURE via existing local-PC relay; no NAT changes.",
+  "tests": {
+    "passed": 72,
+    "modules": [
+      "test_office_chunker_kordoc",
+      "test_kordoc_office_pilot"
+    ]
+  },
+  "search": {
+    "questions": 8,
+    "scope": "single document selected",
+    "baseline_top1_evidence": 8,
+    "candidate_top1_evidence": 8,
+    "mean_seconds": {
+      "old": 6.562,
+      "new": 8.062
+    },
+    "rows": [
+      {
+        "query_id": 0,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 4,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 0,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 5,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 1,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 10
+      },
+      {
+        "query_id": 1,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 6
+      },
+      {
+        "query_id": 2,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 9
+      },
+      {
+        "query_id": 2,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 3
+      },
+      {
+        "query_id": 3,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 7
+      },
+      {
+        "query_id": 3,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 4,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 4,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 76,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 5,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 5,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 6,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 6,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 7,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 18
+      },
+      {
+        "query_id": 7,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 4
+      }
+    ]
+  },
+  "limits": [
+    "Single-document, eight-question evaluation; does not establish whole-corpus quality.",
+    "Single-run API timings include external KURE variability; candidate was slower on average.",
+    "Small fragments remain at page ends (30) and before tables (49).",
+    "No production deployment, active-index switch, or GitHub push performed."
+  ],
+  "cleanup": {
+    "temporary_indices_removed": true,
+    "temporary_app_tmpfs_removed": true,
+    "production_chunks_unchanged": 794
+  }
+}

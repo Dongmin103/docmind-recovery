@@ -178,7 +178,17 @@ class OfficeChunker:
             key = (getattr(block.provenance[0], "slide", None) if by_slide else
                    getattr(block.provenance[0], "page", None) if by_pdf else
                    tuple(getattr(block.provenance[0], "heading_path", ())))
-            if pending and (key != boundary_key or (not by_slide and block.block_type == BlockType.HEADING)):
+            # PDF layout parsers can label several short lines as headings.
+            # Carry a short fragment forward instead of cutting at every label.
+            # Page boundaries and explicit custom delimiters still take priority.
+            short_pdf_fragment = (
+                by_pdf and not custom_delimiter and bool(pending)
+                and all(item["ck_type"] == "text" for item in pending)
+                and sum(item["tk_nums"] for item in pending) < min(48, budget)
+            )
+            if pending and (key != boundary_key or (
+                not by_slide and block.block_type == BlockType.HEADING and not short_pdf_fragment
+            )):
                 flush()
             boundary_key = key
             index = len(source_for_index)
@@ -187,6 +197,11 @@ class OfficeChunker:
             if by_slide:
                 text_types.add(BlockType.CAPTION)
             if block.block_type not in text_types or chunk["doc_type_kwd"] != "text":
+                if by_pdf:
+                    # Never merge text across a table/image or reorder its evidence.
+                    flush()
+                    output.append(_merge_source_chunks([chunk], chunk["content_with_weight"]))
+                    continue
                 pending.append({
                     "text": chunk["content_with_weight"],
                     "ck_type": chunk["doc_type_kwd"] if chunk["doc_type_kwd"] != "text" else "caption",
@@ -196,6 +211,9 @@ class OfficeChunker:
                 continue
             built, _, _, has_custom = _build_cks([(chunk["content_with_weight"], None, None)], delimiter)
             custom_delimiter = custom_delimiter or has_custom
+            if by_pdf and pending and built:
+                built[0]["text"] = "\n" + built[0]["text"]
+                built[0]["tk_nums"] = num_tokens_from_string(built[0]["text"])
             for item in built:
                 item["source_indices"] = [index]
                 pending.append(item)
