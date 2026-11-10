@@ -128,15 +128,13 @@ def compose_source():
 
 기준일 2026-11-10 | AVDC CPU/OpenVINO | OCR 미사용
 
-## 읽는 순서와 보고 범위
+## 전체 내용 요약 — 구축·성능·인수인계
 
-이 문서 하나에 최신 적용 상태, GPU 대비 성능, 최적화 이력, 실행 자산, 설정, API 연동, 실행 순서와 합격 확인 방법을 담았다. 이전 PDF 9종은 참고 이력으로 보관하며, 현재 판단에는 이 통합본을 우선한다.
+GPU 없는 AVDC에 문서 색인 엔진을 구축했다. Windows에서 원본을 임시 복호화하고, Ubuntu VM에서 파싱·청킹·OpenVINO 임베딩·색인을 수행한 뒤 임시 평문을 정리한다.
 
-관리·보고 담당자는 1~7장, 인수 개발자는 8~14장을 읽는다. 본문 명령은 실행할 위치와 전제를 확인한 후 사용하는 절차이며 이번 통합 작업에서 재색인·재배포·네트워크 변경은 하지 않았다. PDF의 긴 명령어는 화면 폭에 맞춰 접히므로 복사 실행할 때는 같은 통합본 Markdown의 코드 블록을 사용한다.
+[VISUAL_OVERVIEW]
 
-기록 시점의 확인과 현재 실시간 상태를 구분한다. 코드/인수 도구의 통합 직전 기준은 0dc194ad2c8f686521d096f5d3adbea8b9cbd915이다. 실제 이미지·모델·마운트 소스는 부록의 검증 목록과 대조한다. 문서 커밋이 바뀌어도 서버가 자동 배포되는 것은 아니다.
-
-개발자의 전달 범위는 엔진이다. 운영 체계·네트워크·백업·사용자 인증 연동의 완료 여부는 엔진 구현과 구분해 남긴다. 새 서버 전체 설치 ZIP 또는 상용 복호화 모듈·실제 키는 이 PDF에 포함하지 않는다.
+핵심 결론: 최신 154개·100.74MiB는 정리 ACK까지 185.18초, 호스트 CPU 평균 25%·관측 최대 83%였다. 같은 24개 입력에서는 OpenVINO CPU 61.70초로 GPU 39.19초보다 약 1.57배 걸렸다. 엔진 실행·연동·확인 절차를 인계하며, 장시간·업무 피크·새 서버 전체 설치는 추가 검증이 필요하다.
 ''']
     mappings = [
         ('기존 색인을 비우고 154개를 다시 처리했습니다', '1. 최신 결과 — 실제 154개를 약 3분 5초에 처리'),
@@ -292,6 +290,57 @@ class CpuChart(Flowable):
         c.drawRightString(WIDTH,8,f'{max_t:.0f}초 관측')
 
 
+class Overview(Flowable):
+    """A one-page overview; each metric keeps its own experiment boundary."""
+    def __init__(self):
+        super().__init__(); self.width=WIDTH; self.height=500
+
+    def draw(self):
+        c=self.canv
+        def txt(text,x,y,size=9,bold=False,col=NAVY):
+            c.setFillColor(col);c.setFont('KRB' if bold else 'KR',size);c.drawString(x,y,text)
+        def para(text,x,y,w,size=8.5,leading=13):
+            st=ParagraphStyle('overview',fontName='KR',fontSize=size,leading=leading,textColor=NAVY,wordWrap='CJK')
+            obj=Paragraph(text,st);_,h=obj.wrap(w,1000);obj.drawOn(c,x,y-h);return h
+        def box(x,y,w,h):
+            c.setFillColor(LIGHT);c.roundRect(x,y,w,h,5,stroke=0,fill=1)
+        card=(WIDTH-20)/3
+        for i,(label,value,detail) in enumerate([
+            ('최신 실제 문서 154개','3분 5초','100.74MiB · 152성공 / OCR 제외 2개'),
+            ('같은 24개 / GPU 대비','1.57배 시간','GPU 39.19초 → CPU 61.70초'),
+            ('154개 / 서버 전체 CPU','평균 25%','관측 최대 83% · 약 6초 간격 표본')]):
+            x=i*(card+10);box(x,419,card,78)
+            txt(label,x+10,477,8,True,TEAL);txt(value,x+10,449,20,True)
+            para(detail,x+10,438,card-20,7.7,11)
+        txt('처음부터 완료까지',0,397,11,True)
+        step=(WIDTH-30)/4
+        for i,(a,b) in enumerate([
+            ('1  Windows','원본 확인<br/>공유 게이트 · 임시 복호화'),
+            ('2  파서 + 청커','Kordoc 추출<br/>제목·본문 청킹 v3'),
+            ('3  CPU 색인','OpenVINO 의미 계산<br/>저장 · 최신 세트 활성화'),
+            ('4  정리 확인','Windows·VM 평문 삭제<br/>원본 해시 · 정리 ACK')]):
+            x=i*(step+10);box(x,321,step,63);txt(a,x+8,365,8.5,True,TEAL)
+            para(b,x+8,354,step-16,7.8,11)
+            if i<3:txt('›',x+step+2,346,12,True,TEAL)
+        txt('현재 배분: 허용량과 실제 사용량은 다름',0,300,11,True)
+        para('물리 서버: CPU 칩 2개 · 48코어 / 96논리 · RAM 127.6GiB<br/>VM: 96 vCPU · 상한 100% · RAM 64GiB',0,287,WIDTH,8.5,13)
+        y=237;embedw=WIDTH*88/96
+        c.setFillColor(TEAL);c.rect(0,y,embedw,22,fill=1,stroke=0)
+        c.setFillColor(NAVY);c.rect(embedw,y,WIDTH-embedw,22,fill=1,stroke=0)
+        txt('임베딩: 논리 프로세서 88개분 시간 한도',9,y+7,8,True,colors.white)
+        txt('8개분',embedw+5,y+7,7.7,True,colors.white)
+        para('임베딩 22작업자 × 4스레드 / 메모리 한도 52GiB<br/>나머지 영역은 파서·API·DB 공유. 파서 2개 / 합산 4개분·1GiB. 문서 12슬롯.',0,230,WIDTH,8.2,12)
+        txt('최적화 흐름',0,185,10.5,True)
+        para('문서 순서를 유지한 병렬 처리 → CPU 영역·작업자 조정 → OpenVINO FP32 → 청킹 v3',0,174,WIDTH,8.3,12)
+        half=(WIDTH-14)/2
+        box(0,22,half,125);box(half+14,22,half,125)
+        txt('검증된 결과',10,129,10,True,TEAL)
+        para('• 154개: 456쪽 · 활성 청크 1,596개<br/>• 원본 해시 유지 · 임시 평문 0개<br/>• 컨테이너 합계 메모리 최대 37.17GiB<br/>• 그룹웨어 HTTP 200: 31/31<br/>  평균 20.67 → 22.18ms<br/>  색인 중 p95 68.75ms / 최대 130.46ms',10,118,half-20,8.1,13)
+        txt('인수인계와 다음 확인',half+24,129,10,True,TEAL)
+        para('• 자산 → 설정 → API → 실행 → 합격 확인<br/>• 키·모델·상용 복호화 모듈은 별도 수령<br/>• 검색 회귀: 기존 12질문 일치<br/>  청킹 사례집: 첫 근거 적중 8/8 유지<br/>• 추가: 새 서버 재현·상시 동기화·외부 검색<br/>  장시간·업무 피크·검색 동시 부하',half+24,118,half-20,8.1,13)
+        txt('기준일 2026-11-10. 단회 시험이며 그룹웨어 시작 페이지 검사를 실제 업무 부하 시험과 구분한다.',0,6,7.3,col=GRAY)
+
+
 class Doc(BaseDocTemplate):
     def afterFlowable(self, flow):
         if isinstance(flow,Paragraph) and flow.style.name=='chapter':
@@ -347,6 +396,7 @@ def build(text):
         if line=='[VISUAL_GPU]':story.append(Bars());continue
         if line=='[VISUAL_FLOW]':story.append(Flow());continue
         if line=='[VISUAL_CPU]':story.append(CpuChart());continue
+        if line=='[VISUAL_OVERVIEW]':story.append(Overview());continue
         if line.startswith('```'):
             lang=line[3:];story.append(p('명령/데이터 · '+(lang or 'text'),'sub'))
             while i<len(lines) and not lines[i].startswith('```'):
