@@ -1,5 +1,7 @@
 # DOCMIND
 
+최신 상태와 측정 결과: [AVDC 종합보고서](docs/reports/AVDC-STATUS-2026-11-10.md) · [PDF](docs/reports/AVDC-STATUS-2026-11-10.pdf) · [154개 재색인 상세](docs/AVDC-INDEXING-154-2026-11-10.md).
+
 등록한 Windows 원본 폴더의 문서를 색인하고, 전체·폴더·문서 범위로 검색하며 근거가 있는 AI 답변을 제공합니다.
 
 ## 설치와 실행

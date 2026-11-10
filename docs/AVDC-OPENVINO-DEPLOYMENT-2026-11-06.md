@@ -1,5 +1,7 @@
 # AVDC OpenVINO 운영 전환 및 Git 동기화
 
+> 2026-11-10 현재 문서·청크 수와 최신 실측은 [154개 재색인 기록](AVDC-INDEXING-154-2026-11-10.md)을 기준으로 한다. 아래 535건 보존 등의 수치는 11월 6일 전환 당시 이력이다. 운영 파일은 폴더 정리 후 `/opt/docmind-avdc/runtime` 및 `/opt/docmind-avdc/config` 아래에 있다.
+
 2026-11-06 14:58 KST에 AVDC 임베딩을 **OpenVINO FP32**로 전환했고 15:03 KST에
 검증을 마쳤다. 이전 [66.684초 구성](AVDC-DEPLOYMENT-2026-11-05.md)의 자원·동시성은
 유지했다. 15:15 KST 이후 Git 반영 점검에서도 실제 서비스·풀 소스 해시와 영구

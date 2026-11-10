@@ -1,0 +1,850 @@
+{
+  "schema": "docmind-avdc-154-comparison-v1",
+  "date": "2026-11-10",
+  "previous": {
+    "documents": 154,
+    "input_bytes": 105638237,
+    "successful_documents": 152,
+    "failed_documents": 2,
+    "failure_codes": {
+      "PARSER_PDF_NO_SEARCHABLE_TEXT": 2
+    },
+    "chunks": 2135,
+    "pages": 456,
+    "registration_to_last_activation_seconds": 205.07999992370605,
+    "registration_to_all_terminal_cleaned_seconds": 204.98399996757507,
+    "chunks_per_hour": 37478.05735741832,
+    "load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 13,
+        "start": "2026-11-06T06:53:20.2774039+00:00",
+        "last": "2026-11-06T06:54:32.4822373+00:00",
+        "http_200": 13,
+        "HttpSeconds": [
+          14.5,
+          12.63,
+          26.33,
+          26.33
+        ],
+        "HostCPU": [
+          3.85,
+          3.0,
+          12.0,
+          12.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.08,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          24818.92,
+          24809.0,
+          24867.0,
+          24867.0
+        ],
+        "Read_ms_per_op": 0.119,
+        "Write_ms_per_op": 0.046
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 34,
+        "start": "2026-11-06T06:54:38.4628363+00:00",
+        "last": "2026-11-06T06:57:56.2618663+00:00",
+        "http_200": 34,
+        "HttpSeconds": [
+          14.32,
+          12.16,
+          28.53,
+          28.57
+        ],
+        "HostCPU": [
+          23.59,
+          23.0,
+          47.0,
+          63.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.29,
+          0.0,
+          1.0,
+          2.0
+        ],
+        "FreeMiB": [
+          24080.97,
+          24028.0,
+          24673.0,
+          24826.0
+        ],
+        "Read_ms_per_op": 0.125,
+        "Write_ms_per_op": 0.048
+      },
+      "after": {
+        "phase": "after",
+        "samples": 8,
+        "start": "2026-11-06T06:58:02.2258145+00:00",
+        "last": "2026-11-06T06:58:44.4073526+00:00",
+        "http_200": 8,
+        "HttpSeconds": [
+          17.14,
+          17.63,
+          25.12,
+          25.12
+        ],
+        "HostCPU": [
+          3.75,
+          3.0,
+          9.0,
+          9.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.25,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          24268.88,
+          24042.0,
+          24799.0,
+          24799.0
+        ],
+        "Read_ms_per_op": 0.117,
+        "Write_ms_per_op": 0.048
+      }
+    },
+    "container_cpu_equivalents": {
+      "embedding": 15.888569045066532,
+      "other": 2.2631749200750115,
+      "parser": 0.7691346270098791
+    },
+    "peak_memory_gib": {
+      "embedding_mem": 31.68405532836914,
+      "parser_mem": 0.8132438659667969,
+      "app_mem": 1.1109771728515625,
+      "total_mem": 35.35155487060547,
+      "vm_available_min_gib": 24.875003814697266
+    },
+    "cleanup": {
+      "PlainFileCount": 0,
+      "TrialKeyExists": false,
+      "OriginalHashesUnchanged": true,
+      "Success": true,
+      "Error": null
+    }
+  },
+  "current": {
+    "documents": 154,
+    "input_bytes": 105638237,
+    "successful_documents": 152,
+    "failed_documents": 2,
+    "failure_codes": {
+      "PARSER_PDF_NO_SEARCHABLE_TEXT": 2
+    },
+    "chunks": 1596,
+    "pages": 456,
+    "registration_to_last_activation_seconds": 184.64199995994568,
+    "registration_to_all_terminal_cleaned_seconds": 185.17599987983704,
+    "chunks_per_hour": 31117.513898497586,
+    "load": {
+      "baseline": {
+        "phase": "baseline",
+        "samples": 13,
+        "start": "2026-11-10T02:19:07.1320384+00:00",
+        "last": "2026-11-10T02:20:19.6654493+00:00",
+        "http_200": 13,
+        "HttpSeconds": [
+          20.67,
+          19.67,
+          31.9,
+          31.9
+        ],
+        "HostCPU": [
+          4.0,
+          3.0,
+          13.0,
+          13.0
+        ],
+        "GroupWareCPU": [
+          0.08,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "DiskQueue": [
+          0.31,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          19809.46,
+          19819.0,
+          19838.0,
+          19838.0
+        ],
+        "Read_ms_per_op": 0.106,
+        "Write_ms_per_op": 0.071
+      },
+      "indexing": {
+        "phase": "indexing",
+        "samples": 31,
+        "start": "2026-11-10T02:20:25.6971719+00:00",
+        "last": "2026-11-10T02:23:27.9132960+00:00",
+        "http_200": 31,
+        "HttpSeconds": [
+          22.18,
+          14.3,
+          68.75,
+          130.46
+        ],
+        "HostCPU": [
+          25.0,
+          26.0,
+          41.0,
+          83.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.16,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          19156.26,
+          19113.0,
+          19571.0,
+          19791.0
+        ],
+        "Read_ms_per_op": 0.109,
+        "Write_ms_per_op": 0.051
+      },
+      "after": {
+        "phase": "after",
+        "samples": 5,
+        "start": "2026-11-10T02:23:33.9127219+00:00",
+        "last": "2026-11-10T02:23:57.9775721+00:00",
+        "http_200": 5,
+        "HttpSeconds": [
+          16.69,
+          17.12,
+          20.41,
+          20.41
+        ],
+        "HostCPU": [
+          6.2,
+          6.0,
+          13.0,
+          13.0
+        ],
+        "GroupWareCPU": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "DiskQueue": [
+          0.4,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "FreeMiB": [
+          19589.4,
+          19878.0,
+          19908.0,
+          19908.0
+        ],
+        "Read_ms_per_op": 0.084,
+        "Write_ms_per_op": 0.063
+      }
+    },
+    "container_cpu_equivalents": {
+      "embedding": 18.277995721793435,
+      "other": 2.0387061917341645,
+      "parser": 0.8136011842846446
+    },
+    "peak_memory_gib": {
+      "embedding_mem": 33.73580551147461,
+      "parser_mem": 0.859619140625,
+      "app_mem": 1.0687370300292969,
+      "total_mem": 37.1727180480957,
+      "vm_available_min_gib": 22.72547149658203
+    },
+    "cleanup": {
+      "PlainFileCount": 0,
+      "TrialKeyExists": false,
+      "OriginalHashesUnchanged": true,
+      "Success": true,
+      "Error": null
+    }
+  },
+  "input_identity_verified": true,
+  "per_file_outcomes_identical": true,
+  "old_catalog_deleted": {
+    "documents": 689,
+    "search_entries": 45636
+  },
+  "final_catalog": {
+    "documents": 154,
+    "active_documents": 152,
+    "search_entries": 1596
+  },
+  "runtime": {
+    "vm_vcpu": 96,
+    "vm_limit_percent": 100,
+    "vm_memory_gib": 64,
+    "embedding_workers": 22,
+    "threads_per_worker": 4,
+    "embedding_cpu_budget": 88,
+    "embedding_memory_limit_gib": 52,
+    "parser_workers": 2,
+    "parser_cpu_budget": 4,
+    "parser_memory_limit_gib": 1,
+    "document_slots": 12,
+    "embedding_requests": 24,
+    "engine": "OpenVINO FP32",
+    "ocr": false,
+    "chunker_revision": "docmind-kordoc-chunker-v3"
+  },
+  "limitations": [
+    "One run per condition; no statistical significance claim.",
+    "New chunking and empty index applied together; cannot isolate chunking-only effect.",
+    "Service warm; no model restart or OS cache flush.",
+    "HTTP probe covers groupware start page, not signed-in transactions.",
+    "Host sampling about 6 seconds; peaks are observed samples.",
+    "No concurrent reranker/search evaluation in this run.",
+    "Activation timestamp resolution is one second; ACK timestamp resolution is milliseconds."
+  ],
+  "stage_means_seconds": {
+    "previous": {
+      "parse_http": 0.6420955050986842,
+      "normalize_artifacts": 0.026241208651315788,
+      "chunk": 0.06265491067763158,
+      "embedding": 4.865885752210526,
+      "index_staging": 0.18973164039473683,
+      "activation": 0.1807228075855263,
+      "container_cleanup": 0.09205702115789474
+    },
+    "current": {
+      "parse_http": 0.6652068509736843,
+      "normalize_artifacts": 0.026674083881578946,
+      "chunk": 0.04992178744736842,
+      "embedding": 5.200498864960526,
+      "index_staging": 0.1639147215526316,
+      "activation": 0.15613600909210526,
+      "container_cleanup": 0.05594583765789474
+    }
+  },
+  "host_stage_current": {
+    "source_verify": {
+      "samples": 154,
+      "mean_seconds": 0.22381306753246755,
+      "max_seconds": 0.6393514
+    },
+    "lock_wait": {
+      "samples": 154,
+      "mean_seconds": 3.2744464064935066,
+      "max_seconds": 18.5262382
+    },
+    "decrypt": {
+      "samples": 154,
+      "mean_seconds": 0.6330727175324675,
+      "max_seconds": 2.0715273
+    },
+    "post_decrypt_verify": {
+      "samples": 154,
+      "mean_seconds": 0.1401364538961039,
+      "max_seconds": 0.3367056
+    },
+    "delivery_roundtrip": {
+      "samples": 152,
+      "mean_seconds": 7.284567606578947,
+      "max_seconds": 23.7426961
+    },
+    "host_cleanup": {
+      "samples": 154,
+      "mean_seconds": 0.03329027402597402,
+      "max_seconds": 0.0930756
+    },
+    "status_ack": {
+      "samples": 154,
+      "mean_seconds": 0.19681082272727274,
+      "max_seconds": 1.0744497
+    },
+    "host_total": {
+      "samples": 154,
+      "mean_seconds": 11.743943455194804,
+      "max_seconds": 29.9293828
+    }
+  },
+  "host_samples": [
+    {
+      "elapsed_seconds": 0.0,
+      "phase": "baseline",
+      "cpu_percent": 2.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 31.067,
+      "http_code": 200,
+      "free_gib": 19.2871
+    },
+    {
+      "elapsed_seconds": 6.332,
+      "phase": "baseline",
+      "cpu_percent": 2.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 29.848,
+      "http_code": 200,
+      "free_gib": 19.2637
+    },
+    {
+      "elapsed_seconds": 12.37,
+      "phase": "baseline",
+      "cpu_percent": 2.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 31.902,
+      "http_code": 200,
+      "free_gib": 19.373
+    },
+    {
+      "elapsed_seconds": 18.423,
+      "phase": "baseline",
+      "cpu_percent": 2.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 15.423,
+      "http_code": 200,
+      "free_gib": 19.3662
+    },
+    {
+      "elapsed_seconds": 24.42,
+      "phase": "baseline",
+      "cpu_percent": 13.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 19.922,
+      "http_code": 200,
+      "free_gib": 19.3691
+    },
+    {
+      "elapsed_seconds": 30.421,
+      "phase": "baseline",
+      "cpu_percent": 3.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 15.332,
+      "http_code": 200,
+      "free_gib": 19.3594
+    },
+    {
+      "elapsed_seconds": 36.465,
+      "phase": "baseline",
+      "cpu_percent": 8.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 25.31,
+      "http_code": 200,
+      "free_gib": 19.3633
+    },
+    {
+      "elapsed_seconds": 42.493,
+      "phase": "baseline",
+      "cpu_percent": 2.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 14.502,
+      "http_code": 200,
+      "free_gib": 19.3584
+    },
+    {
+      "elapsed_seconds": 48.51,
+      "phase": "baseline",
+      "cpu_percent": 4.0,
+      "groupware_cpu_percent": 1.0,
+      "http_ms": 17.963,
+      "http_code": 200,
+      "free_gib": 19.3545
+    },
+    {
+      "elapsed_seconds": 54.508,
+      "phase": "baseline",
+      "cpu_percent": 2.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 14.11,
+      "http_code": 200,
+      "free_gib": 19.3545
+    },
+    {
+      "elapsed_seconds": 60.516,
+      "phase": "baseline",
+      "cpu_percent": 6.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 19.671,
+      "http_code": 200,
+      "free_gib": 19.3438
+    },
+    {
+      "elapsed_seconds": 66.53,
+      "phase": "baseline",
+      "cpu_percent": 3.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.926,
+      "http_code": 200,
+      "free_gib": 19.3486
+    },
+    {
+      "elapsed_seconds": 72.533,
+      "phase": "baseline",
+      "cpu_percent": 3.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 19.714,
+      "http_code": 200,
+      "free_gib": 19.3457
+    },
+    {
+      "elapsed_seconds": 78.565,
+      "phase": "indexing",
+      "cpu_percent": 4.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.353,
+      "http_code": 200,
+      "free_gib": 19.3271
+    },
+    {
+      "elapsed_seconds": 84.56,
+      "phase": "indexing",
+      "cpu_percent": 8.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 38.934,
+      "http_code": 200,
+      "free_gib": 19.1123
+    },
+    {
+      "elapsed_seconds": 90.815,
+      "phase": "indexing",
+      "cpu_percent": 12.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 130.456,
+      "http_code": 200,
+      "free_gib": 18.8672
+    },
+    {
+      "elapsed_seconds": 97.714,
+      "phase": "indexing",
+      "cpu_percent": 5.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 68.751,
+      "http_code": 200,
+      "free_gib": 18.8047
+    },
+    {
+      "elapsed_seconds": 104.971,
+      "phase": "indexing",
+      "cpu_percent": 5.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.128,
+      "http_code": 200,
+      "free_gib": 18.6787
+    },
+    {
+      "elapsed_seconds": 111.015,
+      "phase": "indexing",
+      "cpu_percent": 11.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 18.467,
+      "http_code": 200,
+      "free_gib": 18.6807
+    },
+    {
+      "elapsed_seconds": 116.981,
+      "phase": "indexing",
+      "cpu_percent": 12.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.745,
+      "http_code": 200,
+      "free_gib": 18.6836
+    },
+    {
+      "elapsed_seconds": 123.034,
+      "phase": "indexing",
+      "cpu_percent": 83.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 19.969,
+      "http_code": 200,
+      "free_gib": 18.6592
+    },
+    {
+      "elapsed_seconds": 129.366,
+      "phase": "indexing",
+      "cpu_percent": 18.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 16.25,
+      "http_code": 200,
+      "free_gib": 18.6719
+    },
+    {
+      "elapsed_seconds": 135.346,
+      "phase": "indexing",
+      "cpu_percent": 21.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 25.718,
+      "http_code": 200,
+      "free_gib": 18.6484
+    },
+    {
+      "elapsed_seconds": 141.33,
+      "phase": "indexing",
+      "cpu_percent": 10.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 10.057,
+      "http_code": 200,
+      "free_gib": 18.6494
+    },
+    {
+      "elapsed_seconds": 147.284,
+      "phase": "indexing",
+      "cpu_percent": 20.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 23.794,
+      "http_code": 200,
+      "free_gib": 18.668
+    },
+    {
+      "elapsed_seconds": 153.268,
+      "phase": "indexing",
+      "cpu_percent": 24.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 14.298,
+      "http_code": 200,
+      "free_gib": 18.6475
+    },
+    {
+      "elapsed_seconds": 159.255,
+      "phase": "indexing",
+      "cpu_percent": 9.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.081,
+      "http_code": 200,
+      "free_gib": 18.6611
+    },
+    {
+      "elapsed_seconds": 165.263,
+      "phase": "indexing",
+      "cpu_percent": 31.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 15.064,
+      "http_code": 200,
+      "free_gib": 18.6338
+    },
+    {
+      "elapsed_seconds": 171.251,
+      "phase": "indexing",
+      "cpu_percent": 33.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 19.536,
+      "http_code": 200,
+      "free_gib": 18.6465
+    },
+    {
+      "elapsed_seconds": 177.224,
+      "phase": "indexing",
+      "cpu_percent": 19.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.93,
+      "http_code": 200,
+      "free_gib": 18.6758
+    },
+    {
+      "elapsed_seconds": 183.202,
+      "phase": "indexing",
+      "cpu_percent": 33.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 14.092,
+      "http_code": 200,
+      "free_gib": 18.6553
+    },
+    {
+      "elapsed_seconds": 189.161,
+      "phase": "indexing",
+      "cpu_percent": 41.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 12.682,
+      "http_code": 200,
+      "free_gib": 18.6611
+    },
+    {
+      "elapsed_seconds": 195.203,
+      "phase": "indexing",
+      "cpu_percent": 31.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.249,
+      "http_code": 200,
+      "free_gib": 18.6406
+    },
+    {
+      "elapsed_seconds": 201.171,
+      "phase": "indexing",
+      "cpu_percent": 31.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 10.417,
+      "http_code": 200,
+      "free_gib": 18.6279
+    },
+    {
+      "elapsed_seconds": 207.086,
+      "phase": "indexing",
+      "cpu_percent": 32.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 12.746,
+      "http_code": 200,
+      "free_gib": 18.6807
+    },
+    {
+      "elapsed_seconds": 213.05,
+      "phase": "indexing",
+      "cpu_percent": 41.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 11.271,
+      "http_code": 200,
+      "free_gib": 18.6699
+    },
+    {
+      "elapsed_seconds": 219.069,
+      "phase": "indexing",
+      "cpu_percent": 35.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 16.26,
+      "http_code": 200,
+      "free_gib": 18.665
+    },
+    {
+      "elapsed_seconds": 225.076,
+      "phase": "indexing",
+      "cpu_percent": 34.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 16.936,
+      "http_code": 200,
+      "free_gib": 18.6562
+    },
+    {
+      "elapsed_seconds": 231.036,
+      "phase": "indexing",
+      "cpu_percent": 36.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 14.068,
+      "http_code": 200,
+      "free_gib": 18.6533
+    },
+    {
+      "elapsed_seconds": 236.985,
+      "phase": "indexing",
+      "cpu_percent": 37.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 17.374,
+      "http_code": 200,
+      "free_gib": 18.6719
+    },
+    {
+      "elapsed_seconds": 242.902,
+      "phase": "indexing",
+      "cpu_percent": 29.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 35.053,
+      "http_code": 200,
+      "free_gib": 18.6377
+    },
+    {
+      "elapsed_seconds": 248.88,
+      "phase": "indexing",
+      "cpu_percent": 37.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 11.077,
+      "http_code": 200,
+      "free_gib": 18.668
+    },
+    {
+      "elapsed_seconds": 254.807,
+      "phase": "indexing",
+      "cpu_percent": 26.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 20.305,
+      "http_code": 200,
+      "free_gib": 18.6445
+    },
+    {
+      "elapsed_seconds": 260.781,
+      "phase": "indexing",
+      "cpu_percent": 7.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.66,
+      "http_code": 200,
+      "free_gib": 18.6777
+    },
+    {
+      "elapsed_seconds": 266.781,
+      "phase": "after",
+      "cpu_percent": 3.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 17.123,
+      "http_code": 200,
+      "free_gib": 18.6631
+    },
+    {
+      "elapsed_seconds": 272.839,
+      "phase": "after",
+      "cpu_percent": 3.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 13.651,
+      "http_code": 200,
+      "free_gib": 18.7148
+    },
+    {
+      "elapsed_seconds": 278.876,
+      "phase": "after",
+      "cpu_percent": 6.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 20.405,
+      "http_code": 200,
+      "free_gib": 19.4121
+    },
+    {
+      "elapsed_seconds": 284.861,
+      "phase": "after",
+      "cpu_percent": 6.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 12.861,
+      "http_code": 200,
+      "free_gib": 19.4414
+    },
+    {
+      "elapsed_seconds": 290.846,
+      "phase": "after",
+      "cpu_percent": 13.0,
+      "groupware_cpu_percent": 0.0,
+      "http_ms": 19.396,
+      "http_code": 200,
+      "free_gib": 19.4199
+    }
+  ]
+}
