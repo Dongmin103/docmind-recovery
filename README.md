@@ -1,8 +1,8 @@
 # DOCMIND
 
-엔진을 인수인계받는 담당자는 [엔진 인수인계서: 실행 설정·연동·검증·남은 사항](docs/ENGINE-HANDOFF-2026-11-10.md)부터 읽으세요. AVDC의 최신 CPU/OpenVINO 구성과 아래 기존 Windows 설치 패키지를 구분합니다.
+**대표 문서: [DocMind 통합보고서 PDF](docs/reports/DOCMIND-INTEGRATED-2026-11-10.pdf)** · [같은 통합본의 Markdown/복사용 명령](docs/reports/DOCMIND-INTEGRATED-2026-11-10.md).
 
-최신 상태와 측정 결과: [AVDC 종합보고서](docs/reports/AVDC-STATUS-2026-11-10.md) · [PDF](docs/reports/AVDC-STATUS-2026-11-10.pdf) · [154개 재색인 상세](docs/AVDC-INDEXING-154-2026-11-10.md).
+최신 154개 성능·GPU 비교·평균/최대 리소스·최적화 이력과 엔진 인수인계(자산·설정·API·실행·합격 확인)를 한 문서에 통합했습니다. 과거 PDF와 [세부 인수 문서](docs/ENGINE-HANDOFF-2026-11-10.md)는 이력·유지보수 자료로 보관합니다. AVDC의 최신 CPU/OpenVINO 구성과 아래 기존 Windows 설치 패키지를 구분합니다.
 
 등록한 Windows 원본 폴더의 문서를 색인하고, 전체·폴더·문서 범위로 검색하며 근거가 있는 AI 답변을 제공합니다.
 

@@ -1,5 +1,7 @@
 # 인수인계 상태
 
+대표 문서: [DocMind 통합보고서 PDF](reports/DOCMIND-INTEGRATED-2026-11-10.pdf). 최신 성능과 엔진 실행·연동·검증 절차를 하나로 통합했다. [같은 통합본의 Markdown](reports/DOCMIND-INTEGRATED-2026-11-10.md)에서 명령을 복사할 수 있다.
+
 2026-11-10 최신 엔진 인계 기준은 [엔진 인수인계서](ENGINE-HANDOFF-2026-11-10.md)다. AVDC OpenVINO 실행 설정·연동 규격·실측 검증·미검증 항목과 운영 담당 범위를 구분했다. 아래 내용은 9월 초기 인계 이력이며 최신 AVDC 실행 상태로 해석하지 않는다.
 
 날짜: 2026-09-21

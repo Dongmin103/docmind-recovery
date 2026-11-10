@@ -1,5 +1,7 @@
 # DocMind AVDC 구축·색인 성능 종합보고서
 
+이 7쪽 보고서는 이력으로 보관한다. 현재 대표 문서는 [성능·최적화 이력·엔진 인수인계를 통합한 PDF](DOCMIND-INTEGRATED-2026-11-10.pdf)이며, [통합본 Markdown](DOCMIND-INTEGRATED-2026-11-10.md)도 제공한다.
+
 2026-11-10 현재 상태 · OCR 미사용 · 기존 PC GPU 경로 유지
 
 [PDF 보고서](AVDC-STATUS-2026-11-10.pdf)
