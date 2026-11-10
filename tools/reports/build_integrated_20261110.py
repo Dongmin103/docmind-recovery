@@ -243,7 +243,7 @@ GitLab과 GitHub main에 통합본·소스·기존 상세 문서를 함께 보�
             continue
         parts.append('### '+p.name+'\n\nSHA256: `'+hashlib.sha256(p.read_bytes()).hexdigest()+'`\n')
     text = '\n\n'.join(parts)
-    OUT.with_suffix('.md').write_text(text,encoding='utf-8')
+    OUT.with_suffix('.md').write_text(text,encoding='utf-8',newline='\n')
     return text
 
 
