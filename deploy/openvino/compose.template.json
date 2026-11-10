@@ -1,0 +1,315 @@
+{
+  "services": {
+    "mysql": {
+      "image": "mysql:8.0.40",
+      "pull_policy": "never",
+      "command": [
+        "--max-allowed-packet=1073741824",
+        "--max-connections=100"
+      ],
+      "environment": {
+        "MYSQL_ROOT_PASSWORD": "GENERATED_AT_INSTALL",
+        "MYSQL_DATABASE": "docmind"
+      },
+      "volumes": [
+        "mysql:/var/lib/mysql"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "mem_limit": "512m",
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -p\"$$MYSQL_ROOT_PASSWORD\" --silent"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 60
+      }
+    },
+    "es": {
+      "image": "elasticsearch:8.11.3",
+      "pull_policy": "never",
+      "environment": {
+        "discovery.type": "single-node",
+        "xpack.security.enabled": "true",
+        "xpack.security.http.ssl.enabled": "false",
+        "ELASTIC_PASSWORD": "GENERATED_AT_INSTALL",
+        "ES_JAVA_OPTS": "-Xms512m -Xmx512m",
+        "bootstrap.memory_lock": "false"
+      },
+      "volumes": [
+        "es:/usr/share/elasticsearch/data"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "mem_limit": "1536m",
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "curl -fsS -u \"elastic:$$ELASTIC_PASSWORD\" http://localhost:9200/_cluster/health >/dev/null"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 60
+      }
+    },
+    "redis": {
+      "image": "valkey/valkey:8",
+      "pull_policy": "never",
+      "command": [
+        "valkey-server",
+        "--requirepass",
+        "GENERATED_AT_INSTALL",
+        "--maxmemory",
+        "64mb",
+        "--maxmemory-policy",
+        "volatile-lru"
+      ],
+      "volumes": [
+        "redis:/data"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "mem_limit": "128m",
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "valkey-cli",
+          "ping"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30
+      }
+    },
+    "minio": {
+      "image": "pgsty/silo:RELEASE.2026-08-06T00-00-00Z",
+      "pull_policy": "never",
+      "command": [
+        "server",
+        "/data"
+      ],
+      "environment": {
+        "MINIO_ROOT_USER": "docmind",
+        "MINIO_ROOT_PASSWORD": "GENERATED_AT_INSTALL"
+      },
+      "volumes": [
+        "minio:/data"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "mem_limit": "256m",
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "curl",
+          "-fsS",
+          "http://localhost:9000/minio/health/live"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30
+      }
+    },
+    "embedding": {
+      "image": "docmind-openvino-embedding:2026.11.10-r1",
+      "pull_policy": "never",
+      "volumes": [],
+      "tmpfs": [
+        "/tmp:rw,size=134217728"
+      ],
+      "networks": [
+        "backend"
+      ],
+      "cpus": 4,
+      "mem_limit": "3g",
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/health',timeout=4).read()"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "start_period": "240s",
+        "retries": 30
+      }
+    },
+    "parser": {
+      "image": "docmind-kordoc-parser:2026.10.19",
+      "pull_policy": "never",
+      "environment": {
+        "KORDOC_OFFLINE": "1",
+        "KORDOC_WORKERS": "1",
+        "KORDOC_OCR_ENABLED": "0",
+        "KORDOC_REQUIRE_OCR": "0",
+        "KORDOC_MAX_PDF_PAGES": "2000",
+        "KORDOC_CONVERSION_TIMEOUT_MS": "180000"
+      },
+      "tmpfs": [
+        "/tmp:rw,size=268435456"
+      ],
+      "networks": [
+        "parser"
+      ],
+      "mem_limit": "1g",
+      "cpus": 2,
+      "restart": "unless-stopped"
+    },
+    "preview": {
+      "image": "docmind-preview:2026.10.19",
+      "pull_policy": "never",
+      "environment": {
+        "DOCMIND_PREVIEW_ROOT": "/run/docmind-previews",
+        "HOME": "/run/docmind-previews/processor-home",
+        "TMPDIR": "/run/docmind-previews/processor-tmp",
+        "XDG_CACHE_HOME": "/run/docmind-previews/processor-cache"
+      },
+      "volumes": [
+        "preview:/run/docmind-previews"
+      ],
+      "networks": [
+        "parser"
+      ],
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "256m",
+      "pids_limit": 64,
+      "restart": "unless-stopped"
+    },
+    "docmind": {
+      "image": "docmind-openvino-api:2026.11.10-r1",
+      "pull_policy": "never",
+      "depends_on": {
+        "mysql": {
+          "condition": "service_healthy"
+        },
+        "es": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        },
+        "minio": {
+          "condition": "service_healthy"
+        },
+        "embedding": {
+          "condition": "service_healthy"
+        },
+        "parser": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "MYSQL_PASSWORD": "GENERATED_AT_INSTALL",
+        "ELASTIC_PASSWORD": "GENERATED_AT_INSTALL",
+        "REDIS_PASSWORD": "GENERATED_AT_INSTALL",
+        "MINIO_PASSWORD": "GENERATED_AT_INSTALL",
+        "DOC_ENGINE": "elasticsearch",
+        "STORAGE_IMPL": "MINIO",
+        "API_PROXY_SCHEME": "python",
+        "DOCMIND_SHARED_WORKSPACE_ENABLED": "1",
+        "DOCMIND_SHARED_USER_EMAIL": "docmind@internal.invalid",
+        "DOCMIND_CATALOG_DB_PRIMARY_ENABLED": "1",
+        "DOCMIND_CATALOG_SHADOW_ENABLED": "0",
+        "DOCMIND_GENERATIONLESS_E2E_ENABLED": "1",
+        "DOCMIND_HOST_WORKER_KEY_ID": "docmind-runtime-host",
+        "DOCMIND_HOST_WORKER_HMAC_SECRET_FILE": "/run/secrets/worker-key",
+        "DOCMIND_EPHEMERAL_PARSER_ROOT": "/run/docmind-ephemeral-parser",
+        "DOCMIND_PREVIEW_ENABLED": "0",
+        "DOCMIND_PREVIEW_ROOT": "/run/docmind-previews",
+        "DOCMIND_PREVIEW_PROCESSOR_URL": "http://preview:8090",
+        "PARSER_PLATFORM_ENABLED": "1",
+        "TE_RUN_MODE": "0",
+        "PARSER_PLATFORM_INTEGRATION_READY": "1",
+        "PARSER_PLATFORM_KORDOC_URL": "http://parser:8095",
+        "PARSER_PLATFORM_PPTX_NATIVE_ENABLED": "1",
+        "PARSER_PLATFORM_ARTIFACT_ROOT": "/ragflow/parser-platform-artifacts",
+        "KORDOC_CLIENT_CONCURRENCY": "1",
+        "DOCMIND_INGESTION_DOCUMENT_CONCURRENCY": "1",
+        "EMBEDDING_BATCH_SIZE": "16",
+        "EMBEDDING_BATCH_CONCURRENCY": "1",
+        "MAX_CONCURRENT_EMBEDDING_REQUESTS": "1",
+        "DOCMIND_BUILTIN_EMBED_TIMEOUT_SECONDS": "600",
+        "DOCMIND_STORAGE_AUDIT_ROOT": "/run/docmind-storage-audit",
+        "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+        "TZ": "Asia/Seoul",
+        "DOCMIND_ANSWER_ENABLED": "0",
+        "DOCMIND_PACKAGE_INSTALLATION": "openvino-v1",
+        "PARSER_PLATFORM_KORDOC_CHUNKER_REVISION": "docmind-kordoc-chunker-v3"
+      },
+      "ports": [],
+      "volumes": [
+        "config:/ragflow/conf",
+        "logs:/ragflow/logs",
+        "parser-artifacts:/ragflow/parser-platform-artifacts",
+        "preview:/run/docmind-previews"
+      ],
+      "tmpfs": [
+        "/run/docmind-ephemeral-parser:rw,noexec,nosuid,nodev,size=536870912,mode=0700",
+        "/run/docmind-storage-audit:rw,noexec,nosuid,nodev,size=67108864,mode=0700"
+      ],
+      "networks": [
+        "frontend",
+        "backend",
+        "parser"
+      ],
+      "mem_limit": "2560m",
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/ragflow/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen(\"http://localhost:9380/api/v1/system/healthz\",timeout=5).read()"
+        ],
+        "interval": "15s",
+        "timeout": "10s",
+        "start_period": "120s",
+        "retries": 30
+      }
+    }
+  },
+  "networks": {
+    "frontend": {},
+    "backend": {
+      "internal": true
+    },
+    "parser": {
+      "internal": true
+    }
+  },
+  "volumes": {
+    "mysql": {},
+    "es": {},
+    "redis": {},
+    "minio": {},
+    "config": {},
+    "logs": {},
+    "parser-artifacts": {},
+    "preview": {
+      "driver": "local",
+      "driver_opts": {
+        "type": "tmpfs",
+        "device": "tmpfs",
+        "o": "size=134217728,uid=10001,gid=10001,mode=0700,noexec,nosuid,nodev"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+FROM docmind-runtime-base:sanitized-20261019
+WORKDIR /ragflow
+COPY app/conf/ ./conf/
+COPY app/api/ ./api/
+COPY app/common/ ./common/
+COPY app/rag/ ./rag/
+COPY app/deepdoc/ ./deepdoc/
+COPY app/scripts/ ./scripts/
+COPY app/tools/scripts/ ./tools/scripts/
+COPY app/pyproject.toml app/uv.lock ./
+COPY app/web/dist/ ./web/dist/
+COPY app/docker/entrypoint.sh ./entrypoint.sh
+COPY deploy/windows/scripts/entrypoint.py deploy/windows/scripts/bootstrap.py /opt/docmind/
+COPY deploy/openvino/smoke.py /opt/docmind/smoke.py
+COPY tools/handoff/ /opt/docmind/handoff/
+ARG SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
+RUN chmod +x /ragflow/entrypoint.sh && printf '%s\n' "$SOURCE_COMMIT" > /ragflow/VERSION && mkdir -p /ragflow/logs /ragflow/private /ragflow/parser-platform-artifacts /var/log/nginx /run /tmp && chmod 1777 /tmp
+ENV PATH=/ragflow/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin VIRTUAL_ENV=/ragflow/.venv PYTHONPATH=/ragflow NLTK_DATA=/ragflow/ragflow_deps/nltk_data:/root/nltk_data PYTHONDONTWRITEBYTECODE=1 TIKA_SERVER_JAR=file:///ragflow/tika-server-standard-3.3.0.jar
+ENTRYPOINT ["/ragflow/.venv/bin/python", "/opt/docmind/entrypoint.py"]

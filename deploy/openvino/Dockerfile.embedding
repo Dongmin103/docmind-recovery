@@ -1,0 +1,7 @@
+FROM docmind-gte-openvino:20261106
+COPY tools/avdc_embedding/service.py tools/avdc_embedding/pool.py /opt/docmind/
+COPY openvino-model/model.xml openvino-model/model.bin /opt/docmind/openvino-model/
+ARG SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+ENTRYPOINT ["python", "/opt/docmind/pool.py", "--config", "/opt/docmind/config.json"]
