@@ -16,7 +16,7 @@
 | 4. API 연결 | [요청·응답·인증·상태·오류 규칙](engine-handoff/API.md) |
 | 5. 인수 합격 확인 | [실행 절차 E~F](engine-handoff/RUNBOOK.md): 합성 입력·해시·활성 청크·정리·기록 양식 |
 
-[인수 도구](../tools/handoff/engine.py)는 `projects`, `register-source`, `jobs`, `check-job`을 제공한다. `register-source`는 기본 dry-run이며 `--apply`를 명시할 때만 새 source/폴더를 만든다. [합성 문서 생성기](../tools/handoff/make_sample.py)는 비민감 DOCX를 만들며 암호화나 업로드를 하지 않는다. 새 서버에 필요한 바이너리·키는 별도 수령해야 한다. 이미지·OpenVINO 모델을 포함한 새 설치 후보본의 기동은 확인했다. 실제 색인은 검증 스크립트의 PDF 생성 모듈 누락으로 미완료이며, 배포 상태는 [설치 패키지 안내](OPENVINO-PACKAGE-2026-11-10.md)를 따른다.
+[인수 도구](../tools/handoff/engine.py)는 `projects`, `register-source`, `jobs`, `check-job`을 제공한다. `register-source`는 기본 dry-run이며 `--apply`를 명시할 때만 새 source/폴더를 만든다. [합성 문서 생성기](../tools/handoff/make_sample.py)는 비민감 DOCX를 만들며 암호화나 업로드를 하지 않는다. 새 서버에 필요한 바이너리·키는 별도 수령해야 한다. 이미지·OpenVINO 모델을 포함한 새 설치 후보본의 기동은 확인했다. 추가 연동·검증 범위와 배포 상태는 [설치 패키지 안내](OPENVINO-PACKAGE-2026-11-10.md)를 따른다.
 
 ## 1. 무엇을 만들었는가
 
