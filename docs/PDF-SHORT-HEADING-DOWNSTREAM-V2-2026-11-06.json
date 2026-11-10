@@ -30,8 +30,160 @@
     "unit_tests_passed": 74
   },
   "search": {
-    "second_candidate_verified": false,
-    "reason": "Temporary baseline index primary shard was not allocated: disk high watermark 90%, used 90.2%, available 5.5 GiB below required 5.7 GiB. No cluster settings changed. First candidate 8/8 evidence@1 does not validate second candidate."
+    "second_candidate_verified": true,
+    "date": "2026-11-10",
+    "scope": "Same eight questions, single document selected; isolated temporary indices, cached Kordoc output, production OpenVINO embeddings and KURE via existing local relay; no NAT changes. Not a corpus-wide quality evaluation.",
+    "questions": 8,
+    "visible_evidence_top1": {
+      "old": 8,
+      "new": 8
+    },
+    "rows": [
+      {
+        "query_id": 0,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 4,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 0,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 4,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 1,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 10
+      },
+      {
+        "query_id": 1,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 2,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 9
+      },
+      {
+        "query_id": 2,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 3,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 7
+      },
+      {
+        "query_id": 3,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 4,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 4,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 75,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 5,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 5,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 6,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 2
+      },
+      {
+        "query_id": 6,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": null,
+        "dense_evidence_rank": 1
+      },
+      {
+        "query_id": 7,
+        "variant": "old",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 2,
+        "dense_evidence_rank": 18
+      },
+      {
+        "query_id": 7,
+        "variant": "new",
+        "rerank_evidence_rank": 1,
+        "visible_evidence_rank": 1,
+        "candidate_count": 128,
+        "bm25_evidence_rank": 1,
+        "dense_evidence_rank": 3
+      }
+    ]
   },
   "limitations": [
     "Repeated marginal labels remain",
