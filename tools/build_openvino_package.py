@@ -1,5 +1,6 @@
 """Package already built, verified CPU images; never export containers or volumes."""
 import argparse
+import base64
 import gzip
 import hashlib
 import json
@@ -44,17 +45,17 @@ def build(out):
     shutil.copyfile(ROOT/'app/LICENSE',legal/'DOCMIND-LICENSE')
     shutil.copyfile(ROOT/'app/THIRD_PARTY_NOTICES.md',legal/'THIRD_PARTY_NOTICES.md')
     # Only upstream license text/model card is exported, never runtime configuration.
-    license_program = '''import json,importlib.metadata as m
+    license_program = '''import json,base64,importlib.metadata as m
 from pathlib import Path
 d=m.distribution('openvino')
-r={'GTE-model-card.md':Path('/opt/docmind/model/README.md').read_text()}
+r={'GTE-model-card.md':base64.b64encode(Path('/opt/docmind/model/README.md').read_bytes()).decode()}
 for p in d.files:
- if '.dist-info/licenses/' in str(p): r['OpenVINO-'+Path(str(p)).name]=Path(d.locate_file(p)).read_text()
+ if '.dist-info/licenses/' in str(p): r['OpenVINO-'+Path(str(p)).name]=base64.b64encode(Path(d.locate_file(p)).read_bytes()).decode()
 print(json.dumps(r))'''
     notices=json.loads(subprocess.check_output(DOCKER+['run','--rm','--network','none','--entrypoint','python',IMAGES[1],'-c',license_program]))
     for name, text in notices.items():
         if Path(name).name!=name: raise ValueError('Unsafe notice path')
-        (legal/name).write_text(text)
+        (legal/name).write_bytes(base64.b64decode(text))
     shutil.copyfile(ROOT/'app/LICENSE',legal/'GTE-Apache-2.0.txt')
     images=[]
     for tag in IMAGES:
