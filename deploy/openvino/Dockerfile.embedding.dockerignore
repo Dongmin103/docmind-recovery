@@ -1,0 +1,8 @@
+*
+!tools
+!tools/avdc_embedding
+!tools/avdc_embedding/service.py
+!tools/avdc_embedding/pool.py
+!openvino-model
+!openvino-model/model.xml
+!openvino-model/model.bin

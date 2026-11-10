@@ -41,6 +41,19 @@ def build(out):
     legal=bundle/'licenses'; legal.mkdir()
     shutil.copyfile(ROOT/'app/LICENSE',legal/'DOCMIND-LICENSE')
     shutil.copyfile(ROOT/'app/THIRD_PARTY_NOTICES.md',legal/'THIRD_PARTY_NOTICES.md')
+    # Only upstream license text/model card is exported, never runtime configuration.
+    license_program = '''import json,importlib.metadata as m
+from pathlib import Path
+d=m.distribution('openvino')
+r={'GTE-model-card.md':Path('/opt/docmind/model/README.md').read_text()}
+for p in d.files:
+ if '.dist-info/licenses/' in str(p): r['OpenVINO-'+Path(str(p)).name]=Path(d.locate_file(p)).read_text()
+print(json.dumps(r))'''
+    notices=json.loads(subprocess.check_output(['docker','run','--rm','--network','none','--entrypoint','python',IMAGES[1],'-c',license_program]))
+    for name, text in notices.items():
+        if Path(name).name!=name: raise ValueError('Unsafe notice path')
+        (legal/name).write_text(text)
+    shutil.copyfile(ROOT/'app/LICENSE',legal/'GTE-Apache-2.0.txt')
     images=[]
     for tag in IMAGES:
         r=json.loads(subprocess.check_output(['docker','image','inspect',tag]))[0]
@@ -63,7 +76,7 @@ def build(out):
     parts=[]
     with archive.open('rb') as f:
         index=1
-        while b:=f.read(256*1024*1024):
+        while b:=f.read(64*1024*1024):
             part=out/(archive.name+f'.part{index:03}')
             part.write_bytes(b)
             parts.append({'name':part.name,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()}); index+=1
