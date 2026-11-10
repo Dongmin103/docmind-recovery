@@ -198,5 +198,8 @@
     "production_active_set_unchanged": true,
     "cluster_health_after_cleanup": "green"
   },
-  "deployed": false
+  "deployed": true,
+  "deployment_date": "2026-11-10",
+  "deployment_scope": "AVDC production code only; existing indices preserved; new or explicitly reindexed documents use v3. Windows GPU runtime unchanged.",
+  "deployment_record": "AVDC-CHUNKING-DEPLOYMENT-2026-11-10.md"
 }

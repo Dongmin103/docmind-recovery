@@ -1,5 +1,7 @@
 # 현재 코드 구조와 목표 구조
 
+2026-11-10 AVDC에 PDF 제목·본문 묶음 청킹 v3를 적용했다. Kordoc과 기존 색인은 유지하며 이후 색인부터 적용한다. [배포·검증·복구 기록](AVDC-CHUNKING-DEPLOYMENT-2026-11-10.md)을 참조한다.
+
 2026-11-06 AVDC CPU 운영 임베딩은 OpenVINO FP32로 전환됐다. Windows GPU 경로는
 별개로 유지한다. [현재 AVDC 설정·검증 기록](AVDC-OPENVINO-DEPLOYMENT-2026-11-06.md)을 참조한다.
 

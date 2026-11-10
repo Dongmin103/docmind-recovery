@@ -60,7 +60,7 @@ class ParserPlatformConfig:
     kordoc_patch_revision: str = "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b"
     kordoc_ocr_model_revision: str = "kordoc-4.15.7-default"
     kordoc_normalizer_revision: str = "docmind-kordoc-normalizer-v3"
-    kordoc_chunker_revision: str = "docmind-kordoc-chunker-v2"
+    kordoc_chunker_revision: str = "docmind-kordoc-chunker-v3"
     surya_service_url: str = "http://surya2-ocr:8091"
     surya_deadline_seconds: int = 1200
     surya_parser_version: str = "0.22.1"
@@ -117,7 +117,7 @@ class ParserPlatformConfig:
             kordoc_patch_revision=source.get("PARSER_PLATFORM_KORDOC_PATCH_REVISION", "sha256:25378aebb75d6507296cc22b60a6158935ca3af5a4ac888708b3cee08f21646b").strip(),
             kordoc_ocr_model_revision=source.get("PARSER_PLATFORM_KORDOC_OCR_MODEL_REVISION", "kordoc-4.15.7-default").strip(),
             kordoc_normalizer_revision=source.get("PARSER_PLATFORM_KORDOC_NORMALIZER_REVISION", "docmind-kordoc-normalizer-v3").strip(),
-            kordoc_chunker_revision=source.get("PARSER_PLATFORM_KORDOC_CHUNKER_REVISION", "docmind-kordoc-chunker-v2").strip(),
+            kordoc_chunker_revision=source.get("PARSER_PLATFORM_KORDOC_CHUNKER_REVISION", "docmind-kordoc-chunker-v3").strip(),
             surya_service_url=source.get("PARSER_PLATFORM_SURYA_URL", "http://surya2-ocr:8091").rstrip("/"),
             surya_deadline_seconds=_positive_int(source, "PARSER_PLATFORM_SURYA_DEADLINE_SECONDS", 1200),
             surya_parser_version=source.get("PARSER_PLATFORM_SURYA_PARSER_VERSION", "0.22.1").strip(),

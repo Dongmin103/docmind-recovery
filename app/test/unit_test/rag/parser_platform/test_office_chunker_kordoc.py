@@ -134,3 +134,14 @@ def test_pdf_explicit_custom_delimiter_does_not_merge_short_headings():
                           (1, BlockType.TEXT, "본문")], delimiter="`###`")
     assert len(chunks) == 3
     assert [c["content_with_weight"].strip() for c in chunks] == ["제목 하나", "제목 둘", "본문"]
+
+
+def test_heading_grouping_revision_invalidates_previous_chunking_fingerprint():
+    from dataclasses import replace
+    from rag.parser_platform.config import ParserPlatformConfig
+
+    current = ParserPlatformConfig.from_env({})
+    previous = replace(current, kordoc_chunker_revision="docmind-kordoc-chunker-v2")
+    assert current.kordoc_chunker_revision == "docmind-kordoc-chunker-v3"
+    assert current.run_config_fingerprint("pdf") != previous.run_config_fingerprint("pdf")
+    assert current.kordoc_parser_version == previous.kordoc_parser_version
