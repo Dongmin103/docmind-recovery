@@ -4,6 +4,18 @@
 
 **이 문서는 문서를 받아 검색 가능한 청크·벡터를 만드는 엔진의 인수인계서다.** 엔진 코드, 실행 설정, 연결 규격, 확인한 결과와 미검증 사항을 전달한다. 서버 운영 체계 구축 완료나 서비스 전체의 운영 인수 승인을 뜻하지 않는다. 이번 문서 작성에서는 재배포·재색인·네트워크 변경을 하지 않았다.
 
+### 처음 받은 개발자가 따라갈 순서
+
+| 순서 | 구체적인 인계 자료 |
+|---|---|
+| 1. 실행 자산 수령 | [이미지·모델·복호화 모듈·전달 위치](engine-handoff/ASSETS.md), [실제 조회한 버전·해시](engine-handoff/assets.json) |
+| 2. 설정 작성 | [필수 설정값·형식·확인 방법](engine-handoff/CONFIGURATION.md) |
+| 3. 초기 등록·실행 | [실행 절차 A~D](engine-handoff/RUNBOOK.md): 기존/신규 설치 구분, 프로젝트·폴더·source, 워커 연결 |
+| 4. API 연결 | [요청·응답·인증·상태·오류 규칙](engine-handoff/API.md) |
+| 5. 인수 합격 확인 | [실행 절차 E~F](engine-handoff/RUNBOOK.md): 합성 입력·해시·활성 청크·정리·기록 양식 |
+
+[인수 도구](../tools/handoff/engine.py)는 `projects`, `register-source`, `jobs`, `check-job`을 제공한다. `register-source`는 기본 dry-run이며 `--apply`를 명시할 때만 새 source/폴더를 만든다. [합성 문서 생성기](../tools/handoff/make_sample.py)는 비민감 DOCX를 만들며 암호화나 업로드를 하지 않는다. 새 서버에 필요한 바이너리·키는 별도 수령해야 한다. 이 문서를 보완하면서 새 설치 ZIP을 발행한 것은 아니다.
+
 ## 1. 무엇을 만들었는가
 
 등록된 Windows 폴더의 암호화 문서를 기존 uEncryptor2로 임시 복호화하고, Ubuntu VM의 Docker 서비스에서 파싱·청킹·임베딩·색인을 수행한다. 원본은 그대로 두고 작업용 평문은 정리한다. AVDC에서는 GPU와 OCR을 사용하지 않는다.
@@ -50,7 +62,7 @@ MySQL은 문서·버전·작업 상태를 관리한다. 문서별 진행이 겹�
 | `tools/avdc_embedding/` | AVDC OpenVINO 서비스·풀·변환 코드·설정 예제 |
 | `tools/local_embedding/` | 별도의 기존 PC GPU 경로. AVDC 코드로 덮어쓰지 않음 |
 
-AVDC 배포 폴더는 아래와 같다. 이는 11월 10일까지의 배포·정리 기록 기준이며 이 문서 작성 시 원격 생존 상태를 새로 조회한 것은 아니다.
+AVDC 배포 폴더는 아래와 같다. 11월 10일 인계서 보완 중 고정 호스트키 SSH로 8개 서비스 running, 이미지 ID·자원 설정과 모델·핵심 소스 해시를 다시 읽기 전용 확인했다. Windows 복호화 모듈은 이번에 재해시하지 않았으므로 인수 때 확인한다.
 
 | 위치 | 내용 |
 |---|---|
@@ -133,7 +145,7 @@ New-Item -ItemType File -Path 'D:\DocMind\worker\runtime\handoff-ingest.stop'
 
 ### 원본 폴더를 엔진에 연결하기
 
-1. 대상 프로젝트와 폴더를 준비하고 `DocmindSource.id`, `project_id`, `default_folder_id`, `enabled`를 연결한다. 현재 이를 한 번에 처리하는 전용 설치 명령/화면은 제공하지 않는다.
+1. 대상 프로젝트와 폴더를 준비하고 `DocmindSource.id`, `project_id`, `default_folder_id`, `enabled`를 연결한다. 기존 Windows 설치 패키지에는 workspace·모델·source 초기화 코드가 있다. 기존 AVDC에는 이를 다시 실행하지 않고, 이번에 추가한 `register-source`로 지정 프로젝트의 새 source/기본 폴더만 만든다. 구체적인 명령과 신규 workspace 준비는 [실행 절차](engine-handoff/RUNBOOK.md)를 따른다.
 2. [워커 JSON 예제](../tools/windows/docmind-host-worker.config.example.json)를 비공개 경로에 복사하고 `sources[].source_id`를 같은 ID로, `root`를 Windows 원본 경로로 지정한다. JSON에 경로만 추가하면 서버 등록까지 완료되는 것이 아니다.
 3. `api_base_uri`, HMAC 키 파일, uEncryptor2 경로·SHA256·서명, 임시 작업·정리 영수증·동기화 상태·공유 복호화 제어 경로를 채운다. 실제 보관 정책과 볼륨 조건도 설정에 맞게 준비한다.
 4. 기존 워커는 인증된 **loopback HTTP(S)** 주소를 요구한다. Ubuntu VM의 원격 주소를 그대로 넣지 않는다. Windows에서 승인된 로컬 전달 경로가 있어야 한다. 이 내부 API 연결과 KURE용 외부 인터넷 연결은 별개이며 NAT 구성은 보류 상태다.
@@ -155,7 +167,7 @@ powershell.exe -NoProfile -File .\tools\windows\Watch-DocMindEncryptedSources.ps
 | `POST /cloud-sync/host-worker/claim` | 처리 가능한 작업 임대. 작업이 없으면 `job: null` |
 | `POST /cloud-sync/host-worker/jobs/{job_id}/validate` | 임대한 버전·작업 유효성 검증 |
 | `PUT /cloud-sync/host-worker/jobs/{job_id}/artifact` | 임시 평문 전달 후 파싱·색인 처리 |
-| `POST /cloud-sync/host-worker/jobs/{job_id}/cleanup/prepare` | 정리 수명 주기 진행 |
+| `POST /cloud-sync/host-worker/jobs/{job_id}/cleanup/prepare` | 임대 만료 후 서버 정리 완료·호스트 정리 대기 작업의 복구용 |
 | `POST /cloud-sync/host-worker/jobs/{job_id}/status` | 워커 결과·호스트 정리 상태 보고. 일반 GET 조회 API가 아님 |
 
 인증은 `X-DocMind-Key-Id`, `X-DocMind-Timestamp`, `X-DocMind-Nonce`, `X-DocMind-Content-SHA256`, `X-DocMind-Signature` 헤더를 사용하는 HMAC-SHA256이다. 서명 대상은 `METHOD`, 경로·쿼리, timestamp, nonce, 본문 SHA256을 줄바꿈으로 연결한 값이다. 응답 검증도 기존 공통 라이브러리를 사용한다. 평문 전달에는 worker/version/fencing token/평문 해시·크기 헤더가 추가된다. payload 전체와 유효성 조건의 기준은 [API 코드](../app/api/apps/restful_apis/docmind_api.py)와 [워커 공통 구현](../tools/windows/DocMindUEncryptorHostWorker.Common.ps1)이다.
@@ -229,7 +241,7 @@ HTTP 성공만 보지 말고 응답의 업무 결과와 근거 문서·청크를
 | 항목 | 현재 판단 | 이어받을 작업 |
 |---|---|---|
 | 새 환경 설치 재현 | Git 소스·예제는 있음. 최신 AVDC를 빈 서버에서 한 번에 설치하는 완성 패키지는 별도 확인 필요 | 이미지·모델·상용 복호화 모듈·서버 설정 목록을 수령하고 합성 문서로 재현 |
-| source 초기 구성 | 프로젝트·폴더·source 수동 구성 필요 | 연동 담당자가 실제 원본에 매핑. 엔진 개선 시 전용 초기화 도구 후보 |
+| source 초기 구성 | 기존 설치 패키지 초기화 코드와 이번 추가 source 등록 CLI 제공 | 현재 AVDC에는 새 source만 추가. 실제 원본 매핑·합성 E2E 인수는 담당자가 실행 |
 | 상시 변경 감지 | 감시·증분/삭제 코드와 프로토타입 검증 있음 | 현재 AVDC 조합에서 신규/수정/삭제·폴더 삭제·재시작 E2E 확인. 154개 시험으로 대체 불가 |
 | 무인 복호화 | 현재 시험 실행 계정에서 성공 | 로그아웃·재부팅·서비스 계정 조건은 별도 검증. 운영 담당자와 수행 |
 | 검색 외부 연결 | OpenVINO 검색 회귀 기록은 있음. AVDC 단독 외부 통신 경로는 미완료 | 승인된 KURE/답변 연결 준비 후 실제 사용자 인증·scope 포함 통합 시험. NAT 보류 유지 |
@@ -248,6 +260,13 @@ HTTP 성공만 보지 말고 응답의 업무 결과와 근거 문서·청크를
 - [ ] 서비스 health와 자원 한도를 확인했다. 기존 PC GPU 경로와 AVDC CPU 경로를 구분했다.
 - [ ] 지정된 합성 문서 한 건으로 작업 생성 → 활성 청크 → 정리 ACK까지 재현했다. 이 체크는 인수 담당자가 수행할 항목이며 이번 문서 작성 중 실행한 것은 아니다.
 - [ ] OCR 제외·실패 결과를 성공과 구분하며, 검색·상시 동기화·운영 과제의 담당자를 정했다.
+
+### 이번 보완의 검증
+
+- AVDC의 실제 API Python 환경에서 새 도구의 격리 SQLite/합성 파일 검사 8개 통과: dry-run 무변경, 등록 멱등성, 폴더 순번 충돌 방지, 기존 비활성/다른 프로젝트 보존, 잘못된 ID 거절, 정리·활성 버전 불일치 거절, DOCX XML 및 덮어쓰기 금지.
+- AVDC 기존 완료 작업 1건에 새 `check-job`을 읽기 전용 실행해 활성 청크 10개·ES 개수 일치·모든 상태 검사 통과. 원문·벡터는 출력하지 않았다.
+- 실제 DB에는 `register-source` dry-run만 수행했고 source·폴더·작업 건수가 전후 동일했다. 운영 DB에 새 source를 추가하거나 새 색인을 실행하지 않았다.
+- 명령·JSON 예제·문서 링크·Git 추가 파일을 확인했다. 새 설치 전체 재현이나 새 합성 암호문의 종단 간 시험 통과로 확대 해석하지 않는다.
 
 ## 근거 문서
 

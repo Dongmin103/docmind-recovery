@@ -1,0 +1,137 @@
+{
+  "verified_on": "2026-11-10",
+  "method": "pinned SSH read-only Docker inspect and file SHA256",
+  "baseline_code": "f5c7bebad51c49d7b4e6a706bfc23ecda29baace",
+  "services": {
+    "docmind": {
+      "image": "sha256:6efabc3403fcd5b37ca6f83ac709fbcb9075cbc7542f4d11ba09db2697189365",
+      "configured_image": "docmind-avdc:cpu-noocr-20261102",
+      "status": "running",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 2684354560,
+      "settings": {
+        "DOCMIND_INGESTION_DOCUMENT_CONCURRENCY": "12",
+        "MAX_CONCURRENT_EMBEDDING_REQUESTS": "24",
+        "KORDOC_CLIENT_CONCURRENCY": "2",
+        "PARSER_PLATFORM_KORDOC_CHUNKER_REVISION": "docmind-kordoc-chunker-v3",
+        "DOCMIND_SHARED_WORKSPACE_ENABLED": "1",
+        "DOCMIND_HOST_WORKER_KEY_ID": "docmind-runtime-host"
+      }
+    },
+    "embedding": {
+      "image": "sha256:5b54a0e50412b36e64bf6f8fcc89472d08d11cb203f0fc42fb744b6b576794b6",
+      "configured_image": "docmind-gte-openvino:20261106",
+      "status": "running",
+      "cpu": 88.000004096,
+      "cpuset": "0-47,56-95",
+      "memory": 55834574848,
+      "settings": {}
+    },
+    "es": {
+      "image": "sha256:58a3a280935d830215802322e9a0373faaacdfd646477aa7e718939c2f29292a",
+      "configured_image": "elasticsearch:8.11.3",
+      "status": "running",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 1610612736,
+      "settings": {}
+    },
+    "minio": {
+      "image": "sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac",
+      "configured_image": "pgsty/silo:RELEASE.2026-08-06T00-00-00Z",
+      "status": "running",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 268435456,
+      "settings": {}
+    },
+    "mysql": {
+      "image": "sha256:d58ac93387f644e4e040c636b8f50494e78e5afc27ca0a87348b2f577da2b7ff",
+      "configured_image": "mysql:8.0.40",
+      "status": "running",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 536870912,
+      "settings": {}
+    },
+    "parser": {
+      "image": "sha256:53fc3d95238e2bc0f8dc35676440213b2a36d59a904c7d051bdcf35166475d2d",
+      "configured_image": "docmind-kordoc-parser:2026.10.19",
+      "status": "running",
+      "cpu": 4.0,
+      "cpuset": "48-55",
+      "memory": 1073741824,
+      "settings": {
+        "KORDOC_WORKERS": "2"
+      }
+    },
+    "preview": {
+      "image": "sha256:9cf6168534fb253c035a46e70f10e15a0e258e65e01311e8fce4045bf2832708",
+      "configured_image": "docmind-preview:2026.10.19",
+      "status": "running",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 268435456,
+      "settings": {}
+    },
+    "redis": {
+      "image": "sha256:640c5e62cea04b6d6f2084232651d0cc70362d31f4f805e7be94dbed6855e8f2",
+      "configured_image": "valkey/valkey:8",
+      "status": "running",
+      "cpu": 0.0,
+      "cpuset": "48-55",
+      "memory": 134217728,
+      "settings": {}
+    }
+  },
+  "files": {
+    "runtime/embedding/service.py": {
+      "bytes": 7800,
+      "sha256": "778d77a3622f986fe8de6222ba2168081daa7eb13c4c0e9ce50d527df2371f65"
+    },
+    "runtime/embedding/pool.py": {
+      "bytes": 6908,
+      "sha256": "6e447a289e6b6d8338361c325291e4d9eaa71df40cd74fba5b10147688592953"
+    },
+    "runtime/api/office_chunker.py": {
+      "bytes": 13505,
+      "sha256": "5eccc80e948274aeaaafac0489a7ba22d47bdffa7f0c457cd1034547faac7f13"
+    },
+    "runtime/api/parser_config.py": {
+      "bytes": 13281,
+      "sha256": "d6e410e320f2e8d253974e423d4008c7e9062b4bd6dc265c6a81b8b4168f4b77"
+    },
+    "models/openvino/model.xml": {
+      "bytes": 541657,
+      "sha256": "0db4102fb18b2724f91e6d404ae651d5ec39a9ae65dd479c7f7ae0e8079e0c19"
+    },
+    "models/openvino/model.bin": {
+      "bytes": 1255093468,
+      "sha256": "ca07edf92d30bdfc2fc2b423aea7db6481b94b65163a596fb314b17bc3b3ce17"
+    },
+    "runtime/api/docmind_ingestion_service.py": {
+      "bytes": 74708,
+      "sha256": "d85497ea15ee2ba215baa8df31a3102fd5e6e62611ea950fd4c266a982ae6af9"
+    },
+    "runtime/api/docmind_api.py": {
+      "bytes": 54419,
+      "sha256": "0189bab290a295847b80dc0071bc0ed591de287b3a13fe54715260813958fe7e"
+    },
+    "runtime/api/settings.py": {
+      "bytes": 14589,
+      "sha256": "0fea0af0d0624038addee3ed9729dd6fea0c97d5e8f760605238a0970534a954"
+    },
+    "runtime/api/docmind_ingestion_executor.py": {
+      "bytes": 1856,
+      "sha256": "2d3ce874a4aeffd71d3fcdd3b1421db9d7ddc73b8ab5741bf3d87bc098ea0646"
+    },
+    "runtime/api/embedding_service.py": {
+      "bytes": 9389,
+      "sha256": "5daf7e52c83147eee96d068adfe94ad823e99b95d986996de7fb0f429fe1bfb5"
+    }
+  },
+  "model_revision": "9bbca17d9273fd0d03d5725c7a4b0f6b45142062",
+  "trusted_code_revision": "40ced75c3017eb27626c9d4ea981bde21a2662f4",
+  "note": "Image IDs are not archive file hashes. No full installer archive was created or verified by this handoff."
+}
