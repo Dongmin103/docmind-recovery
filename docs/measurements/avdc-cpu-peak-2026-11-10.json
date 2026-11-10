@@ -1,0 +1,568 @@
+{
+  "schema": "docmind-avdc-cpu-peak-v1",
+  "source_run": "chunker-v3-154-20261110-r1",
+  "analysis_mode": "saved_logs_only_no_reindex",
+  "host_logical_processors": 96,
+  "host_peak_utc": "2026-11-10T02:21:10.1664581+00:00",
+  "host_peak_kst": "2026-11-10T11:21:10.166458+09:00",
+  "seconds_since_first_registration": 46.80845785140991,
+  "host_peak_percent": 83.0,
+  "aligned_vm_interval": {
+    "start_utc": "2026-11-10T02:21:09.957205+00:00",
+    "end_utc": "2026-11-10T02:21:10.974349+00:00",
+    "end_relative_to_peak_seconds": 0.8078908920288086,
+    "contains_host_peak_timestamp": true,
+    "cpu_time_equivalents": {
+      "embedding": 77.8120667724549,
+      "other": 2.063716697701402,
+      "parser": 0.6657526770169957
+    },
+    "embedding_share_of_96_percent": 81.05423622130718,
+    "all_containers_share_of_96_percent": 83.20394111474614,
+    "workers_above_0_1_cpu": 22,
+    "worker_cpu_min": 3.13623401010124,
+    "worker_cpu_max": 3.8539301942309905
+  },
+  "host_neighbors": [
+    {
+      "utc": "2026-11-10T02:20:58.1474066+00:00",
+      "cpu_percent": 11.0,
+      "groupware_cpu_integer_percent": 0,
+      "http_ms": 18.467000000000002,
+      "http_code": 200,
+      "disk_queue": 0
+    },
+    {
+      "utc": "2026-11-10T02:21:04.1125487+00:00",
+      "cpu_percent": 12.0,
+      "groupware_cpu_integer_percent": 0,
+      "http_ms": 13.745000000000001,
+      "http_code": 200,
+      "disk_queue": 0
+    },
+    {
+      "utc": "2026-11-10T02:21:10.1664581+00:00",
+      "cpu_percent": 83.0,
+      "groupware_cpu_integer_percent": 0,
+      "http_ms": 19.969,
+      "http_code": 200,
+      "disk_queue": 1
+    },
+    {
+      "utc": "2026-11-10T02:21:16.4984699+00:00",
+      "cpu_percent": 18.0,
+      "groupware_cpu_integer_percent": 0,
+      "http_ms": 16.25,
+      "http_code": 200,
+      "disk_queue": 0
+    },
+    {
+      "utc": "2026-11-10T02:21:22.4776498+00:00",
+      "cpu_percent": 21.0,
+      "groupware_cpu_integer_percent": 0,
+      "http_ms": 25.718,
+      "http_code": 200,
+      "disk_queue": 0
+    }
+  ],
+  "vm_intervals": [
+    {
+      "start_utc": "2026-11-10T02:20:54.882072+00:00",
+      "end_utc": "2026-11-10T02:20:55.886232+00:00",
+      "end_relative_to_peak_seconds": -14.28022575378418,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 3.7452442699891777,
+        "other": 3.019649039437726,
+        "parser": 1.0246510375145368
+      },
+      "embedding_share_of_96_percent": 3.90129611457206,
+      "all_containers_share_of_96_percent": 7.0467638639863575,
+      "workers_above_0_1_cpu": 2,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.46558177899279
+    },
+    {
+      "start_utc": "2026-11-10T02:20:55.886232+00:00",
+      "end_utc": "2026-11-10T02:20:56.892058+00:00",
+      "end_relative_to_peak_seconds": -13.274400234222412,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 3.8716764729698787,
+        "other": 3.4678668736897147,
+        "parser": 2.4436454953647275
+      },
+      "embedding_share_of_96_percent": 4.03299632601029,
+      "all_containers_share_of_96_percent": 7.64535765277041,
+      "workers_above_0_1_cpu": 3,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.11187173036107
+    },
+    {
+      "start_utc": "2026-11-10T02:20:56.892058+00:00",
+      "end_utc": "2026-11-10T02:20:57.896990+00:00",
+      "end_relative_to_peak_seconds": -12.26946759223938,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 5.3421182432749,
+        "other": 2.7626309306876666,
+        "parser": 1.6932995595029456
+      },
+      "embedding_share_of_96_percent": 5.5647065034113545,
+      "all_containers_share_of_96_percent": 8.442447056211007,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 2.4777780081722556
+    },
+    {
+      "start_utc": "2026-11-10T02:20:57.896990+00:00",
+      "end_utc": "2026-11-10T02:20:58.899958+00:00",
+      "end_relative_to_peak_seconds": -11.266500234603882,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 4.07643874835443,
+        "other": 3.137818968923754,
+        "parser": 1.7141664550810007
+      },
+      "embedding_share_of_96_percent": 4.246290362869198,
+      "all_containers_share_of_96_percent": 7.514851788831442,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 2.0140236714803588
+    },
+    {
+      "start_utc": "2026-11-10T02:20:58.899958+00:00",
+      "end_utc": "2026-11-10T02:20:59.903399+00:00",
+      "end_relative_to_peak_seconds": -10.26305890083313,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 8.110198101386212,
+        "other": 2.02947290635055,
+        "parser": 1.403131356677465
+      },
+      "embedding_share_of_96_percent": 8.448123022277304,
+      "all_containers_share_of_96_percent": 10.562157299725794,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8168648939420797
+    },
+    {
+      "start_utc": "2026-11-10T02:20:59.903399+00:00",
+      "end_utc": "2026-11-10T02:21:00.907474+00:00",
+      "end_relative_to_peak_seconds": -9.258983612060547,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 13.524431038035122,
+        "other": 2.274771648640107,
+        "parser": 1.680109070368811
+      },
+      "embedding_share_of_96_percent": 14.087948997953252,
+      "all_containers_share_of_96_percent": 16.45750279862003,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.9240085320856712
+    },
+    {
+      "start_utc": "2026-11-10T02:21:00.907474+00:00",
+      "end_utc": "2026-11-10T02:21:01.912165+00:00",
+      "end_relative_to_peak_seconds": -8.254292726516724,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 16.07936454131926,
+        "other": 2.807731254049439,
+        "parser": 1.819359592389046
+      },
+      "embedding_share_of_96_percent": 16.74933806387423,
+      "all_containers_share_of_96_percent": 19.67405812017573,
+      "workers_above_0_1_cpu": 5,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8817909628880445
+    },
+    {
+      "start_utc": "2026-11-10T02:21:01.912165+00:00",
+      "end_utc": "2026-11-10T02:21:02.917984+00:00",
+      "end_relative_to_peak_seconds": -7.248473882675171,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 13.679776516662203,
+        "other": 2.2461997146236645,
+        "parser": 0.6635737678674287
+      },
+      "embedding_share_of_96_percent": 14.249767204856461,
+      "all_containers_share_of_96_percent": 16.58955857425611,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.937090684119079
+    },
+    {
+      "start_utc": "2026-11-10T02:21:02.917984+00:00",
+      "end_utc": "2026-11-10T02:21:03.922003+00:00",
+      "end_relative_to_peak_seconds": -6.244455099105835,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 10.055221242086265,
+        "other": 1.691869741680677,
+        "parser": 0.4190618809981098
+      },
+      "embedding_share_of_96_percent": 10.47418879383986,
+      "all_containers_share_of_96_percent": 12.236553108090565,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.934189344503652
+    },
+    {
+      "start_utc": "2026-11-10T02:21:03.922003+00:00",
+      "end_utc": "2026-11-10T02:21:04.927323+00:00",
+      "end_relative_to_peak_seconds": -5.2391345500946045,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 4.106296249549639,
+        "other": 1.4005214569470332,
+        "parser": 0.00022380921211776256
+      },
+      "embedding_share_of_96_percent": 4.277391926614207,
+      "all_containers_share_of_96_percent": 5.736268444267367,
+      "workers_above_0_1_cpu": 3,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 2.9244403716720977
+    },
+    {
+      "start_utc": "2026-11-10T02:21:04.927323+00:00",
+      "end_utc": "2026-11-10T02:21:05.932231+00:00",
+      "end_relative_to_peak_seconds": -4.234226703643799,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 4.054285190815701,
+        "other": 1.8527579484783585,
+        "parser": 0.16394140077805133
+      },
+      "embedding_share_of_96_percent": 4.223213740433022,
+      "all_containers_share_of_96_percent": 6.1531699367646455,
+      "workers_above_0_1_cpu": 1,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.9605621690156014
+    },
+    {
+      "start_utc": "2026-11-10T02:21:05.932231+00:00",
+      "end_utc": "2026-11-10T02:21:06.935192+00:00",
+      "end_relative_to_peak_seconds": -3.2312657833099365,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 3.9870247373834693,
+        "other": 1.6264482164040752,
+        "parser": 0.07820045468361002
+      },
+      "embedding_share_of_96_percent": 4.153150768107781,
+      "all_containers_share_of_96_percent": 5.847367660195359,
+      "workers_above_0_1_cpu": 2,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 2.2533280750836218
+    },
+    {
+      "start_utc": "2026-11-10T02:21:06.935192+00:00",
+      "end_utc": "2026-11-10T02:21:07.940724+00:00",
+      "end_relative_to_peak_seconds": -2.225733757019043,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 46.432275431566566,
+        "other": 1.8336879898309593,
+        "parser": 0.2634565514309757
+      },
+      "embedding_share_of_96_percent": 48.3669535745485,
+      "all_containers_share_of_96_percent": 50.27704523062242,
+      "workers_above_0_1_cpu": 22,
+      "worker_cpu_min": 1.5911974538512919,
+      "worker_cpu_max": 3.828818873329671
+    },
+    {
+      "start_utc": "2026-11-10T02:21:07.940724+00:00",
+      "end_utc": "2026-11-10T02:21:08.946941+00:00",
+      "end_relative_to_peak_seconds": -1.2195165157318115,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 78.98648794600867,
+        "other": 0.7808532469537702,
+        "parser": 0.00031603513332090157
+      },
+      "embedding_share_of_96_percent": 82.27759161042569,
+      "all_containers_share_of_96_percent": 83.09098040933587,
+      "workers_above_0_1_cpu": 22,
+      "worker_cpu_min": 3.3193627210434316,
+      "worker_cpu_max": 3.7963968845466796
+    },
+    {
+      "start_utc": "2026-11-10T02:21:08.946941+00:00",
+      "end_utc": "2026-11-10T02:21:09.957205+00:00",
+      "end_relative_to_peak_seconds": -0.20925259590148926,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 77.6656866189759,
+        "other": 1.2786213331432776,
+        "parser": 0.00038207837815768995
+      },
+      "embedding_share_of_96_percent": 80.90175689476656,
+      "all_containers_share_of_96_percent": 82.23365411679082,
+      "workers_above_0_1_cpu": 22,
+      "worker_cpu_min": 3.0388098988189327,
+      "worker_cpu_max": 3.8801742030521877
+    },
+    {
+      "start_utc": "2026-11-10T02:21:09.957205+00:00",
+      "end_utc": "2026-11-10T02:21:10.974349+00:00",
+      "end_relative_to_peak_seconds": 0.8078908920288086,
+      "contains_host_peak_timestamp": true,
+      "cpu_time_equivalents": {
+        "embedding": 77.8120667724549,
+        "other": 2.063716697701402,
+        "parser": 0.6657526770169957
+      },
+      "embedding_share_of_96_percent": 81.05423622130718,
+      "all_containers_share_of_96_percent": 83.20394111474614,
+      "workers_above_0_1_cpu": 22,
+      "worker_cpu_min": 3.13623401010124,
+      "worker_cpu_max": 3.8539301942309905
+    },
+    {
+      "start_utc": "2026-11-10T02:21:10.974349+00:00",
+      "end_utc": "2026-11-10T02:21:11.985743+00:00",
+      "end_relative_to_peak_seconds": 1.8192846775054932,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 65.0472832092724,
+        "other": 1.4052231884440065,
+        "parser": 0.000515130711184314
+      },
+      "embedding_share_of_96_percent": 67.75758667632542,
+      "all_containers_share_of_96_percent": 69.2213608309546,
+      "workers_above_0_1_cpu": 22,
+      "worker_cpu_min": 0.4152685195727675,
+      "worker_cpu_max": 3.8659521703083835
+    },
+    {
+      "start_utc": "2026-11-10T02:21:11.985743+00:00",
+      "end_utc": "2026-11-10T02:21:12.992145+00:00",
+      "end_relative_to_peak_seconds": 2.8256874084472656,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 57.8935839586578,
+        "other": 1.5960429663151756,
+        "parser": 0.06246405943391377
+      },
+      "embedding_share_of_96_percent": 60.30581662360187,
+      "all_containers_share_of_96_percent": 61.968361380180184,
+      "workers_above_0_1_cpu": 20,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.875188212526465
+    },
+    {
+      "start_utc": "2026-11-10T02:21:12.992145+00:00",
+      "end_utc": "2026-11-10T02:21:13.997087+00:00",
+      "end_relative_to_peak_seconds": 3.830629587173462,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 48.82929987295283,
+        "other": 1.4478634003045765,
+        "parser": 0.03662200749365426
+      },
+      "embedding_share_of_96_percent": 50.86385403432586,
+      "all_containers_share_of_96_percent": 52.3720450763098,
+      "workers_above_0_1_cpu": 16,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.960426862612938
+    },
+    {
+      "start_utc": "2026-11-10T02:21:13.997087+00:00",
+      "end_utc": "2026-11-10T02:21:15.004619+00:00",
+      "end_relative_to_peak_seconds": 4.838161468505859,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 29.439444596805174,
+        "other": 2.326382959614472,
+        "parser": 0.19492286411848853
+      },
+      "embedding_share_of_96_percent": 30.666088121672058,
+      "all_containers_share_of_96_percent": 33.0894037046038,
+      "workers_above_0_1_cpu": 12,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.811293787469873
+    },
+    {
+      "start_utc": "2026-11-10T02:21:15.004619+00:00",
+      "end_utc": "2026-11-10T02:21:16.009557+00:00",
+      "end_relative_to_peak_seconds": 5.843099355697632,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 15.32051004965439,
+        "other": 2.4862471918358535,
+        "parser": 0.08750192536349218
+      },
+      "embedding_share_of_96_percent": 15.958864635056655,
+      "all_containers_share_of_96_percent": 18.54870545988567,
+      "workers_above_0_1_cpu": 7,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.831082546562705
+    },
+    {
+      "start_utc": "2026-11-10T02:21:16.009557+00:00",
+      "end_utc": "2026-11-10T02:21:17.012674+00:00",
+      "end_relative_to_peak_seconds": 6.846216201782227,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 9.295278049007731,
+        "other": 3.2675674950469142,
+        "parser": 0.13454464504987312
+      },
+      "embedding_share_of_96_percent": 9.68258130104972,
+      "all_containers_share_of_96_percent": 13.086297441723591,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8480063564543894
+    },
+    {
+      "start_utc": "2026-11-10T02:21:17.012674+00:00",
+      "end_utc": "2026-11-10T02:21:18.016577+00:00",
+      "end_relative_to_peak_seconds": 7.850118637084961,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 13.13505330428207,
+        "other": 3.0710145643488738,
+        "parser": 0.06628931025546515
+      },
+      "embedding_share_of_96_percent": 13.68234719196049,
+      "all_containers_share_of_96_percent": 16.88132069649057,
+      "workers_above_0_1_cpu": 5,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8549562825126253
+    },
+    {
+      "start_utc": "2026-11-10T02:21:18.016577+00:00",
+      "end_utc": "2026-11-10T02:21:19.021689+00:00",
+      "end_relative_to_peak_seconds": 8.855231046676636,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 16.471543721886537,
+        "other": 1.748538753704148,
+        "parser": 0.26297954087282754
+      },
+      "embedding_share_of_96_percent": 17.15785804363181,
+      "all_containers_share_of_96_percent": 18.9792525787403,
+      "workers_above_0_1_cpu": 7,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.9597561049085725
+    },
+    {
+      "start_utc": "2026-11-10T02:21:19.021689+00:00",
+      "end_utc": "2026-11-10T02:21:20.024663+00:00",
+      "end_relative_to_peak_seconds": 9.85820484161377,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 17.83984795048561,
+        "other": 1.04882102135673,
+        "parser": 0.0451826361055031
+      },
+      "embedding_share_of_96_percent": 18.58317494842251,
+      "all_containers_share_of_96_percent": 19.6756968456691,
+      "workers_above_0_1_cpu": 6,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8585255362953634
+    },
+    {
+      "start_utc": "2026-11-10T02:21:20.024663+00:00",
+      "end_utc": "2026-11-10T02:21:21.027911+00:00",
+      "end_relative_to_peak_seconds": 10.86145281791687,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 10.885491182591332,
+        "other": 2.087822801017223,
+        "parser": 0.04861310578439217
+      },
+      "embedding_share_of_96_percent": 11.339053315199305,
+      "all_containers_share_of_96_percent": 13.51386873292558,
+      "workers_above_0_1_cpu": 6,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.7677623970187692
+    },
+    {
+      "start_utc": "2026-11-10T02:21:21.027911+00:00",
+      "end_utc": "2026-11-10T02:21:22.031485+00:00",
+      "end_relative_to_peak_seconds": 11.865026712417603,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 6.030099062123007,
+        "other": 1.65608632220035,
+        "parser": 0.04567775253142213
+      },
+      "embedding_share_of_96_percent": 6.281353189711465,
+      "all_containers_share_of_96_percent": 8.006443108670164,
+      "workers_above_0_1_cpu": 3,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.7266812344302873
+    },
+    {
+      "start_utc": "2026-11-10T02:21:22.031485+00:00",
+      "end_utc": "2026-11-10T02:21:23.037145+00:00",
+      "end_relative_to_peak_seconds": 12.870687484741211,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 7.95836848792249,
+        "other": 1.7439727672261596,
+        "parser": 0.18065634555897553
+      },
+      "embedding_share_of_96_percent": 8.28996717491926,
+      "all_containers_share_of_96_percent": 10.106605474113177,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8084412810004253
+    },
+    {
+      "start_utc": "2026-11-10T02:21:23.037145+00:00",
+      "end_utc": "2026-11-10T02:21:24.050709+00:00",
+      "end_relative_to_peak_seconds": 13.88425087928772,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 9.2344751698415,
+        "other": 1.0753387561787948,
+        "parser": 0.08539969030622697
+      },
+      "embedding_share_of_96_percent": 9.619244968584896,
+      "all_containers_share_of_96_percent": 10.739389506271142,
+      "workers_above_0_1_cpu": 4,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.8379444452416065
+    },
+    {
+      "start_utc": "2026-11-10T02:21:24.050709+00:00",
+      "end_utc": "2026-11-10T02:21:25.053711+00:00",
+      "end_relative_to_peak_seconds": 14.887253522872925,
+      "contains_host_peak_timestamp": false,
+      "cpu_time_equivalents": {
+        "embedding": 12.460642132832314,
+        "other": 1.3201739880434469,
+        "parser": 0.07751126130845101
+      },
+      "embedding_share_of_96_percent": 12.979835555033661,
+      "all_containers_share_of_96_percent": 14.355016792578917,
+      "workers_above_0_1_cpu": 5,
+      "worker_cpu_min": 0.0,
+      "worker_cpu_max": 3.659013287224934
+    }
+  ],
+  "http_max_separate_sample": {
+    "utc": "2026-11-10T02:20:37.9471864+00:00",
+    "http_ms": 130.456,
+    "host_cpu_percent": 12.0
+  },
+  "limitations": [
+    "Host and VM sampling intervals/counters are different; clocks were not independently recalibrated.",
+    "Other includes parser; do not add parser twice.",
+    "Worker activity is CPU consumed over an interval, not a request concurrency trace.",
+    "No per-request/token timeline or operator profile in this saved subset; exact triggering request is not identified."
+  ],
+  "source_sha256": {
+    "host-load.csv": "5c34e0b5f0eecdb12a1666123c257815315e36681cce491a6e8c5608ec2cb469",
+    "cpu.csv": "5b9377b295b4c48b34c5286d9451c0a245244b8523e755fbecf9582ae6aa2e04",
+    "sampler.py": "a4b663cae2d33eebc27addab967ed3b9ad9384a0ee184e12216f2deec73e0fea",
+    "audit-summary.json": "9ee97ff3475e386aef07e7c490090b29926e5a5bd4ada04c67f7abd5342f07b1",
+    "result.json": "c5e937c3410a4c9b16bcb88d4c904c2b4b624b4fca76a878874dac797ded4722"
+  }
+}

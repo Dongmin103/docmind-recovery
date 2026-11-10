@@ -186,6 +186,7 @@ GPU 없는 AVDC에 문서 색인 엔진을 구축했다. Windows에서 원본을
             parts.append('\n[VISUAL_FLOW]\n')
         if new.startswith('4.'):
             parts.append('\n[VISUAL_CPU]\n')
+            parts.append('\n[PAGE_BREAK]\n'+read('docs/AVDC-CPU-PEAK-2026-11-10.md').split('\n',1)[1])
     parts.append(HISTORY)
     part = section(status, '## 계산 엔진과 병렬 처리, 청킹을 함께 정리했습니다')
     parts.append(relocate(part.replace('## 계산 엔진과 병렬 처리, 청킹을 함께 정리했습니다', '## 7. OpenVINO·청킹 품질과 확인하지 못한 원인'), 'docs/reports/AVDC-STATUS-2026-11-10.md'))
@@ -379,6 +380,26 @@ class Overview(Flowable):
         txt('기준일 2026-11-10. 단회 시험이며 그룹웨어 시작 페이지 검사를 실제 업무 부하 시험과 구분한다.',0,6,7.3,col=GRAY)
 
 
+class SpikeChart(Flowable):
+    def __init__(self):
+        super().__init__(); self.width=WIDTH; self.height=112
+    def draw(self):
+        c=self.canv
+        data=json.loads(read('docs/measurements/avdc-cpu-peak-2026-11-10.json'))
+        c.setFont('KR',8)
+        for v in [0,50,100]:
+            y=22+v*.7;c.setStrokeColor(LIGHT);c.line(28,y,WIDTH,y)
+            c.setFillColor(GRAY);c.drawRightString(23,y-3,str(v))
+        pts=[(28+(WIDTH-40)*(r['end_relative_to_peak_seconds']+15)/30,22+r['all_containers_share_of_96_percent']*.7) for r in data['vm_intervals']]
+        c.setStrokeColor(TEAL);c.setLineWidth(1.8)
+        for a,b in zip(pts,pts[1:]):c.line(*a,*b)
+        x=28+(WIDTH-40)/2
+        c.setFillColor(NAVY);c.circle(x,22+83*.7,3,fill=1,stroke=0)
+        c.drawString(x+7,22+83*.7+4,'호스트 83%')
+        c.setFillColor(GRAY);c.drawString(28,8,'-15초');c.drawCentredString(x,8,'11:21:10 KST');c.drawRightString(WIDTH,8,'+15초')
+        c.drawString(28,101,'선: VM 컨테이너 CPU 시간 합계 ÷ 96 · 점: 호스트 최대 표본 (%)')
+
+
 class Doc(BaseDocTemplate):
     def afterFlowable(self, flow):
         if isinstance(flow,Paragraph) and flow.style.name=='chapter':
@@ -435,6 +456,8 @@ def build(text):
         if line=='[VISUAL_FLOW]':story.append(Flow());continue
         if line=='[VISUAL_CPU]':story.append(CpuChart());continue
         if line=='[VISUAL_OVERVIEW]':story.append(Overview());continue
+        if line=='[VISUAL_SPIKE]':story.append(SpikeChart());continue
+        if line=='[PAGE_BREAK]':story.append(PageBreak());continue
         if line.startswith('```'):
             lang=line[3:];story.append(p('명령/데이터 · '+(lang or 'text'),'sub'))
             while i<len(lines) and not lines[i].startswith('```'):
