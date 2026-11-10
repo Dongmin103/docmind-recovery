@@ -391,7 +391,7 @@ AVDC 배포 폴더는 아래와 같다. 11월 10일 인계서 보완 중 고정 
 
 ### 새 OpenVINO 설치 패키지 상태
 
-최신 청킹 v3와 OpenVINO FP32 모델을 포함한 Linux amd64 이미지 8개를 새 설치 패키지로 만들었다. ZIP은 6,810,387,148바이트(약 6.81GB)이며, GitLab Generic Package Registry의 `docmind-openvino / 2026.11.10-r1`과 연결 릴리스에서 배포한다. 이미지·모델은 Git 이력에 넣지 않고 패키지 자산으로 전달한다. [릴리스 안내](http://128.134.187.123:9010/rlaxortj00/docmind/-/blob/main/docs/OPENVINO-PACKAGE-2026-11-10.md)를 우선 확인한다.
+최신 청킹 v3와 OpenVINO FP32 모델을 포함한 Linux amd64 이미지 8개를 새 설치 패키지로 만들었다. ZIP은 6,810,387,148바이트(약 6.81GB)이며, GitLab Generic Package Registry의 `docmind-openvino / 2026.11.10-r1`에 업로드 중이다. 전체 전송 완료 후 연결 릴리스에서 제공한다. 이미지·모델은 Git 이력에 넣지 않고 패키지 자산으로 전달한다. [릴리스 안내](http://128.134.187.123:9010/rlaxortj00/docmind/-/blob/main/docs/OPENVINO-PACKAGE-2026-11-10.md)를 우선 확인한다.
 
 | 항목 | 확인 상태 |
 |---|---|
