@@ -1,6 +1,6 @@
 # AVDC disk investigation and cleanup — 2026-11-10
 
-The Ubuntu root filesystem reached 100% usage. Elasticsearch data occupied about 0.83 GiB, not most of the disk. The VM has a 120 GiB virtual disk, but its root logical volume is approximately 58.5 GiB; the LVM volume group still has approximately 58.47 GiB unallocated. No partition, volume, filesystem size, or Elasticsearch disk threshold was changed.
+The Ubuntu root filesystem reached 100% usage. Elasticsearch data occupied about 0.83 GiB, not most of the disk. At initial investigation, the VM had a 120 GiB virtual disk, but its root logical volume was approximately 58.5 GiB; approximately 58.47 GiB remained unallocated in the LVM volume group. The initial cleanup did not resize storage. The subsequent user-authorized expansion is recorded below. Elasticsearch disk thresholds were not changed.
 
 ## Main consumers before cleanup
 
@@ -26,6 +26,20 @@ Disk-full errors were recorded on November 7. On November 10, existing index rea
 
 ## Limits and follow-up
 
-The resumed comparison completed all eight questions for both baseline and second candidate: visible evidence rank 1 was 8/8 in each. Candidate chunks decreased from 794 to 440; chunks under 48 tokens decreased from 533 to 44. A transient KURE read timeout interrupted the first attempt after three completed question pairs; only unfinished pairs were resumed. These calls are quality checks, not a controlled latency benchmark. The candidate remains undeployed and Kordoc remains unchanged.
+The resumed comparison completed all eight questions for both baseline and second candidate: visible evidence rank 1 was 8/8 in each. Candidate chunks decreased from 794 to 440; chunks under 48 tokens decreased from 533 to 44. A transient KURE read timeout interrupted the first attempt after three completed question pairs; only unfinished pairs were resumed. These calls are quality checks, not a controlled latency benchmark. The candidate was subsequently approved and [deployed to AVDC](AVDC-CHUNKING-DEPLOYMENT-2026-11-10.md); Kordoc and existing indices remain unchanged.
 
-This cleanup is not a permanent capacity policy. MySQL retention, container log rotation, and LVM allocation remain unchanged. Continued log growth can consume the reclaimed space. Existing documents, production indices, Kordoc, and the production chunking configuration remain unchanged. Search-quality evidence is recorded separately in `PDF-SHORT-HEADING-DOWNSTREAM-V2-2026-11-06.json`.
+This cleanup is not a permanent capacity policy. MySQL retention and container log rotation remain unchanged. Continued log growth can consume space even after expansion. Search-quality evidence is recorded separately in `PDF-SHORT-HEADING-DOWNSTREAM-V2-2026-11-06.json`.
+
+## Subsequent image cleanup and online expansion
+
+The user authorized further unused-image cleanup and additional disk allocation on November 10.
+
+- Removed the remaining `docmind-ovfull-base:20261106` reference to the unused CPU image after checking every container's image ID. Docker then deleted image `4c0a891dbb00`; active shared layers were preserved.
+- Removed the unused `docmind-ovfull:20261106` alias. Its image remains available under the active `docmind-gte-openvino:20261106` tag.
+- Saved LVM metadata and before/after inventories under `/opt/docmind-avdc/management/disk-expand-20261110`.
+- Verified the root mount was ext4 on `/dev/ubuntu-vg/ubuntu-lv`, with sufficient free extents. Tested and executed `lvextend -L 100G`, then performed online `resize2fs`.
+- Root logical volume: **58.47 → 100 GiB**. Remaining unallocated VG space: **16.95 GiB**. Hyper-V virtual disk remains **120 GiB**; no Windows partition or groupware storage was resized.
+- After expansion, `df` reported approximately **99 GiB filesystem, 45 GiB used, 50 GiB available, 48% usage**.
+- All container IDs remained unchanged during this operation. No service or host reboot was required. Production index and document preservation were checked after expansion.
+
+The saved LVM metadata documents the previous layout; it is not a substitute for data backups and should not be used to shrink the now-expanded mounted filesystem.
