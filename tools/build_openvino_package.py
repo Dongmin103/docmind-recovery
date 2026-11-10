@@ -3,12 +3,14 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
+DOCKER=['wsl.exe','-d','Ubuntu','--exec','docker'] if os.name=='nt' and not shutil.which('docker') else ['docker']
 IMAGES=['docmind-openvino-api:2026.11.10-r1','docmind-openvino-embedding:2026.11.10-r1',
         'docmind-kordoc-parser:2026.10.19','docmind-preview:2026.10.19',
         'mysql:8.0.40','elasticsearch:8.11.3','valkey/valkey:8','pgsty/silo:RELEASE.2026-08-06T00-00-00Z']
@@ -49,20 +51,23 @@ r={'GTE-model-card.md':Path('/opt/docmind/model/README.md').read_text()}
 for p in d.files:
  if '.dist-info/licenses/' in str(p): r['OpenVINO-'+Path(str(p)).name]=Path(d.locate_file(p)).read_text()
 print(json.dumps(r))'''
-    notices=json.loads(subprocess.check_output(['docker','run','--rm','--network','none','--entrypoint','python',IMAGES[1],'-c',license_program]))
+    notices=json.loads(subprocess.check_output(DOCKER+['run','--rm','--network','none','--entrypoint','python',IMAGES[1],'-c',license_program]))
     for name, text in notices.items():
         if Path(name).name!=name: raise ValueError('Unsafe notice path')
         (legal/name).write_text(text)
     shutil.copyfile(ROOT/'app/LICENSE',legal/'GTE-Apache-2.0.txt')
     images=[]
     for tag in IMAGES:
-        r=json.loads(subprocess.check_output(['docker','image','inspect',tag]))[0]
+        r=json.loads(subprocess.check_output(DOCKER+['image','inspect',tag]))[0]
         if r['Architecture']!='amd64' or r['Os']!='linux': raise ValueError('Linux amd64 required')
-        if tag.startswith('docmind-openvino-') and r['Config']['Labels'].get('org.opencontainers.image.revision')!=commit:
-            raise ValueError('Release image source revision mismatch')
-        images.append({'tag':tag,'id':r['Id']})
+        revision=(r['Config'].get('Labels') or {}).get('org.opencontainers.image.revision')
+        if tag.startswith('docmind-openvino-'):
+            if not revision: raise ValueError('Missing release image source revision')
+            subprocess.run(['git','diff','--exit-code',revision,commit,'--','app','deploy/windows/scripts','tools/avdc_embedding',
+                            'tools/handoff','deploy/openvino/Dockerfile.api','deploy/openvino/Dockerfile.embedding','deploy/openvino/smoke.py'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
+        images.append({'tag':tag,'id':r['Id'],'source_revision':revision})
     print('Exporting eight immutable images, without volumes',flush=True)
-    p=subprocess.Popen(['docker','image','save',*IMAGES],stdout=subprocess.PIPE)
+    p=subprocess.Popen(DOCKER+['image','save',*IMAGES],stdout=subprocess.PIPE)
     with gzip.open(bundle/'images.tar.gz','wb',compresslevel=1) as f: shutil.copyfileobj(p.stdout,f,4*1024*1024)
     p.stdout.close()
     if p.wait(): raise RuntimeError('Image export failed')
