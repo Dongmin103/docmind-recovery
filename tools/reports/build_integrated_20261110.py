@@ -189,7 +189,7 @@ GPU 없는 AVDC에 문서 색인 엔진을 구축했다. Windows에서 원본을
             parts.append('\n[PAGE_BREAK]\n'+read('docs/AVDC-CPU-PEAK-2026-11-10.md').split('\n',1)[1])
     parts.append(HISTORY)
     part = section(status, '## 계산 엔진과 병렬 처리, 청킹을 함께 정리했습니다')
-    parts.append(relocate(part.replace('## 계산 엔진과 병렬 처리, 청킹을 함께 정리했습니다', '## 7. OpenVINO·청킹 품질과 확인하지 못한 원인'), 'docs/reports/AVDC-STATUS-2026-11-10.md'))
+    parts.append(relocate(part.replace('## 계산 엔진과 병렬 처리, 청킹을 함께 정리했습니다', '## 7. 최적화 효과와 검색 품질 검증 범위'), 'docs/reports/AVDC-STATUS-2026-11-10.md'))
     parts.append('''
 ### 같은 24개 비교의 단계별 상세값
 
